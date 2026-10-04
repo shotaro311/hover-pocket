@@ -19,13 +19,13 @@ internal sealed class CaptureFiles(AssetStore store)
     { await Task.Run(() => { var encoder = new PngBitmapEncoder(); encoder.Frames.Add(BitmapFrame.Create(bitmap)); using var file = new FileStream(path, FileMode.CreateNew, FileAccess.Write, FileShare.None); encoder.Save(file); file.Flush(true); }); }
     public static void MarkComplete(string stage, string[] files, string? folder)
     { using var stream = new FileStream(Path.Combine(stage, "complete.json"), FileMode.CreateNew, FileAccess.Write, FileShare.None); JsonSerializer.Serialize(stream, new CapturePending(files.Select(Path.GetFileName).Cast<string>().ToArray(), folder)); stream.Flush(true); }
-    public async Task<int> ImportCompletedAsync(string stage)
+    public async Task<string[]> ImportCompletedAsync(string stage)
     {
         var pending = JsonSerializer.Deserialize<CapturePending>(await File.ReadAllTextAsync(Path.Combine(stage, "complete.json"))) ?? throw new InvalidDataException("保存待ちの記録が不正です。");
         if (pending.Files is not { Length: >= 1 and <= 2 } || pending.Files.Any(name => string.IsNullOrEmpty(name) || Path.GetFileName(name) != name || Path.GetExtension(name) is not (".png" or ".mp4"))) throw new InvalidDataException("保存待ちファイルが不正です。");
         var folder = pending.FolderId;
         if (folder is not null && !(await store.QueryAsync(new(Limit: 1))).Folders.Any(item => item.Id == folder)) folder = null;
-        var ids = new HashSet<string>();
+        var ids = new List<string>();
         foreach (var name in pending.Files)
         {
             var result = await store.ImportAsync(Path.Combine(stage, name), folder);
@@ -33,7 +33,7 @@ internal sealed class CaptureFiles(AssetStore store)
             if (result.Status is not ("saved" or "duplicate")) throw new IOException(result.Error ?? "ライブラリへの保存に失敗しました。保存待ちファイルは保持されています。");
             if (result.AssetId is not null) ids.Add(result.AssetId);
         }
-        await AssetRecycle.MoveAsync(stage); return ids.Count;
+        await AssetRecycle.MoveAsync(stage); return ids.Distinct().ToArray();
     }
     public async Task<CaptureRetryResult> RetryPendingAsync()
     {
@@ -41,7 +41,7 @@ internal sealed class CaptureFiles(AssetStore store)
         foreach (var directory in Directory.EnumerateDirectories(Path.Combine(store.Root, "staging"), "capture-*"))
         {
             if (!File.Exists(Path.Combine(directory, "complete.json"))) continue;
-            try { count += await ImportCompletedAsync(directory); }
+            try { count += (await ImportCompletedAsync(directory)).Length; }
             catch (Exception ex) when (ex is JsonException or InvalidDataException or IOException or UnauthorizedAccessException)
             {
                 failed++;

@@ -10,8 +10,9 @@ public sealed record Category(string Id, string Name, string? ParentId);
 public sealed record SavedSearch(string Id, string Name, AssetQuery Filter);
 public sealed record AssetQuery(string Text = "", string View = "recent", string? Kind = null,
     string? FolderId = null, string? TagId = null, int Offset = 0, int Limit = 80,
-    string[]? FolderIds = null, string[]? TagIds = null, string? CreatedAfter = null, string? CreatedBefore = null, int Version = 1);
-public sealed record AssetPage(Asset[] Items, long Total, Category[] Folders, Category[] Tags, SavedSearch[] Searches);
+    string[]? FolderIds = null, string[]? TagIds = null, string? CreatedAfter = null, string? CreatedBefore = null, int Version = 1,
+    string? Extension = null, string SortBy = "created", bool Descending = true);
+public sealed record AssetPage(Asset[] Items, long Total, Category[] Folders, Category[] Tags, SavedSearch[] Searches, string[]? Extensions = null);
 public sealed record ImportResult(string Status, string? AssetId = null, string? Error = null);
 public sealed record ExportResult(long AssetCount, long ExcludedPending);
 public sealed record AssetManifest(int Version, string CreatedAt, Asset[] Assets, Category[] Folders,
@@ -52,8 +53,11 @@ public static class AssetFormat
         && DateTimeOffset.TryParse(value, out var date) && date.Offset == TimeSpan.Zero;
     public static void ValidateQuery(AssetQuery query)
     {
-        if (query.Version != 1 || query.Text is null || query.Offset < 0 || query.Limit is < 1 or > 200 || query.View is not ("recent" or "favorites" or "uncategorized" or "trash")
+        if (query.Version is not (1 or 2) || query.Text is null || query.Offset < 0 || query.Limit is < 1 or > 200 || query.View is not ("recent" or "favorites" or "uncategorized" or "trash")
             || query.Kind is not (null or "" or "image" or "video" or "pdf" or "other")
+            || query.SortBy is not ("created" or "name" or "size")
+            || query.Extension is not null && (query.Extension.Length > 32 || query.Extension.Any(c => !(c is >= 'a' and <= 'z' or >= '0' and <= '9')))
+            || query.Version == 1 && (query.Extension is not null || query.SortBy != "created" || !query.Descending)
             || query.CreatedAfter is not null && !IsUtc(query.CreatedAfter) || query.CreatedBefore is not null && !IsUtc(query.CreatedBefore))
             throw new InvalidDataException("Unsupported search filter.");
     }

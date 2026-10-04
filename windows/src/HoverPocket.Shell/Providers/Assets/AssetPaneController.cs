@@ -1,4 +1,4 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using System.Windows;
 using System.Windows.Media.Imaging;
 using HoverPocket.Assets;
@@ -50,13 +50,14 @@ internal sealed class AssetPaneController : IDisposable
     private const string InternalDragFormat = "HoverPocket.AssetDrag";
     private sealed record PreparedDrag(string Key, string[] Paths, long[] Sizes, DateTime[] Modified);
     public AssetPaneController(AssetStore store, Window owner, BridgeDispatcher bridge, CoreWebView2 web,
-        Action<AssetPreviewLayout> layout, Func<string> provider, AssetPlaybackOwner playback, Action? openOrganizer = null, Action<string?>? capture = null, FrameworkElement? webSurface = null)
+        Action<AssetPreviewLayout> layout, Func<string> provider, AssetPlaybackOwner playback, Action? openOrganizer = null, Func<string, string?, Task>? capture = null, FrameworkElement? webSurface = null)
     {
         _webSurface = webSurface;
         _store = store; _media = AssetMedia.For(store); _owner = owner; _bridge = bridge; _web = web; _layout = layout; _provider = provider; _playback = playback;
         _store.Changed += OnChanged;
         Register("assets.query", async p => await _store.QueryAsync(Parse<AssetQuery>(p)));
         Register("assets.matches", async p => new { matches = await _store.MatchesAsync(Parse<AssetQuery>(p!.Value.GetProperty("query")), Text(p, "id")) });
+        Register("assets.selectionRange", async p => new { ids = await _store.SelectionRangeAsync(Parse<AssetQuery>(p!.Value.GetProperty("query")), Text(p, "anchorId"), Text(p, "targetId")) });
         Register("assets.update", UpdateAsync);
         Register("assets.undo", async _ => { if (_undo is not null) { await _store.RestoreMetadataAsync(_undo); _undo = null; } return new { ok = true }; });
         Register("assets.category", async p => new { id = await _store.AddCategoryAsync(Text(p, "type"), Text(p, "name"), Optional(p, "parentId")) });
@@ -82,7 +83,7 @@ internal sealed class AssetPaneController : IDisposable
         Register("assets.endPreview", _ => { EndPreview(); return Task.FromResult<object?>(new { ok = true }); });
         Register("assets.organizer", _ => { _previewLayout = new(true, Organizer: true); _layout(_previewLayout); return Task.FromResult<object?>(new { ok = true }); });
         Register("assets.openOrganizer", _ => { openOrganizer?.Invoke(); return Task.FromResult<object?>(new { ok = true }); });
-        Register("assets.capture", p => { capture?.Invoke(Optional(p, "folderId")); return Task.FromResult<object?>(new { ok = capture is not null }); });
+        Register("assets.capture", async p => { var kind = Optional(p, "kind") ?? "settings"; if (kind is not ("settings" or "screenshot" or "recording")) throw new ArgumentException("Unknown capture action."); if (capture is not null) await capture(kind, Optional(p, "folderId")); return new { ok = capture is not null }; });
         Register("assets.pick", PickAsync);
         Register("assets.cancelImport", _ => { _import?.Cancel(); return Task.FromResult<object?>(new { ok = true }); });
         Register("assets.importState", _ => Task.FromResult<object?>(Progress()));
@@ -109,6 +110,15 @@ internal sealed class AssetPaneController : IDisposable
         });
         web.AddWebResourceRequestedFilter("https://asset-media.hoverpocket.local/*", CoreWebView2WebResourceContext.All);
         web.WebResourceRequested += ServeMedia;
+        web.ContainsFullScreenElementChanged += OnBrowserFullscreenChanged;
+    }
+
+    private void OnBrowserFullscreenChanged(object? sender, object args)
+    {
+        if (_disposed || !_previewLayout.Active || _selected?.Kind != "video") return;
+        _previewLayout = _previewLayout with { Fullscreen = _web.ContainsFullScreenElement };
+        _layout(_previewLayout);
+        _ = _bridge.PostEventAsync("assets.fullscreenChanged", new { fullscreen = _previewLayout.Fullscreen });
     }
     private void Register(string method, Func<JsonElement?, Task<object?>> handler) => _bridge.Register(method, async (p, _) =>
     {
@@ -134,6 +144,7 @@ internal sealed class AssetPaneController : IDisposable
         _preview?.Cancel(); _preview?.Dispose(); _preview = new(); var token = _preview.Token;
         var generation = ++_generation; var id = Text(p, "id");
         var asset = await _store.GetAsync(id) ?? throw new FileNotFoundException();
+        if (generation != _generation || _disposed || token.IsCancellationRequested) return new { cancelled = true };
         if (_provider() != "assets") throw new InvalidOperationException("素材画面でプレビューしてください。");
         _selected = asset; _lease = Guid.NewGuid().ToString("N");
         _layout(_previewLayout with { Active = true, PinOnly = !_previewLayout.Active });
@@ -147,28 +158,33 @@ internal sealed class AssetPaneController : IDisposable
             videoUrl = asset.Kind == "video" ? $"https://asset-media.hoverpocket.local/{_lease}/{asset.Id}" : null };
     }
     private bool _editingImage;
+    private Capture.InlineImageEditor? _inlineEditor;
     private async Task<object?> EditImageAsync(JsonElement? p)
     {
         if (_editingImage) return new { cancelled = true };
         _editingImage = true;
         using var pin = PinForDialog();
+        var generation = _generation;
         try
         {
             var asset = await _store.GetAsync(Text(p, "id")) ?? throw new FileNotFoundException();
             var image = await AssetImageEditor.LoadAsync(_store, asset);
-            if (_disposed) return new { cancelled = true };
-            var editor = new Capture.ScreenshotEditorWindow(image, existingAsset: true) { Owner = _owner };
-            editor.ShowDialog();
-            if (editor.Result is null) return new { cancelled = true };
-            var result = await AssetImageEditor.SaveCopyAsync(_store, asset, editor.Result.Image);
-            return new { ok = true, result.AssetId, result.Status };
+            if (_disposed || generation != _generation) return new { cancelled = true };
+            if (_webSurface is null) throw new InvalidOperationException("編集画面を表示できませんでした。");
+            _inlineEditor = new();
+            ImportResult? result = null;
+            var saved = await _inlineEditor.ShowAsync(_owner, _webSurface, _web, image,
+                async edited => result = await AssetImageEditor.SaveCopyAsync(_store, asset, edited.Image));
+            if (!saved || result is null || _disposed) return new { cancelled = true };
+            return new { ok = true, result.AssetId, result.Status, asset = await _store.GetAsync(result.AssetId!) };
         }
         catch (Exception ex) when (ex is NotSupportedException or System.Runtime.InteropServices.ExternalException)
         { Services.AppDiagnostics.Record("asset.edit.failed", ex); throw new InvalidOperationException("この画像を編集できません。形式・破損・アクセス権を確認してください。原本は保持されています。"); }
-        finally { _editingImage = false; }
+        finally { _editingImage = false; _inlineEditor = null; }
     }
     public void EndPreview()
     {
+        _inlineEditor?.Cancel();
         _playback.Release(this);
         CloseMediaStreams();
         ++_generation; _preview?.Cancel(); _selected = null; _lease = null;
@@ -404,9 +420,9 @@ internal sealed class AssetPaneController : IDisposable
         return new { ok = true };
     }
     private void OnChanged() { _preparedDrag = null; if (!_disposed) _ = _bridge.PostEventAsync("assets.changed", new { }); }
-    private IDisposable PinForDialog() { _layout(_previewLayout with { Active = true, PinOnly = !_previewLayout.Active }); return new DialogPin(() => { if (!_disposed) _layout(_previewLayout); }); }
+    private IDisposable PinForDialog() { _layout(_previewLayout with { Active = true, PinOnly = true }); return new DialogPin(() => { if (!_disposed) _layout(_previewLayout); }); }
     private void CloseMediaStreams() { BoundedReadStream[] streams; lock (_resourceStreams) { streams = _resourceStreams.ToArray(); _resourceStreams.Clear(); } foreach (var stream in streams) stream.Dispose(); }
-    public void Dispose() { _disposed = true; _thumbnails.Cancel(); _thumbnails.Dispose(); _playback.Release(this); _store.Changed -= OnChanged; _web.WebResourceRequested -= ServeMedia; _preview?.Cancel(); _preview?.Dispose(); CloseMediaStreams(); _selected = null; _lease = null; }
+    public void Dispose() { _disposed = true; _inlineEditor?.Cancel(); _thumbnails.Cancel(); _thumbnails.Dispose(); _playback.Release(this); _store.Changed -= OnChanged; _web.WebResourceRequested -= ServeMedia; _web.ContainsFullScreenElementChanged -= OnBrowserFullscreenChanged; _preview?.Cancel(); _preview?.Dispose(); CloseMediaStreams(); _selected = null; _lease = null; }
 }
 
 internal sealed class DialogPin(Action release) : IDisposable { public void Dispose() => release(); }

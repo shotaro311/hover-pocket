@@ -1,4 +1,4 @@
-using System.Windows;
+﻿using System.Windows;
 using System.Windows.Interop;
 using HoverPocket.Shell.Bridge;
 using HoverPocket.Shell.Providers.Assets;
@@ -24,7 +24,7 @@ internal sealed class AssetOrganizerWindow : Window
         Title = bridge.CurrentSettings.Language == HoverPocket.Shell.Configuration.AppLanguage.English ? "HoverPocket — Assets" : "HoverPocket — 素材";
         Width = Math.Min(1100, SystemParameters.WorkArea.Width * .9); Height = Math.Min(720, SystemParameters.WorkArea.Height * .9); MinWidth = 480; MinHeight = 360;
         Background = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(4, 4, 6));
-        Content = _web; WindowStartupLocation = WindowStartupLocation.CenterScreen;
+        var host = new System.Windows.Controls.Grid(); host.Children.Add(_web); Content = host; WindowStartupLocation = WindowStartupLocation.CenterScreen;
         _web.CreationProperties = new CoreWebView2CreationProperties { UserDataFolder = Path.Combine(dataRoot, "AssetWebView2") };
         Loaded += async (_, _) =>
         {
@@ -44,7 +44,7 @@ internal sealed class AssetOrganizerWindow : Window
                     if (_closed || Dispatcher.HasShutdownStarted) return;
                     await Dispatcher.InvokeAsync(() => { if (!_closed && _web.CoreWebView2 is not null) _web.CoreWebView2.PostWebMessageAsJson(json); }).Task;
                 });
-                _pane = new(bridge.AssetLibrary, this, dispatcher, _web.CoreWebView2, ApplyLayout, () => "assets", bridge.AssetPlayback, capture: folder => bridge.AssetCaptureRequested?.Invoke(folder), webSurface: _web);
+                _pane = new(bridge.AssetLibrary, this, dispatcher, _web.CoreWebView2, ApplyLayout, () => "assets", bridge.AssetPlayback, capture: (kind, folder) => bridge.AssetCaptureRequested?.Invoke(kind, folder) ?? Task.CompletedTask, webSurface: _web);
                 dispatcher.Register("panel.beginTextInput", (_, _) => Task.FromResult<object?>(new { ok = true }));
                 dispatcher.Register("panel.endTextInput", (_, _) => Task.FromResult<object?>(new { ok = true }));
                 dispatcher.Register("assets.language", (_, _) => Task.FromResult<object?>(new { language = bridge.CurrentSettings.Language == HoverPocket.Shell.Configuration.AppLanguage.English ? "en" : "ja" }));

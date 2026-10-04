@@ -2,3 +2,6 @@ contracts/pocket/v1/** text eol=lf
 Sources/HoverPocket/Resources/PocketApps/** text eol=lf
 script/verify_pocket_contracts.py text eol=lf
 .github/workflows/pocket-contracts-verify.yml text eol=lf
+
+# Backup fixtures must keep the exact bytes recorded in their manifests.
+shared/asset-library/fixtures/v1/originals/** -text

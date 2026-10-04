@@ -175,30 +175,69 @@ public sealed class AssetStore : IDisposable
         try { return await Task.Run(() =>
         {
             token.ThrowIfCancellationRequested(); using var db = Open();
-            var where = new List<string> { "a.trashed=$trash" }; var args = new List<(string, object?)> { ("trash", query.View == "trash") };
-            if (selectedId is not null) { where.Add("a.id=$selected"); args.Add(("selected", selectedId)); }
-            if (query.View == "favorites") where.Add("a.favorite=1");
-            if (query.View == "uncategorized") where.Add("a.id NOT IN(SELECT m.asset FROM memberships m JOIN categories c ON c.id=m.category WHERE c.type='folder')");
-            if (!string.IsNullOrEmpty(query.Kind)) { where.Add("a.kind=$kind"); args.Add(("kind", query.Kind)); }
-            foreach (var (key, values) in new[] { ("folder", (query.FolderIds ?? []).Concat(query.FolderId is null ? [] : new[] { query.FolderId }).Distinct().ToArray()), ("tag", (query.TagIds ?? []).Concat(query.TagId is null ? [] : new[] { query.TagId }).Distinct().ToArray()) })
-                if (values.Length > 0)
-                {
-                    var parameters = values.Select((value, index) => { var name = key + index; args.Add((name, value)); return "$" + name; });
-                    where.Add($"a.id IN(SELECT m.asset FROM memberships m WHERE m.category IN ({string.Join(',', parameters)}))");
-                }
-            if (query.CreatedAfter is not null) { where.Add("julianday(a.created)>=julianday($after)"); args.Add(("after", query.CreatedAfter)); }
-            if (query.CreatedBefore is not null) { where.Add("julianday(a.created)<julianday($before)"); args.Add(("before", query.CreatedBefore)); }
-            var i = 0;
-            foreach (var word in AssetFormat.Normalize(query.Text).Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries))
-            {
-                var key = "q" + i++; args.Add((key, word));
-                where.Add($"(instr(a.normalized,${key})>0 OR instr(a.extension,${key})>0 OR a.id IN(SELECT m.asset FROM memberships m JOIN categories c ON c.id=m.category WHERE c.type='tag' AND instr(c.normalized,${key})>0))");
-            }
-            var clause = string.Join(" AND ", where);
+            var (clause, args) = QueryFilter(query);
+            if (selectedId is not null) { clause += " AND a.id=$selected"; args.Add(("selected", selectedId)); }
             var total = Convert.ToInt64(Scalar(db, $"SELECT count(*) FROM assets a WHERE {clause}", args.ToArray()));
             args.Add(("limit", Math.Clamp(query.Limit, 1, 200))); args.Add(("offset", Math.Max(0, query.Offset)));
-            var assets = ReadAssets(db, $"SELECT a.* FROM assets a WHERE {clause} ORDER BY a.created DESC,a.id LIMIT $limit OFFSET $offset", args.ToArray());
-            return new AssetPage(assets, total, Categories(db, "folder"), Categories(db, "tag"), Searches(db));
+            var assets = ReadAssets(db, $"SELECT a.* FROM assets a WHERE {clause} ORDER BY {QueryOrder(query)} LIMIT $limit OFFSET $offset", args.ToArray());
+            using var formats = Command(db, "SELECT DISTINCT extension FROM assets ORDER BY extension");
+            using var formatRows = formats.ExecuteReader(); var extensions = new List<string>();
+            while (formatRows.Read()) extensions.Add(formatRows.GetString(0));
+            return new AssetPage(assets, total, Categories(db, "folder"), Categories(db, "tag"), Searches(db), extensions.ToArray());
+        }, token); } finally { _readers.Release(); }
+    }
+    private static (string Clause, List<(string Key, object? Value)> Args) QueryFilter(AssetQuery query)
+    {
+        var where = new List<string> { "a.trashed=$trash" }; var args = new List<(string, object?)> { ("trash", query.View == "trash") };
+        if (query.View == "favorites") where.Add("a.favorite=1");
+        if (query.View == "uncategorized") where.Add("a.id NOT IN(SELECT m.asset FROM memberships m JOIN categories c ON c.id=m.category WHERE c.type='folder')");
+        if (!string.IsNullOrEmpty(query.Kind)) { where.Add("a.kind=$kind"); args.Add(("kind", query.Kind)); }
+        if (query.Extension is not null) { where.Add("a.extension=$extension"); args.Add(("extension", query.Extension)); }
+        foreach (var (key, values) in new[] { ("folder", (query.FolderIds ?? []).Concat(query.FolderId is null ? [] : new[] { query.FolderId }).Distinct().ToArray()), ("tag", (query.TagIds ?? []).Concat(query.TagId is null ? [] : new[] { query.TagId }).Distinct().ToArray()) })
+            if (values.Length > 0)
+            {
+                var parameters = values.Select((value, index) => { var name = key + index; args.Add((name, value)); return "$" + name; });
+                where.Add($"a.id IN(SELECT m.asset FROM memberships m WHERE m.category IN ({string.Join(',', parameters)}))");
+            }
+        if (query.CreatedAfter is not null) { where.Add("julianday(a.created)>=julianday($after)"); args.Add(("after", query.CreatedAfter)); }
+        if (query.CreatedBefore is not null) { where.Add("julianday(a.created)<julianday($before)"); args.Add(("before", query.CreatedBefore)); }
+        var i = 0;
+        foreach (var word in AssetFormat.Normalize(query.Text).Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries))
+        {
+            var key = "q" + i++; args.Add((key, word));
+            where.Add($"(instr(a.normalized,${key})>0 OR instr(a.extension,${key})>0 OR a.id IN(SELECT m.asset FROM memberships m JOIN categories c ON c.id=m.category WHERE c.type='tag' AND instr(c.normalized,${key})>0))");
+        }
+        var clause = string.Join(" AND ", where);
+        return (clause, args);
+    }
+    private static string QueryOrder(AssetQuery query)
+    {
+        var column = query.SortBy switch { "name" => "a.normalized", "size" => "a.size", _ => "a.created" };
+        return $"{column} {(query.Descending ? "DESC" : "ASC")},a.id";
+    }
+    public async Task<string[]> SelectionRangeAsync(AssetQuery query, string anchorId, string targetId, CancellationToken token = default)
+    {
+        AssetFormat.ValidateQuery(query);
+        await Ready;
+        if (RecoveryWarning is not null) return [];
+        await _readers.WaitAsync(token);
+        try { return await Task.Run(() =>
+        {
+            token.ThrowIfCancellationRequested(); using var db = Open();
+            var (clause, args) = QueryFilter(query);
+            args.Add(("anchor", anchorId)); args.Add(("target", targetId));
+            using var command = Command(db, $"""
+                WITH ordered AS (
+                    SELECT a.id,ROW_NUMBER() OVER (ORDER BY {QueryOrder(query)}) AS position FROM assets a WHERE {clause}
+                ), bounds AS (
+                    SELECT MIN(position) AS first,MAX(position) AS last,COUNT(*) AS count FROM ordered WHERE id IN ($anchor,$target)
+                )
+                SELECT id FROM ordered,bounds WHERE bounds.count=CASE WHEN $anchor=$target THEN 1 ELSE 2 END
+                    AND position BETWEEN bounds.first AND bounds.last ORDER BY position
+                """, args.ToArray());
+            using var rows = command.ExecuteReader(); var ids = new List<string>();
+            while (rows.Read()) { token.ThrowIfCancellationRequested(); ids.Add(rows.GetString(0)); }
+            return ids.ToArray();
         }, token); } finally { _readers.Release(); }
     }
     public async Task<Asset?> GetAsync(string id)

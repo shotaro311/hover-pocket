@@ -6,8 +6,10 @@
 
 `manifest.schema.json`は完全バックアップの公開契約。原本は`originals/<UUID>.<extension>`、拡張子なしの場合は`originals/<UUID>`。日時はUTC、サイズはバイト。タグ・フォルダはUUIDの集合。名前の変更は原本のパス・ID・拡張子を変更しない。元の絶対パス・取得URL・資格情報を含めない。
 
-保存検索の`filter.version`は1。省略された既存fixtureは1として読む。`folderIds`と`tagIds`は各集合内OR、異なる集合間AND。単一の`folderId`/`tagId`も集合に合流する。日付の`createdAfter`はUTCの含む境界、`createdBefore`は含まない境界で、画面が端末の現地日付から翌日境界を計算する。`excludedPending`はエクスポートで除外された未確定の取り込み数で、原本数に含めない。
+保存検索の`filter.version`は1または2。省略された既存fixtureは1として読む。版2はファイル形式と並び順を追加する。`extension`は小文字の拡張子（ドットなし）、`null`・省略は制限なし、空文字は拡張子なし。`sortBy`は`created`（取り込み日）、`name`（正規化した名前）、`size`（バイト数）。`descending`は降順なら`true`。省略時は従来どおり取り込み日の降順とし、同値はIDの昇順で安定させる。一覧・ページ取得・Shift範囲選択は同じ順序を使う。追加条件を持つ検索は版2として保存し、旧版が無視して広い条件に戻すことを防ぐ。`folderIds`と`tagIds`は各集合内OR、異なる集合間AND。単一の`folderId`/`tagId`も集合に合流する。日付の`createdAfter`はUTCの含む境界、`createdBefore`は含まない境界で、画面が端末の現地日付から翌日境界を計算する。`excludedPending`はエクスポートで除外された未確定の取り込み数で、原本数に含めない。
 
 `fixtures/v1`は生成した原本と固定ハッシュを含む、両OS用の復元fixture。名前・分類・お気に入り・ゴミ箱・由来フラグ・保存検索の意味を復元して検証する。WindowsのCoreテストは自動生成fixtureの保存/復元とこのfixtureの読み込みを別に実行する。
 
 今後のDB変更は適用前のSQLite backup APIによるスナップショット、対応migration、fixture、旧版の書き込み拒否検証を同時に追加する。DBスナップショットは原本を含むバックアップとは別。未知の版を旧版へ自動変換しない。
+
+2026-10-04: 検索条件は既存のJSON列に保存するためDB版1・原本形式の変更やmigrationは不要。旧アプリへ戻しても素材・分類・原本は維持されるが、版2の保存検索は旧アプリでは未対応として拒否される。版2を含む完全バックアップの旧アプリへの復元も拒否する。切替前のDBバックアップと旧版を保持する。共通fixtureは従来の版1検索と版2検索の両方を含む。

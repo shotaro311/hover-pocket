@@ -17,6 +17,7 @@ internal sealed class ClipboardBridgeController : IDisposable
     private bool _disposed;
     private bool _providerVisible;
     private bool _privateMode;
+    private readonly SemaphoreSlim _imageReads = new(2);
 
     public ClipboardBridgeController(
         ClipboardHistoryStore store,
@@ -34,6 +35,7 @@ internal sealed class ClipboardBridgeController : IDisposable
     }
 
     public event EventHandler? ExternalDragStarted;
+    internal ClipboardHistoryStore StoreForVerify => _store;
     public async Task<object?> SaveImageToLibraryAsync(HoverPocket.Assets.AssetStore library, string id, CancellationToken token)
     {
         if (!Guid.TryParse(id, out var parsed)) throw new ArgumentException("画像が見つかりません。");
@@ -46,6 +48,7 @@ internal sealed class ClipboardBridgeController : IDisposable
     public void Attach(BridgeDispatcher dispatcher)
     {
         dispatcher.Register("clipboard.getState", (_, _) => Task.FromResult<object?>(BuildState()));
+        dispatcher.Register("clipboard.getImage", ReadImageAsync);
         dispatcher.Register("clipboard.copyText", CopyTextAsync);
         dispatcher.Register("clipboard.copyImage", CopyImageAsync);
         dispatcher.Register("clipboard.clear", ClearAsync);
@@ -63,8 +66,11 @@ internal sealed class ClipboardBridgeController : IDisposable
         {
             try
             {
-                _monitor.Start();
-                _store.CaptureCurrentClipboard("monitor-start");
+                if (!_monitor.IsListening)
+                {
+                    _monitor.Start();
+                    _store.CaptureCurrentClipboard("monitor-start");
+                }
             }
             catch (InvalidOperationException)
             {
@@ -84,6 +90,19 @@ internal sealed class ClipboardBridgeController : IDisposable
             _monitor.IsListening,
             _settingsProvider().ClipboardPrivateMode,
             _providerVisibleProvider());
+    }
+
+    private async Task<object?> ReadImageAsync(JsonElement? parameters, CancellationToken cancellationToken)
+    {
+        var id = ReadRequiredGuid(parameters, "id");
+        var thumbnail = parameters is { } value && value.TryGetProperty("thumbnail", out var small) && small.GetBoolean();
+        await _imageReads.WaitAsync(cancellationToken);
+        try
+        {
+            if (_disposed) return new { dataUrl = (string?)null };
+            return new { dataUrl = await Task.Run(() => _store.ReadImageDataUrl(id, thumbnail), cancellationToken) };
+        }
+        finally { _imageReads.Release(); }
     }
 
     public void Dispose()

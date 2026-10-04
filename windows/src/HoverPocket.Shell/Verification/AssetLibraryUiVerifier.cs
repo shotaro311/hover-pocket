@@ -3,6 +3,7 @@ using System.Text.Json;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using HoverPocket.Assets;
+using HoverPocket.Shell.Display;
 using HoverPocket.Shell.Providers.Assets;
 using HoverPocket.Shell.Windows;
 
@@ -54,6 +55,19 @@ internal static class AssetLibraryUiVerifier
         if(!string.IsNullOrWhiteSpace(protectedPath)) { var protectedId=(await store.ImportAsync(protectedPath)).AssetId!; var protectedFrame=await media.FrameAsync((await store.GetAsync(protectedId))!,1,false,CancellationToken.None); if(protectedFrame.Error?.Contains("パスワード")!=true) failures.Add("assets: password-protected PDF did not provide a specific explanation"); }
         await controller.PanelBridgeController.SelectProviderFromShellAsync("assets");
         var web = controller.Panel.WebView!;
+        var priorCapture = controller.PanelBridgeController.AssetCaptureRequested;
+        var captureActions = new List<string>();
+        controller.PanelBridgeController.AssetCaptureRequested = (kind, folder) => { captureActions.Add(kind); return Task.CompletedTask; };
+        try
+        {
+            var captureDeadline = DateTime.UtcNow.AddSeconds(5);
+            while (await web.ExecuteScriptAsync("!!document.querySelector('[data-action=screenshot]')") != "true" && DateTime.UtcNow < captureDeadline) await Task.Delay(30);
+            await web.ExecuteScriptAsync("document.querySelector('[data-action=screenshot]').click();document.querySelector('[data-action=recording]').click()");
+            while (captureActions.Count < 2 && DateTime.UtcNow < captureDeadline) await Task.Delay(30);
+            if (!captureActions.SequenceEqual(new[] { "screenshot", "recording" })) failures.Add("assets: capture icons did not reach their native actions");
+            else VerifyConsole.WriteLine("PASS library capture icons: screenshot and recording reach native actions without settings dispatch");
+        }
+        finally { controller.PanelBridgeController.AssetCaptureRequested = priorCapture; }
         if (Environment.GetEnvironmentVariable("HOVERPOCKET_ASSET_INTERACTION_ONLY") == "1") { await AssetInteractionVerifier.RunAsync(controller, imageId, failures); return failures.ToArray(); }
         await web.ExecuteScriptAsync($$"""
             window.__assetProbe={done:false};
@@ -64,7 +78,8 @@ internal static class AssetLibraryUiVerifier
                 const card=document.querySelector('[data-asset-id="{{imageId}}"]');
                 if(!card) throw Error('image card absent');
                 card.dispatchEvent(new MouseEvent('dblclick',{bubbles:true}));
-                for(let i=0;i<100&&!document.querySelector('.assets-media img')?.complete;i++) await new Promise(r=>setTimeout(r,30));
+                for(let i=0;i<200&&document.querySelector('.assets-edit-image')?.disabled!==false;i++) await new Promise(r=>setTimeout(r,30));
+                if(document.querySelector('.assets-edit-image')?.disabled!==false) throw Error('image preview not ready');
                 const picture=document.querySelector('.assets-media img');
                 const result=await request('assets.preview',{id:'{{imageId}}',page:1});
                 await request('assets.layout',{fullscreen:true});
@@ -72,7 +87,7 @@ internal static class AssetLibraryUiVerifier
                 await request('assets.layout',{fullscreen:false});
                 const external=await fetch('https://asset-media.hoverpocket.local/invalid/invalid');
                 await request('assets.endPreview');
-                window.__assetProbe={done:true,ok:query.total>=2&&result.width===1200&&retained&&external.status===403,queryCount:query.total};
+                window.__assetProbe={done:true,ok:query.total>=2&&result.width===1200&&retained&&external.status===403,queryCount:query.total,width:result.width,retained,externalStatus:external.status};
               } catch(error) { window.__assetProbe={done:true,ok:false,error:error.message}; }
             });
             """);
@@ -86,7 +101,7 @@ internal static class AssetLibraryUiVerifier
         var resizeCount = 0;
         System.Windows.SizeChangedEventHandler onResize = (_, _) => resizeCount++;
         web.SizeChanged += onResize;
-        await web.ExecuteScriptAsync($$"""import('/js/bridge.js').then(async({request})=>{await request('assets.preview',{id:'{{imageId}}'});await request('assets.layout',{fullscreen:false});});""");
+        await web.ExecuteScriptAsync($$"""document.querySelector('[data-asset-id="{{imageId}}"]')?.dispatchEvent(new MouseEvent('dblclick',{bubbles:true}));""");
         deadline = DateTime.UtcNow.AddSeconds(8);
         while (DateTime.UtcNow < deadline && (!controller.Panel.AssetLayout.Active || controller.Panel.AssetLayout.Width != 1200 || controller.Panel.IsAnimating)) await Task.Delay(30);
         web.SizeChanged -= onResize;
@@ -98,18 +113,25 @@ internal static class AssetLibraryUiVerifier
             failures.Add("assets: adaptive native panel exceeds work area cap");
         controller.SimulatePointerMoveForVerify(layout.Monitor.WorkArea.Left + 20, layout.Monitor.WorkArea.Bottom - 20);
         await Task.Delay(650);
-        if (!controller.Panel.IsVisible || !controller.Panel.AssetLayout.Active) failures.Add("assets: preview was not pinned outside hover area");
+        if (controller.Panel.IsVisible || controller.Panel.AssetLayout.Active || await web.ExecuteScriptAsync("document.querySelector('.assets-preview').hidden") != "true") failures.Add("assets: hover exit did not close preview and restore the list");
+        controller.SetPointerSimulationForVerify(layout.AccessSurface.PhysicalRect.Left + layout.AccessSurface.PhysicalRect.Width / 2, layout.AccessSurface.PhysicalRect.Top);
+        await controller.ShowPanelForUiVerifyAsync();
+        await web.ExecuteScriptAsync($$"""import('/js/bridge.js').then(({request})=>request('assets.preview',{id:'{{imageId}}'}));""");
+        deadline = DateTime.UtcNow.AddSeconds(5);
+        while (DateTime.UtcNow < deadline && (!controller.Panel.AssetLayout.Active || controller.Panel.IsAnimating)) await Task.Delay(30);
         await web.ExecuteScriptAsync("import('/js/bridge.js').then(async({request})=>{await request('assets.layout',{fullscreen:true});window.__nativeFull=true;});");
         deadline = DateTime.UtcNow.AddSeconds(5);
         while (DateTime.UtcNow < deadline && (!controller.Panel.AssetLayout.Fullscreen || controller.Panel.IsAnimating)) await Task.Delay(30);
         if (controller.Panel.LiquidTargetForVerify?.PhysicalRect != layout.Monitor.Bounds) failures.Add("assets: fullscreen does not use current monitor bounds");
         await controller.RunHealthCheckForVerifyAsync();
         if (!controller.Panel.AssetLayout.Fullscreen || controller.Panel.LiquidTargetForVerify?.PhysicalRect != layout.Monitor.Bounds) failures.Add("assets: health repair reset fullscreen preview");
-        controller.Panel.SetAssetBackgrounded(true);
-        await controller.RunHealthCheckForVerifyAsync();
-        if (!controller.Panel.AssetBackgrounded || (HoverPocket.Shell.Interop.NativeMethods.GetExtendedStyles(controller.Panel.Hwnd) & HoverPocket.Shell.Interop.NativeMethods.WsExTopmost) != 0)
-            failures.Add("assets: health repair raised backgrounded preview");
-        controller.Panel.SetAssetBackgrounded(false);
+        controller.Panel.DismissAssetPreviewOnFocusLoss();
+        await Task.Delay(700);
+        if (controller.Panel.AssetLayout.Active || controller.PanelExpectedVisibleForVerify) failures.Add("assets: external focus did not dismiss the preview");
+        await controller.ShowPanelForUiVerifyAsync();
+        await web.ExecuteScriptAsync($$"""import('/js/bridge.js').then(async({request})=>{await request('assets.preview',{id:'{{imageId}}'});await request('assets.layout',{fullscreen:true});});""");
+        deadline = DateTime.UtcNow.AddSeconds(5);
+        while (DateTime.UtcNow < deadline && (!controller.Panel.AssetLayout.Fullscreen || controller.Panel.IsAnimating)) await Task.Delay(30);
         await web.ExecuteScriptAsync("import('/js/bridge.js').then(async({request})=>{const s=await request('timer.getState');await request('timer.start',{preset:{...s.draftTimer,title:'Asset preview timer probe',durationSeconds:1,isPomodoro:false,soundEnabled:false}});});");
         await Task.Delay(1300);
         if (controller.PanelBridgeController.SelectedProviderId != "assets" || !controller.Panel.AssetLayout.Fullscreen) failures.Add("assets: timer expiry interrupted pinned fullscreen preview");
@@ -117,6 +139,7 @@ internal static class AssetLibraryUiVerifier
         await web.ExecuteScriptAsync("import('/js/bridge.js').then(async({request})=>{await request('assets.layout',{fullscreen:false});await request('assets.endPreview');});");
         await Task.Delay(300);
         if (controller.PanelBridgeController.CurrentSettings.PanelSize != normalSize) failures.Add("assets: preview changed normal size preferences");
+        await VerifyCaptureTimeoutAsync(controller, failures);
         controller.SetPointerSimulationForVerify(layout.AccessSurface.PhysicalRect.Left + layout.AccessSurface.PhysicalRect.Width / 2, layout.AccessSurface.PhysicalRect.Top);
         await web.ExecuteScriptAsync($$"""window.__dragPrepared=false;import('/js/bridge.js').then(async({request})=>{const a=await request('assets.copy',{id:'{{imageId}}',mode:'drag'});const b=await request('assets.copy',{id:'{{imageId}}',mode:'drag'});window.__dragPrepared=!!a.prepared&&!!b.prepared;});""");
         deadline=DateTime.UtcNow.AddSeconds(8);while(DateTime.UtcNow<deadline && await web.ExecuteScriptAsync("window.__dragPrepared")!="true")await Task.Delay(30);
@@ -186,6 +209,10 @@ internal static class AssetLibraryUiVerifier
                     """);
                 deadline=DateTime.UtcNow.AddSeconds(10); while(DateTime.UtcNow<deadline && await web.ExecuteScriptAsync("window.__ownedPlayerReady")!="true") await Task.Delay(50);
                 if(await web.ExecuteScriptAsync("window.__ownedPlayerReady")!="true") failures.Add("assets: actual provider video player did not play");
+                await VerifyVideoVisibilityAndFullscreenAsync(controller, failures);
+                await web.ExecuteScriptAsync($$"""document.querySelector('[data-asset-id="{{ownedVideo.Id}}"]')?.dispatchEvent(new MouseEvent('dblclick',{bubbles:true}));""");
+                deadline=DateTime.UtcNow.AddSeconds(8); while(DateTime.UtcNow<deadline && await web.ExecuteScriptAsync("!!document.querySelector('.assets-media video')?.readyState")!="true") await Task.Delay(40);
+                await web.ExecuteScriptAsync("window.__ownedVideo=document.querySelector('.assets-media video');window.__ownedVideo.muted=true;window.__ownedVideo.play()");
                 await organizerWeb.ExecuteScriptAsync($$"""document.querySelector('[data-asset-id="{{imageId}}"]')?.dispatchEvent(new MouseEvent('dblclick',{bubbles:true}));""");
                 deadline=DateTime.UtcNow.AddSeconds(8); while(DateTime.UtcNow<deadline && controller.Panel.AssetLayout.Active) await Task.Delay(50);
                 await Task.Delay(150);
@@ -223,8 +250,83 @@ internal static class AssetLibraryUiVerifier
         }
         await controller.PanelBridgeController.SelectProviderFromShellAsync("controls");
         await AssetInteractionVerifier.RunAsync(controller, imageId, failures);
-        if (failures.Count == 0) VerifyConsole.WriteLine("PASS assets: durable import, PNG alpha, PDF mixed/1000 lazy pages/isolated worker restart, corrupt/protected originals, virtual cards, native resize/fullscreen/pinning/background health, uninterrupted timer, drag preparation, resource lease, organizer, empty folder drop, temporary selection, OS recycle" + (videoPath is null ? " (video fixture absent)" : ", H.264 playback/range delivery/single owner"));
+        if (failures.Count == 0) VerifyConsole.WriteLine("PASS assets: durable import, PNG alpha, PDF mixed/1000 lazy pages/isolated worker restart, corrupt/protected originals, virtual cards, native resize/fullscreen/hover exit/focus dismissal, capture timeout recovery, uninterrupted timer, drag preparation, resource lease, organizer, empty folder drop, temporary selection, OS recycle" + (videoPath is null ? " (video fixture absent)" : ", H.264 playback/range delivery/single owner"));
         return failures.ToArray();
+    }
+
+    private static async Task VerifyCaptureTimeoutAsync(HoverShellController controller, List<string> failures)
+    {
+        if (controller.PanelBridgeController.CurrentSettings.ReduceMotion || !System.Windows.SystemParameters.ClientAreaAnimation)
+        {
+            VerifyConsole.WriteLine("SKIP stalled capture: reduced motion bypasses the snapshot path");
+            return;
+        }
+        var panel = controller.Panel;
+        var layout = controller.ActiveLayoutForVerify!;
+        var completed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        Stream? pendingStream = null;
+        panel.CapturePreviewForVerify = stream => { pendingStream = stream; return completed.Task; };
+        try
+        {
+            await controller.ShowPanelForUiVerifyAsync();
+            var bounds = layout.PanelTarget.PhysicalRect;
+            var physical = new PhysicalRect(bounds.Left, bounds.Top, bounds.Width + 90, bounds.Height + 90);
+            var destination = new WindowPlacement(new DisplayLayoutService().PhysicalToDip(physical, layout.Monitor), physical);
+            await panel.ResizeAsync(destination).WaitAsync(TimeSpan.FromSeconds(7));
+            if (pendingStream is null || !pendingStream.CanWrite || panel.Opacity != 1 || panel.ResizeOverlayVisibleForVerify || panel.IsAnimating)
+                failures.Add("assets: a stalled WebView capture did not restore an interactive panel");
+            else VerifyConsole.WriteLine("PASS stalled WebView capture: bounded recovery, live panel restored, late stream remains writable");
+        }
+        finally
+        {
+            completed.TrySetResult(); panel.CapturePreviewForVerify = null;
+            await Task.Delay(30);
+            if (pendingStream?.CanWrite == true) failures.Add("assets: timed-out capture stream not disposed after completion");
+            await panel.ResizeAsync(layout.PanelTarget);
+        }
+    }
+
+    private static async Task VerifyVideoVisibilityAndFullscreenAsync(HoverShellController controller, List<string> failures)
+    {
+        var panel = controller.Panel; var web = panel.WebView!;
+        var visibility = await web.ExecuteScriptAsync("""
+            (()=>{const v=document.querySelector('.assets-media video'); if(!v)return false;
+              const source=v.src; Object.defineProperty(document,'hidden',{configurable:true,value:true});
+              try{document.dispatchEvent(new Event('visibilitychange'));return v.paused&&v.src===source&&v.hasAttribute('src');}
+              finally{delete document.hidden;document.dispatchEvent(new Event('visibilitychange'));}})()
+            """);
+        if (visibility != "true") failures.Add("assets: occlusion discarded the active video source");
+        await web.CoreWebView2.CallDevToolsProtocolMethodAsync("Runtime.evaluate", JsonSerializer.Serialize(new
+        {
+            expression = "(async()=>{const v=document.querySelector('.assets-media video');v.volume=.3;v.muted=true;await v.play();await v.requestFullscreen();})()",
+            userGesture = true, awaitPromise = true
+        }));
+        var deadline = DateTime.UtcNow.AddSeconds(6);
+        while (DateTime.UtcNow < deadline && (!panel.AssetLayout.Fullscreen || panel.IsAnimating)) await Task.Delay(30);
+        if (!web.CoreWebView2.ContainsFullScreenElement || !panel.AssetLayout.Fullscreen || panel.LiquidTargetForVerify?.PhysicalRect != controller.ActiveLayoutForVerify!.Monitor.Bounds)
+            failures.Add("assets: the video player's fullscreen request did not expand the native window");
+        var screen = controller.ActiveLayoutForVerify!.Monitor.Bounds;
+        if (!panel.ContainsPhysicalPoint(screen.Left + 1, screen.Top + 1) || !panel.ContainsPhysicalPoint(screen.Right - 1, screen.Bottom - 1) || panel.ContainsPhysicalPoint(screen.Right + 1, screen.Bottom - 1))
+            failures.Add("assets: fullscreen hover bounds do not cover exactly the monitor");
+        if (await web.ExecuteScriptAsync("!!window.__ownedVideo&&!window.__ownedVideo.paused&&window.__ownedVideo.volume===.3&&window.__ownedVideo.hasAttribute('src')") != "true")
+            failures.Add("assets: resume/fullscreen changed the video player or stopped playback");
+        await web.ExecuteScriptAsync("document.exitFullscreen()");
+        deadline = DateTime.UtcNow.AddSeconds(6);
+        while (DateTime.UtcNow < deadline && (panel.AssetLayout.Fullscreen || panel.IsAnimating)) await Task.Delay(30);
+        if (web.CoreWebView2.ContainsFullScreenElement || panel.AssetLayout.Fullscreen) failures.Add("assets: native fullscreen did not restore the preview size");
+        else VerifyConsole.WriteLine("PASS video occlusion/resume and player fullscreen/restore");
+        await web.CoreWebView2.CallDevToolsProtocolMethodAsync("Runtime.evaluate", JsonSerializer.Serialize(new
+        {
+            expression = "new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))",
+            awaitPromise = true
+        }));
+        await web.ExecuteScriptAsync("window.__videoNativeClicks=[];for(const name of ['mousedown','click','dblclick'])document.addEventListener(name,e=>window.__videoNativeClicks.push([e.type,e.detail,e.target.tagName,e.isTrusted]),{capture:true})");
+        await PreviewMotionVerifier.DoubleClickMediaAsync(web);
+        deadline = DateTime.UtcNow.AddSeconds(6);
+        while (DateTime.UtcNow < deadline && (panel.AssetLayout.Active || panel.IsAnimating)) await Task.Delay(30);
+        if (panel.AssetLayout.Active || await web.ExecuteScriptAsync("document.querySelector('.assets-preview').hidden && !window.__ownedVideo.hasAttribute('src')") != "true")
+            failures.Add($"assets: native video double-click did not return to list and release player; visible={panel.IsVisible}, hit={web.IsHitTestVisible}, animating={panel.IsAnimating}; " + await web.ExecuteScriptAsync("({clicks:window.__videoNativeClicks,fullscreen:!!document.fullscreenElement,hidden:document.querySelector('.assets-preview').hidden,rect:window.__ownedVideo.getBoundingClientRect().toJSON()})"));
+        else VerifyConsole.WriteLine("PASS native video double-click: list restored and player released");
     }
     private static byte[] PdfFixture(int pages = 2)
     {

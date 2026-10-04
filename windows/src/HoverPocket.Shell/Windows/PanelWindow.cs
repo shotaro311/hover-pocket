@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.IO;
 using System.Text.Json;
 using System.Windows;
@@ -69,6 +69,7 @@ internal sealed class PanelWindow : NoActivateWindow
     public AssetPreviewLayout AssetLayout { get; private set; } = new(false);
     public event Action<AssetPreviewLayout>? AssetLayoutChanged;
     public event Action? AssetOrganizerRequested;
+    public event Action? AssetPreviewDismissRequested;
     public event Action<bool>? AssetDragChanged;
     public async Task ReceiveAssetDropAsync(System.Windows.IDataObject data)
     {
@@ -90,7 +91,14 @@ internal sealed class PanelWindow : NoActivateWindow
     protected override void OnDeactivated(EventArgs e)
     {
         base.OnDeactivated(e);
-        if (!_closed && AssetLayout.Active && !NativeMethods.ForegroundBelongsToCurrentProcess()) SetAssetBackgrounded(true);
+        if (!_closed && !NativeMethods.ForegroundBelongsToCurrentProcess()) DismissAssetPreviewOnFocusLoss();
+    }
+
+    internal void DismissAssetPreviewOnFocusLoss()
+    {
+        if (!AssetLayout.Active || AssetLayout.PinOnly) return;
+        Services.AppDiagnostics.Record("asset.preview.focus-lost");
+        AssetPreviewDismissRequested?.Invoke();
     }
 
     public AnimationDiagnostics LastAnimationDiagnostics { get; private set; } = AnimationDiagnostics.Empty;
@@ -518,7 +526,7 @@ internal sealed class PanelWindow : NoActivateWindow
                 _resizeImageTop = AssetLayout.Fullscreen ? 0 : _liquidLayout?.AccessSurface.DipRect.Height ?? 0;
                 ApplyLiquidSurface();
             }
-            if (IsVisible) await RetargetLiquid(_reveal.Target, "Resize");
+            if (IsVisible) await RetargetLiquid(_reveal.Target, "Resize").WaitAsync(TimeSpan.FromSeconds(3));
         }
         catch (Exception ex) when (ex is InvalidOperationException or System.Runtime.InteropServices.COMException or IOException or TaskCanceledException or TimeoutException or NotSupportedException)
         {
@@ -526,7 +534,7 @@ internal sealed class PanelWindow : NoActivateWindow
             if (!_closed && revision == _resizeRevision)
             {
                 SetLiquidTarget(target, snap: true);
-                ApplyLiquidSurface();
+                CompleteLiquid();
             }
         }
         finally
@@ -556,13 +564,35 @@ internal sealed class PanelWindow : NoActivateWindow
         }
     }
 
+    internal Func<Stream, Task>? CapturePreviewForVerify { get; set; }
+    internal bool ResizeOverlayVisibleForVerify => _resizeOverlay?.IsVisible == true;
+
     private async Task<BitmapSource> CaptureContentAsync()
     {
-        using var stream = new MemoryStream();
-        await _webView!.CoreWebView2.CapturePreviewAsync(CoreWebView2CapturePreviewImageFormat.Png, stream);
-        stream.Position = 0;
-        var bitmap = new BitmapImage(); bitmap.BeginInit(); bitmap.CacheOption = BitmapCacheOption.OnLoad;
-        bitmap.StreamSource = stream; bitmap.EndInit(); bitmap.Freeze(); return bitmap;
+        var stream = new MemoryStream();
+        Task? capture = null;
+        try
+        {
+            capture = CapturePreviewForVerify?.Invoke(stream)
+                ?? _webView!.CoreWebView2.CapturePreviewAsync(CoreWebView2CapturePreviewImageFormat.Png, stream);
+            await capture.WaitAsync(TimeSpan.FromSeconds(2));
+            stream.Position = 0;
+            var bitmap = new BitmapImage(); bitmap.BeginInit(); bitmap.CacheOption = BitmapCacheOption.OnLoad;
+            bitmap.StreamSource = stream; bitmap.EndInit(); bitmap.Freeze(); return bitmap;
+        }
+        finally
+        {
+            // WebView capture cannot be cancelled; a late completion still owns the stream.
+            if (capture is { IsCompleted: false }) _ = DisposeCaptureStreamAsync(capture, stream);
+            else stream.Dispose();
+        }
+    }
+
+    private static async Task DisposeCaptureStreamAsync(Task capture, Stream stream)
+    {
+        try { await capture; }
+        catch { /* The resize has already recovered from the timeout. */ }
+        finally { stream.Dispose(); }
     }
 
     private BitmapSource CaptureDisplayedContent()
@@ -806,6 +836,8 @@ internal sealed class PanelWindow : NoActivateWindow
     public bool ContainsPhysicalPoint(int x, int y, double toleranceDips = 0)
     {
         if (_liquidShape is null || _liquidLayout is null) return false;
+        if (AssetLayout.Fullscreen && _reveal.Target > 0 && _liquidTarget is { } fullscreen)
+            return fullscreen.PhysicalRect.Contains(x, y);
         var rect = new Rect(Left, Top, Width, Height);
         return _liquidShape.Contains(new System.Windows.Point(x / _liquidLayout.Monitor.ScaleX - rect.Left - _viewportOffset.X,
             y / _liquidLayout.Monitor.ScaleY - rect.Top - _viewportOffset.Y), toleranceDips);
@@ -826,7 +858,7 @@ internal sealed class PanelWindow : NoActivateWindow
         }
 
         var uiFolder = ResolveUiFolder();
-        var webView = new WebView2CompositionControl
+        var webView = new PanelWebView
         {
             CreationProperties = new CoreWebView2CreationProperties
             {
@@ -911,7 +943,7 @@ internal sealed class PanelWindow : NoActivateWindow
             voiceMicrophoneGesture: RegisterVoiceMicrophoneGesture);
         _assetPane = new AssetPaneController(_bridgeController.AssetLibrary, this, dispatcher, webView.CoreWebView2,
             value => { if (AssetLayout == value) return; AssetLayout = value; if (!value.Active) SetAssetBackgrounded(false); AssetLayoutChanged?.Invoke(value); }, () => _bridgeController.SelectedProviderId,
-            _bridgeController.AssetPlayback, () => AssetOrganizerRequested?.Invoke(), folder => _bridgeController.AssetCaptureRequested?.Invoke(folder), webSurface: webView);
+            _bridgeController.AssetPlayback, () => AssetOrganizerRequested?.Invoke(), (kind, folder) => _bridgeController.AssetCaptureRequested?.Invoke(kind, folder) ?? Task.CompletedTask, webSurface: webView);
         dispatcher.Register("panel.beginTextInput", (_, _) =>
             Task.FromResult<object?>(BeginKeyboardInteraction()));
         dispatcher.Register("panel.endTextInput", (_, _) =>
