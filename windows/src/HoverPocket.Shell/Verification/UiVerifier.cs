@@ -18,6 +18,7 @@ internal sealed class UiVerifier
     public async Task<int> RunAsync()
     {
         VerifyConsole.WriteLine("UI verify: WebView2 host + bridge + provider registry + settings");
+        if (Environment.GetEnvironmentVariable("HOVERPOCKET_CAPTURE_VERIFY_ONLY") == "1") return await CaptureVerifier.RunAsync(_controller);
 
         try
         {
@@ -35,6 +36,16 @@ internal sealed class UiVerifier
                 _failures.Add("webview: UI did not report ready within 8s");
             }
 
+            if (ready && Environment.GetEnvironmentVariable("HOVERPOCKET_RESPONSE_VERIFY_ONLY") == "1")
+                return await ProviderResponseVerifier.RunAsync(_controller.Panel.WebView!);
+            if (ready && Environment.GetEnvironmentVariable("HOVERPOCKET_PREVIEW_MOTION_VERIFY_ONLY") == "1")
+                return await PreviewMotionVerifier.RunAsync(_controller);
+            if (ready) _failures.AddRange(await AssetLibraryUiVerifier.RunAsync(_controller));
+            if (Environment.GetEnvironmentVariable("HOVERPOCKET_ASSET_VERIFY_ONLY") == "1")
+            {
+                foreach (var failure in _failures) VerifyConsole.WriteLine("FAIL " + failure);
+                return _failures.Count == 0 ? 0 : 1;
+            }
             if (ready) LiquidMotionVerifier.MeasureStationaryWork(_controller.Panel);
             var result = ready ? await _controller.Panel.RunWebVerifyScriptAsync() : null;
             if (result is null)

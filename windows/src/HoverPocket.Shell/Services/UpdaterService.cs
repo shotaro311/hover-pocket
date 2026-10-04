@@ -17,6 +17,7 @@ internal sealed class UpdaterService
     public event EventHandler<UpdaterCheckResult>? StartupUpdateAvailable;
 
     public UpdaterStatusSnapshot Snapshot => _snapshot;
+    public Func<Task>? BeforeRestart { get; set; }
 
     public async Task<UpdaterCheckResult> CheckWithPromptsAsync(Window? owner = null, CancellationToken cancellationToken = default)
     {
@@ -78,6 +79,7 @@ internal sealed class UpdaterService
                 return downloaded;
             }
 
+            if (BeforeRestart is not null) await BeforeRestart();
             SetSnapshot("applying", $"Applying HoverPocket {version}...");
             manager.ApplyUpdatesAndRestart(update.TargetFullRelease);
             return UpdaterCheckResult.ApplyingUpdate(version);

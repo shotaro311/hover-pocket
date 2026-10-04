@@ -1,0 +1,16 @@
+CREATE TABLE IF NOT EXISTS assets(id TEXT PRIMARY KEY, name TEXT NOT NULL, normalized TEXT NOT NULL,
+  extension TEXT NOT NULL, kind TEXT NOT NULL, sha256 TEXT NOT NULL UNIQUE, size INTEGER NOT NULL,
+  created TEXT NOT NULL, favorite INTEGER NOT NULL DEFAULT 0, trashed INTEGER NOT NULL DEFAULT 0,
+  internet INTEGER NOT NULL DEFAULT 0);
+CREATE INDEX IF NOT EXISTS assets_recent ON assets(trashed,created DESC,id);
+CREATE TABLE IF NOT EXISTS categories(id TEXT PRIMARY KEY, type TEXT NOT NULL, name TEXT NOT NULL,
+  normalized TEXT NOT NULL, parent TEXT REFERENCES categories(id));
+CREATE UNIQUE INDEX IF NOT EXISTS category_name ON categories(type,COALESCE(parent,''),normalized);
+CREATE TABLE IF NOT EXISTS memberships(asset TEXT REFERENCES assets(id) ON DELETE CASCADE,
+  category TEXT REFERENCES categories(id) ON DELETE CASCADE, PRIMARY KEY(asset,category));
+CREATE INDEX IF NOT EXISTS memberships_category ON memberships(category,asset);
+CREATE TABLE IF NOT EXISTS searches(id TEXT PRIMARY KEY,name TEXT NOT NULL,filter TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS imports(id TEXT PRIMARY KEY,name TEXT NOT NULL,extension TEXT NOT NULL,
+  created TEXT NOT NULL,internet INTEGER NOT NULL,folder TEXT,sha256 TEXT,size INTEGER);
+PRAGMA user_version=1;
+CREATE TABLE IF NOT EXISTS purges(id TEXT PRIMARY KEY REFERENCES assets(id) ON DELETE CASCADE, started TEXT NOT NULL, recycled INTEGER NOT NULL DEFAULT 0);

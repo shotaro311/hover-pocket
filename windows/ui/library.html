@@ -1,0 +1,10 @@
+<!doctype html>
+<html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>HoverPocket — 素材</title><link rel="stylesheet" href="providers/assets/assets.css"><style>html,body{height:100%;margin:0;background:#080a10;color:#eef0f8;font-family:system-ui,sans-serif}#library{height:100%}.assets-toolbar [data-action=organizer]{display:none}</style></head>
+<body><main id="library"></main><script type="module">
+import {request} from './js/bridge.js';
+import {renderAssetsProvider} from './providers/assets/assets.js';
+const settings=await request('assets.language'); document.documentElement.lang=settings.language;
+renderAssetsProvider({container:document.querySelector('#library'),request,state:{organizer:true,settings}});
+if(innerWidth>=800) document.querySelector('.assets-root').classList.add('show-sidebar');
+window.__hoverPocketReady=true;
+</script></body></html>

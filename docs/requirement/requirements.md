@@ -2,7 +2,7 @@
 project_slug: hover-pocket
 target: Windows version requirements
 created: 2026-07-05
-updated: 2026-10-02
+updated: 2026-10-03
 updated_by: codex
 status: draft-integrated
 source_app_release: v0.1.0-98
@@ -10,7 +10,13 @@ source_app_release: v0.1.0-98
 
 # HoverPocket Windows 版 要件定義
 
+2026-10-03操作改善: 撮影後の編集画面の自動表示オプション、共通の画像編集UI、プレビューから原本を残した編集保存、ドラッグ中の下部ゴミ箱、Space拡大の安定化を追加。[素材ライブラリ要件§13](asset-library-v1.md#13-編集画面とドラッグ操作の改善2026-10-03追加)を正本とする。
+
+2026-10-03撮影機能: ユーザー指定でショートカットによるスクリーンショット・画面収録、PC音声とマイクの収録、撮影直後のペン/テキスト/図形による注釈、選択フォルダへの保存を追加。[素材ライブラリ要件§12](asset-library-v1.md#12-撮影画面収録と注釈2026-10-03追加)と[実装・検証](../../progress/2026-10/2026-10-03_hover-pocket-capture.md)を参照。
+
 2026-10-02追補: 開閉・途中反転・上端との接続・手動/自動設定は[Windows液体アニメーションの要件と契約](windows-liquid-motion-20261002.md)に従う。
+
+2026-10-03素材ライブラリ: Eagleを介さず、アカウント不要で任意形式の原本の保存・検索・分類・取り出しを行う。ユーザー指定により初期版に画像・動画・PDFのプレビュー、上端パネル自身の自動拡大、パネル内の再生/ページ移動、全画面切替を含める。実装範囲・保存と復元・UI・性能の正本は[素材ライブラリ初期版の要件](asset-library-v1.md)、理由と構成は[設計資料](../plan/20261002_ASSET_LIBRARY_DESIGN.md)を参照。Claude Opus 5.5/highのレビューと指摘対応は[レビュー記録](../report/20261002-asset-library-requirements-review.md)へ記録。Windows開発版0.2.9-local.7へ実装し、[検証結果と未完了の受入](../../progress/2026-10/2026-10-03_hover-pocket-asset-library.md)を記録した。macOS実装、基準機の性能受入、公開配布は未完了。既存のAI用「管理された機能ライブラリ」とは別の機能とする。
 
 ## 0. 結論
 
@@ -267,7 +273,7 @@ Must:
 - Expandedではパネル上端、幅、Header矩形、Provider矩形がCompact時と一致し、下端だけが下へ伸びる。
 - Expandedは左transcript / 右root-scoped session cardsの2列を維持し、Smallでもcard列を自動で隠さない。必要時は情報量を減らし、列内scrollする。
 - レーン背景のクリックでは表示モードが変わらず、明示controlだけが`aria-expanded`相当の状態を変更する。
-- fullscreenのstate、route、buttonが存在しない。
+- 音声欄自身の表示モードにはfullscreenのstate、route、buttonが存在しない。素材プレビューの全画面は別の機能として許可し、全画面中は音声欄を非表示にしてセッションを保持する。
 
 ## 4. Provider 機能要件
 

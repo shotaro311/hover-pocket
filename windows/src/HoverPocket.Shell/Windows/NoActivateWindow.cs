@@ -52,7 +52,7 @@ internal abstract class NoActivateWindow : Window
 
         if (Hwnd != IntPtr.Zero)
         {
-            NativeMethods.ShowNoActivate(Hwnd);
+            NativeMethods.ShowNoActivate(Hwnd, Topmost);
         }
     }
 
@@ -72,7 +72,7 @@ internal abstract class NoActivateWindow : Window
         NativeMethods.SetNoActivateStyle(Hwnd, !enabled);
         if (!enabled)
         {
-            NativeMethods.SetTopmostNoActivate(Hwnd);
+            NativeMethods.SetTopmostNoActivate(Hwnd, Topmost);
             return true;
         }
 
@@ -109,7 +109,7 @@ internal abstract class NoActivateWindow : Window
                 placement.PhysicalRect.Top,
                 placement.PhysicalRect.Width,
                 placement.PhysicalRect.Height,
-                show);
+                show, Topmost);
         }
     }
 

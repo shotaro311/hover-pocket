@@ -1,0 +1,1 @@
+HoverPocket 共通の復元fixture

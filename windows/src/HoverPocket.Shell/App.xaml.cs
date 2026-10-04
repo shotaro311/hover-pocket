@@ -22,6 +22,7 @@ public partial class App : System.Windows.Application
     private SingleInstanceGate? _singleInstanceGate;
     private HoverShellController? _shellController;
     private TrayIconService? _trayIconService;
+    private Capture.CaptureController? _captureController;
     private UpdaterService? _updaterService;
     private StartupOptions? _startupOptions;
     private HoverPocketApplicationData? _applicationData;
@@ -240,6 +241,7 @@ public partial class App : System.Windows.Application
         singleInstanceGate.StopRequested += (_, _) =>
             Dispatcher.BeginInvoke(new Action(Shutdown));
         shellController.Start();
+        AppDiagnostics.Record("shell.ready");
 
         if (options.VerifyShell || options.VerifyDisplay || options.VerifyUi)
         {
@@ -254,7 +256,11 @@ public partial class App : System.Windows.Application
 
         if (effectiveApplicationData.ExternalIntegrationsEnabled)
         {
-            _trayIconService = new TrayIconService(shellController, updaterService);
+            _captureController = new Capture.CaptureController(shellController.PanelBridgeController.AssetLibrary, effectiveApplicationData.RootDirectory,
+                shellController.HideForCaptureAsync, shellController.RestoreAfterCapture, shellController.OpenAssetLibraryFromUser);
+            shellController.PanelBridgeController.AssetCaptureRequested = folder => _captureController.Open(folder, useCurrentFolder: true);
+            updaterService.BeforeRestart = _captureController.StopRecordingAsync;
+            _trayIconService = new TrayIconService(shellController, updaterService, _captureController);
             if (shellController.PanelBridgeController.CurrentSettings.AutoCheckForUpdates)
             {
                 _ = updaterService.CheckOnStartupAsync();
@@ -264,7 +270,9 @@ public partial class App : System.Windows.Application
 
     protected override void OnExit(ExitEventArgs e)
     {
+        AppDiagnostics.Record("application.exit");
         _trayIconService?.Dispose();
+        _captureController?.Dispose();
         _shellController?.Dispose();
         CleanupVoiceE2ECredentials();
         _singleInstanceGate?.Dispose();

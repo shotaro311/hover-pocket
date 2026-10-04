@@ -4,6 +4,7 @@ using System.Text.Json;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
+using System.Windows.Media.Imaging;
 using HoverPocket.Shell.Bridge;
 using HoverPocket.Shell.Configuration;
 using HoverPocket.Shell.Display;
@@ -12,6 +13,9 @@ using HoverPocket.Shell.PocketApps;
 using HoverPocket.Shell.Voice;
 using Microsoft.Web.WebView2.Core;
 using Microsoft.Web.WebView2.Wpf;
+using HoverPocket.Shell.Providers.Assets;
+using DataFormats = System.Windows.DataFormats;
+using DragDropEffects = System.Windows.DragDropEffects;
 
 namespace HoverPocket.Shell.Windows;
 
@@ -33,11 +37,26 @@ internal sealed class PanelWindow : NoActivateWindow
     private readonly Grid _root = new();
     private readonly Grid _contentHost = new()
     {
-        HorizontalAlignment = System.Windows.HorizontalAlignment.Center,
+        HorizontalAlignment = System.Windows.HorizontalAlignment.Left,
         VerticalAlignment = System.Windows.VerticalAlignment.Top
     };
     private readonly Border _fallbackVisual;
     private readonly TranslateTransform _contentTransform = new();
+    private readonly System.Windows.Controls.Image _resizeImage = new()
+    {
+        Stretch = Stretch.Fill, HorizontalAlignment = System.Windows.HorizontalAlignment.Left,
+        VerticalAlignment = System.Windows.VerticalAlignment.Top, IsHitTestVisible = false, Visibility = Visibility.Collapsed
+    };
+    private readonly Grid _resizeCover = new() { Background = new SolidColorBrush(System.Windows.Media.Color.FromRgb(4, 4, 6)), IsHitTestVisible = false, Visibility = Visibility.Collapsed };
+    private ResizeOverlayWindow? _resizeOverlay;
+    private WindowPlacement? _resizeImagePlacement;
+    private double _resizeImageTop;
+    private bool _resizePrepared;
+    private long _resizeRevision;
+    private WindowPlacement? _pendingResizeTarget;
+    private Task? _resizeTask;
+    private WindowPlacement? _resizeViewport;
+    private readonly TranslateTransform _viewportOffset = new();
     private readonly List<string> _processFailures = [];
     private bool _isAnimating;
     private WebView2CompositionControl? _webView;
@@ -46,6 +65,33 @@ internal sealed class PanelWindow : NoActivateWindow
     private long _microphoneGestureExpiresAt;
     private BridgeDispatcher? _bridgeDispatcher;
     private bool _closed;
+    private AssetPaneController? _assetPane;
+    public AssetPreviewLayout AssetLayout { get; private set; } = new(false);
+    public event Action<AssetPreviewLayout>? AssetLayoutChanged;
+    public event Action? AssetOrganizerRequested;
+    public event Action<bool>? AssetDragChanged;
+    public async Task ReceiveAssetDropAsync(System.Windows.IDataObject data)
+    {
+        await EnsureWebViewInitializedAsync();
+        if (_assetPane is not null) await _assetPane.ImportDropAsync(data);
+    }
+    public void EndAssetPreview() { if (AssetLayout.Active) _assetPane?.EndPreview(); }
+    internal string DragTraceForVerify => _assetPane?.DragTraceForVerify ?? "no-pane";
+    internal string DragStateForVerify => _assetPane?.DragStateForVerify ?? "no-pane";
+    internal bool InternalAssetDragForVerify => _assetPane?.InternalDragForVerify == true;
+    public bool AssetBackgrounded { get; private set; }
+    public void SetAssetBackgrounded(bool backgrounded)
+    {
+        AssetBackgrounded = backgrounded && AssetLayout.Active;
+        Topmost = !AssetBackgrounded;
+        if (Hwnd != IntPtr.Zero) NativeMethods.SetTopmostNoActivate(Hwnd, Topmost);
+    }
+
+    protected override void OnDeactivated(EventArgs e)
+    {
+        base.OnDeactivated(e);
+        if (!_closed && AssetLayout.Active && !NativeMethods.ForegroundBelongsToCurrentProcess()) SetAssetBackgrounded(true);
+    }
 
     public AnimationDiagnostics LastAnimationDiagnostics { get; private set; } = AnimationDiagnostics.Empty;
 
@@ -72,9 +118,8 @@ internal sealed class PanelWindow : NoActivateWindow
         _contentHost.Height = Height;
         MinWidth = 1;
         MinHeight = 1;
-        MaxWidth = PanelSizeCatalog.Get(PanelSize.ExtraLarge).Width;
-        MaxHeight = PanelSizeCatalog.Get(PanelSize.ExtraLarge).TotalHeight
-            + VoicePanelGeometry.ExpandedHeight(PanelSize.ExtraLarge) + AccessSurfaceWindow.SurfaceHeight;
+        MaxWidth = double.PositiveInfinity;
+        MaxHeight = double.PositiveInfinity;
         Background = new SolidColorBrush(System.Windows.Media.Color.FromRgb(4, 4, 6));
 
         _fallbackVisual = new Border
@@ -96,8 +141,35 @@ internal sealed class PanelWindow : NoActivateWindow
         };
         _root.Children.Add(_fallbackVisual);
         _root.Children.Add(_contentHost);
+        _resizeCover.Children.Add(_resizeImage);
+        RenderOptions.SetBitmapScalingMode(_resizeImage, BitmapScalingMode.HighQuality);
         _contentHost.RenderTransform = _contentTransform;
+        _contentHost.RenderTransformOrigin = new System.Windows.Point(.5, 0);
+        _root.HorizontalAlignment = System.Windows.HorizontalAlignment.Left;
+        _root.VerticalAlignment = System.Windows.VerticalAlignment.Top;
+        _root.UseLayoutRounding = true;
         Content = _root;
+        AllowDrop = true;
+        System.Windows.DragEventHandler assetDragOver = (_, args) =>
+        {
+            if (_assetPane?.HandleInternalDrag(args) == true) return;
+            if (!_bridgeController.AssetsVisible) { args.Effects = DragDropEffects.None; args.Handled = true; return; }
+            AssetDragChanged?.Invoke(true);
+            _ = _bridgeController.BeginAssetDropAsync();
+            args.Effects = DragDropEffects.Copy; args.Handled = true;
+        };
+        PreviewDragEnter += assetDragOver; PreviewDragOver += assetDragOver;
+        PreviewDragLeave += (_, _) => { _assetPane?.ClearDragHover(); AssetDragChanged?.Invoke(false); };
+        PreviewDrop += async (_, args) =>
+        {
+            if (_assetPane?.HandleInternalDrag(args, drop: true) == true) return;
+            args.Handled = true;
+            if (_assetPane is null || !_bridgeController.AssetsVisible) return;
+            await _bridgeController.BeginAssetDropAsync();
+            await _bridgeController.FinishAssetDropAsync(true);
+            await _assetPane.ImportDropAsync(args.Data);
+            AssetDragChanged?.Invoke(false);
+        };
 
         SizeChanged += (_, _) =>
         {
@@ -110,7 +182,7 @@ internal sealed class PanelWindow : NoActivateWindow
 
     public IReadOnlyList<string> ProcessFailures => _processFailures;
 
-    public bool IsAnimating => _isAnimating;
+    public bool IsAnimating => _isAnimating || _resizePrepared || _resizeTask is { IsCompleted: false };
 
     public bool KeyboardInteractionEnabled => ActivationEnabled;
 
@@ -120,6 +192,7 @@ internal sealed class PanelWindow : NoActivateWindow
 
     public void ReleaseBridgeAttachment()
     {
+        _assetPane?.Dispose(); _assetPane = null;
         _bridgeAttachment?.Dispose();
         _bridgeAttachment = null;
     }
@@ -394,14 +467,160 @@ internal sealed class PanelWindow : NoActivateWindow
 
     public Task CloseAsync(DisplaySurfaceLayout layout)
     {
+        CancelResizeImage();
         EndKeyboardInteraction();
         return !IsVisible ? Task.CompletedTask : RetargetLiquid(0, "Close");
     }
 
     public Task ResizeAsync(WindowPlacement target)
     {
-        SetLiquidTarget(target, snap: !IsVisible);
-        return IsVisible ? RetargetLiquid(_reveal.Target, "Resize") : Task.CompletedTask;
+        if (_pendingResizeTarget == target) return _resizeTask ?? Task.CompletedTask;
+        if (_pendingResizeTarget is not null) CancelResizeImage();
+        if (_liquidTarget == target) { CancelResizeImage(); ApplyLiquidSurface(); return _transition?.Task ?? Task.CompletedTask; }
+        _pendingResizeTarget = target;
+        return _resizeTask = ResizeContentAsync(target, ++_resizeRevision);
+    }
+
+    private async Task ResizeContentAsync(WindowPlacement target, long revision)
+    {
+        try
+        {
+            if (!_resizePrepared && IsVisible && !MotionReduced && _reveal.Value > .5 && _webView?.CoreWebView2 is not null)
+            {
+                var snapshot = CaptureDisplayedContent();
+                if (_closed || revision != _resizeRevision) return;
+                _resizeImage.Source = snapshot;
+                _resizeImage.Visibility = Visibility.Visible;
+                _resizeCover.Visibility = Visibility.Visible;
+                _resizeImagePlacement = _liquidTarget;
+                _resizeImageTop = AssetLayout.Fullscreen ? 0 : _liquidLayout?.AccessSurface.DipRect.Height ?? 0;
+                await ShowResizeOverlayAsync(revision);
+            }
+            if (_closed || revision != _resizeRevision) return;
+            if (IsVisible && _liquidLayout is { } layout && !MotionReduced)
+            {
+                _resizeViewport = target;
+            }
+            SetLiquidTarget(target, snap: !IsVisible);
+            if (_resizeImage.Visibility == Visibility.Visible)
+            {
+                // Keep both the HWND and content pixels stationary. Only the silhouette
+                // expands; scaling text on every frame makes it shimmer and jump.
+                ApplyLiquidSurface();
+                _root.UpdateLayout();
+                await _webView!.CoreWebView2.CallDevToolsProtocolMethodAsync("Runtime.evaluate",
+                    "{\"expression\":\"new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(()=>resolve(true))))\",\"awaitPromise\":true}").WaitAsync(TimeSpan.FromSeconds(2));
+                if (_closed || revision != _resizeRevision) return;
+                var destination = await CaptureContentAsync();
+                if (_closed || revision != _resizeRevision) return;
+                _resizeImage.Source = destination;
+                _resizeImagePlacement = target;
+                _resizeImageTop = AssetLayout.Fullscreen ? 0 : _liquidLayout?.AccessSurface.DipRect.Height ?? 0;
+                ApplyLiquidSurface();
+            }
+            if (IsVisible) await RetargetLiquid(_reveal.Target, "Resize");
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or System.Runtime.InteropServices.COMException or IOException or TaskCanceledException or TimeoutException or NotSupportedException)
+        {
+            Services.AppDiagnostics.Record("panel.resize.snapshot.failed", ex);
+            if (!_closed && revision == _resizeRevision)
+            {
+                SetLiquidTarget(target, snap: true);
+                ApplyLiquidSurface();
+            }
+        }
+        finally
+        {
+            if (revision == _resizeRevision)
+            {
+                _pendingResizeTarget = null;
+                _resizeImage.Visibility = Visibility.Collapsed;
+                _resizeImage.Source = null;
+                _resizeCover.Visibility = Visibility.Collapsed;
+                _resizeImagePlacement = null;
+                _resizePrepared = false;
+                _resizeViewport = null;
+                if (!_closed) ApplyLiquidSurface();
+                Opacity = 1;
+                if (_resizeOverlay is { IsVisible: true }) _resizeOverlay.Hide();
+            }
+        }
+    }
+
+    private async Task<BitmapSource> CaptureContentAsync()
+    {
+        using var stream = new MemoryStream();
+        await _webView!.CoreWebView2.CapturePreviewAsync(CoreWebView2CapturePreviewImageFormat.Png, stream);
+        stream.Position = 0;
+        var bitmap = new BitmapImage(); bitmap.BeginInit(); bitmap.CacheOption = BitmapCacheOption.OnLoad;
+        bitmap.StreamSource = stream; bitmap.EndInit(); bitmap.Freeze(); return bitmap;
+    }
+
+    private BitmapSource CaptureDisplayedContent()
+    {
+        var dpi = VisualTreeHelper.GetDpi(_contentHost);
+        var width = Math.Max(1, _contentHost.ActualWidth); var height = Math.Max(1, _contentHost.ActualHeight);
+        var visual = new DrawingVisual();
+        using (var drawing = visual.RenderOpen()) drawing.DrawRectangle(new VisualBrush(_contentHost) { Stretch = Stretch.Fill }, null, new Rect(0, 0, width, height));
+        var bitmap = new RenderTargetBitmap((int)Math.Ceiling(width * dpi.DpiScaleX), (int)Math.Ceiling(height * dpi.DpiScaleY), dpi.PixelsPerInchX, dpi.PixelsPerInchY, PixelFormats.Pbgra32);
+        bitmap.Render(visual); bitmap.Freeze(); return bitmap;
+    }
+
+    private async Task ShowResizeOverlayAsync(long revision)
+    {
+        _resizeOverlay ??= new ResizeOverlayWindow { Owner = this, Content = _resizeCover };
+        _resizeOverlay.EnsureHandle();
+        ApplyLiquidSurface();
+        _resizeOverlay.ShowNoActivate();
+        // Present the old frame before moving the browser's HWND behind it.
+        var presented = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var frames = 0;
+        EventHandler rendered = (_, _) => { if (++frames == 2) presented.TrySetResult(); };
+        CompositionTarget.Rendering += rendered;
+        try { await presented.Task.WaitAsync(TimeSpan.FromMilliseconds(250)); }
+        finally { CompositionTarget.Rendering -= rendered; }
+        if (!_closed && revision == _resizeRevision) Opacity = 0;
+    }
+
+    private sealed class ResizeOverlayWindow : NoActivateWindow
+    {
+        public ResizeOverlayWindow() : base(allowsTransparency: false) { Title = "HoverPocket transition"; MinWidth = MinHeight = 1; }
+    }
+
+    internal async Task<long> PrepareContentTransitionAsync()
+    {
+        var revision = ++_resizeRevision;
+        _pendingResizeTarget = null; _resizeTask = null;
+        if (_resizeImage.Source is not null) { _resizePrepared = true; return revision; }
+        if (!IsVisible || MotionReduced || _reveal.Value <= .5 || _webView?.CoreWebView2 is null) return revision;
+        _resizePrepared = true;
+        try
+        {
+            var placement = _liquidTarget;
+            var top = AssetLayout.Fullscreen ? 0 : _liquidLayout?.AccessSurface.DipRect.Height ?? 0;
+            var snapshot = CaptureDisplayedContent();
+            if (_closed || revision != _resizeRevision) return revision;
+            _resizeImage.Source = snapshot; _resizeImagePlacement = placement; _resizeImageTop = top;
+            _resizeImage.Visibility = _resizeCover.Visibility = Visibility.Visible;
+            _resizePrepared = true;
+            await ShowResizeOverlayAsync(revision);
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or System.Runtime.InteropServices.COMException or IOException or NotSupportedException or TimeoutException)
+        { Services.AppDiagnostics.Record("panel.resize.prepare.failed", ex); CancelContentTransition(revision); }
+        return revision;
+    }
+
+    internal void CancelContentTransition(long revision)
+    { if (revision == _resizeRevision) { CancelResizeImage(); if (!_closed) ApplyLiquidSurface(); } }
+
+    private void CancelResizeImage()
+    {
+        ++_resizeRevision; _pendingResizeTarget = null; _resizeTask = null;
+        _resizeImage.Visibility = Visibility.Collapsed; _resizeImage.Source = null;
+        _resizeCover.Visibility = Visibility.Collapsed; _resizeImagePlacement = null; _resizePrepared = false;
+        _resizeViewport = null;
+        Opacity = 1;
+        if (_resizeOverlay is { IsVisible: true }) _resizeOverlay.Hide();
     }
 
     private void SetLiquidTarget(WindowPlacement target, bool snap)
@@ -509,32 +728,61 @@ internal sealed class PanelWindow : NoActivateWindow
         var placement = new WindowPlacement(dip, new PhysicalRect(
             (int)Math.Round(dip.Left * scaleX), target.PhysicalRect.Top,
             (int)Math.Round(w * scaleX), (int)Math.Round(h * scaleY)));
-        ApplyPlacement(placement, show: false);
-        var contentTop = layout.AccessSurface.DipRect.Height;
+        var viewport = _resizeViewport ?? placement;
+        ApplyPlacement(viewport, show: false);
+        _root.Width = viewport.DipRect.Width; _root.Height = viewport.DipRect.Height;
+        _viewportOffset.X = dip.Left - viewport.DipRect.Left;
+        _viewportOffset.Y = dip.Top - viewport.DipRect.Top;
+        var contentTop = AssetLayout.Fullscreen ? 0 : layout.AccessSurface.DipRect.Height;
         _liquidShape = LiquidPanelGeometry.Shape(_reveal.Value, w, h,
             layout.AccessSurface.DipRect.Width, contentTop, _attachment.Value);
-        _root.Clip = _liquidShape.Path;
+        var clip = AssetLayout.Fullscreen ? new RectangleGeometry(new Rect(0, 0, w, h)) : _liquidShape.Path;
         _fallbackVisual.Margin = new Thickness(0, contentTop, 0, 0);
         if (_webView is not null)
         {
-            _contentHost.Margin = new Thickness(0, contentTop, 0, 0);
+            _contentHost.Margin = new Thickness(target.DipRect.Left - viewport.DipRect.Left, target.DipRect.Top - viewport.DipRect.Top + contentTop, 0, 0);
             // CompositionControl's capture pool rejects zero-sized content during collapse.
             // Keep content at panel dimensions; only the shared silhouette shrinks.
-            _contentHost.Width = w;
-            _contentHost.Height = Math.Max(1, h - contentTop);
+            // Resize the live WebView once, without transforms that alter its capture bounds.
+            // A separate bitmap covers intermediate CompositionControl frames while resizing.
+            _contentHost.Width = target.DipRect.Width;
+            _contentHost.Height = Math.Max(1, target.DipRect.Height - contentTop);
+            if (_resizeImagePlacement is { } imagePlacement)
+            {
+                _resizeImage.Margin = new Thickness(imagePlacement.DipRect.Left - layout.Monitor.Bounds.Left / scaleX, imagePlacement.DipRect.Top - layout.Monitor.Bounds.Top / scaleY + _resizeImageTop, 0, 0);
+                _resizeImage.Width = imagePlacement.DipRect.Width;
+                _resizeImage.Height = Math.Max(1, imagePlacement.DipRect.Height - _resizeImageTop);
+            }
             _contentHost.Opacity = _liquidShape.ContentOpacity;
             _contentTransform.Y = _liquidShape.ContentOffset;
-            _webView.IsHitTestVisible = _reveal.Value >= .88 && _reveal.Target > 0;
+            _webView.IsHitTestVisible = _reveal.Value >= .88 && _reveal.Target > 0 && _resizeImage.Visibility != Visibility.Visible;
         }
-        NativeMethods.SetLiquidWindowRegion(Hwnd, _liquidShape.Path, scaleX, scaleY);
+        var nativeClip = clip;
+        if (_viewportOffset.X != 0 || _viewportOffset.Y != 0)
+        {
+            nativeClip = clip.Clone();
+            nativeClip.Transform = new TranslateTransform(_viewportOffset.X, _viewportOffset.Y);
+        }
+        _root.Clip = nativeClip;
+        NativeMethods.SetLiquidWindowRegion(Hwnd, nativeClip, scaleX, scaleY);
+        if (_resizeOverlay is not null && _resizeImage.Source is not null)
+        {
+            var monitor = layout.Monitor.Bounds;
+            var overlayBounds = new Rect(monitor.Left / scaleX, monitor.Top / scaleY, monitor.Width / scaleX, monitor.Height / scaleY);
+            _resizeOverlay.ApplyPlacement(new(overlayBounds, monitor), show: false);
+            var overlayClip = clip.Clone();
+            overlayClip.Transform = new TranslateTransform(dip.Left - overlayBounds.Left, dip.Top - overlayBounds.Top);
+            _resizeCover.Clip = overlayClip;
+            NativeMethods.SetLiquidWindowRegion(_resizeOverlay.Hwnd, overlayClip, scaleX, scaleY);
+        }
     }
 
     public bool ContainsPhysicalPoint(int x, int y, double toleranceDips = 0)
     {
         if (_liquidShape is null || _liquidLayout is null) return false;
         var rect = new Rect(Left, Top, Width, Height);
-        return _liquidShape.Contains(new System.Windows.Point(x / _liquidLayout.Monitor.ScaleX - rect.Left,
-            y / _liquidLayout.Monitor.ScaleY - rect.Top), toleranceDips);
+        return _liquidShape.Contains(new System.Windows.Point(x / _liquidLayout.Monitor.ScaleX - rect.Left - _viewportOffset.X,
+            y / _liquidLayout.Monitor.ScaleY - rect.Top - _viewportOffset.Y), toleranceDips);
     }
 
 
@@ -579,6 +827,7 @@ internal sealed class PanelWindow : NoActivateWindow
         webView.CoreWebView2.ProcessFailed += (_, args) =>
         {
             _processFailures.Add($"{args.ProcessFailedKind}:{args.Reason}");
+            Services.AppDiagnostics.Record($"webview.failed.{args.ProcessFailedKind}.{args.Reason}");
         };
         WebViewSecurityPolicy.ApplyBrowserDebugSettings(webView.CoreWebView2.Settings, _enableDevTools);
         webView.CoreWebView2.NavigationStarting += (_, args) =>
@@ -634,6 +883,9 @@ internal sealed class PanelWindow : NoActivateWindow
             dispatcher,
             approvalOwner: () => this,
             voiceMicrophoneGesture: RegisterVoiceMicrophoneGesture);
+        _assetPane = new AssetPaneController(_bridgeController.AssetLibrary, this, dispatcher, webView.CoreWebView2,
+            value => { if (AssetLayout == value) return; AssetLayout = value; if (!value.Active) SetAssetBackgrounded(false); AssetLayoutChanged?.Invoke(value); }, () => _bridgeController.SelectedProviderId,
+            _bridgeController.AssetPlayback, () => AssetOrganizerRequested?.Invoke(), folder => _bridgeController.AssetCaptureRequested?.Invoke(folder), webSurface: webView);
         dispatcher.Register("panel.beginTextInput", (_, _) =>
             Task.FromResult<object?>(BeginKeyboardInteraction()));
         dispatcher.Register("panel.endTextInput", (_, _) =>
@@ -704,8 +956,22 @@ internal sealed class PanelWindow : NoActivateWindow
         };
     }
 
+    protected override void OnClosing(System.ComponentModel.CancelEventArgs e)
+    {
+        base.OnClosing(e);
+        if (e.Cancel) return;
+        _closed = true;
+        StopLiquid();
+        ReleaseBridgeAttachment();
+        _bridgeDispatcher = null;
+        // Stop the composition capture before WPF destroys its parent HWND.
+        _webView?.Dispose();
+        _webView = null;
+    }
+
     protected override void OnClosed(EventArgs e)
     {
+        CancelResizeImage();
         _closed = true;
         StopLiquid();
         _transition?.TrySetResult();

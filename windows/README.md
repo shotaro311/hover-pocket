@@ -2,7 +2,31 @@
 
 WPF の常駐シェルと WebView2 のパネルで構成する Windows 版です。画面上端の access surface、非アクティブ表示のパネル、タスクトレイ、設定画面を提供します。
 
-Windows 版の provider は Controls、Calendar、Clipboard、Sticky Notes、Timer、Calculator です。Mirror と Microphone は Windows 版の対象外で、macOS 版の実装には影響しません。
+Windows 版の provider は Controls、Calendar、Clipboard、Sticky Notes、Assets（素材）、Timer、Calculator です。Mirror と Microphone は Windows 版の対象外で、macOS 版の実装には影響しません。
+
+素材はEagle・アカウント・APIキーを必要としないローカルライブラリです。ファイル／フォルダの選択、上端へのドロップ、コピーした画像・ファイルの貼り付けで独立した原本を保存します。フォルダ・タグ・お気に入り、検索条件の保存、アプリ内のゴミ箱と復元、完全バックアップを扱います。素材の通常ウィンドウはトレイの「素材ライブラリを開く」から開き、ポケット内の素材機能を非表示にしていても使えます。
+
+開発版`0.2.9-local.13`は撮影・収録と画像の注釈編集に対応します。`Ctrl+Alt+S`で範囲を選び、撮影直後にペン、テキスト、四角、楕円、矢印で注釈を付けてPNGを保存できます。色、太さ、消しゴム、選択・移動、削除、Undo/Redoに対応し、「元画像も保存」を選べます。範囲選択のEnterは画面全体、Escはキャンセルです。
+
+トレイの「撮影・収録の設定…」で「撮影後に編集画面を開く」をオフにして「設定を保存」を押すと、撮影画像をそのまま保存できます。素材をダブルクリックして「画像を編集」を押すと、同じ編集画面から原本を残して編集済みPNGを追加できます。フォルダとタグは引き継ぎます。保存後の注釈は画素に統合されます。
+
+素材をドラッグすると下部にゴミ箱が現れ、そこへドロップした項目をアプリ内のゴミ箱へ移します。Ctrl+Zまたはゴミ箱から復元できます。画像・動画などの外部アプリへのドラッグは従来どおり作業コピーを渡します。Space長押しによるプレビューの連続開閉を抑止し、拡大中の描画面の再作成を減らしています。
+
+`local.13`では、プレビューの切り替え前から表示を保ち、文字や画像を固定した大きさで見せながら外枠を動かすようにしました。拡大途中の横ずれと細かい文字のちらつきを抑えています。[修正と検証記録](../docs/report/20261003-windows-preview-smooth-recording-shortcut.md)。収録の上下反転は`local.12`で修正済みです。既存の収録ファイルは保持し、新しい収録から正しい向きで保存します。
+
+`local.9`では範囲選択後のクラッシュを修正しました。`local.10`では原本欠損時の保存判定、絞り込み後の複数選択、撮影フォルダの引き継ぎ、壊れた保存待ちによる後続停止を修正し、機能切り替えの不要な描画とフェード時間を減らしました。[修正・計測・検証記録](../docs/report/20261003-windows-review-fixes-response.md)。
+
+`Ctrl+Alt+R`は画面収録の開始・停止です。ショートカットでは設定画面を開かず、Windowsの画面/ウィンドウ選択だけを表示します。音声と保存先は、トレイの「撮影・収録の設定…」で変更して「設定を保存」を押してください。PCの再生音とマイクを個別にオン/オフできます。停止するとMP4を確定し、保存した設定のフォルダへ登録します。収録中に設定画面を閉じても収録は続き、トレイのメニューとツールチップに収録中と表示します。縦横比を保持して最大1920×1080・30fps、音声はAACです。既定のモノラル/ステレオの音声デバイスを使い、マイクの利用にはWindowsの許可が必要です。対象のサイズ変更や終了、空き容量512MiB未満では収録を終了して保存します。
+
+素材画面の「撮影・収録」またはトレイの「撮影・収録の設定…」から、保存先とショートカットを変更できます。他アプリとのキー競合を表示し、撮影/収録のボタンでも操作できます。設定は既存の設定と同じ領域の`capture-settings.json`へ保存し、既存の`settings.json`を変更しません。確定済みの保存失敗は「保存待ちを再試行」から再登録できます。強制終了で未確定のMP4は自動登録せず、「保存待ちフォルダを開く」で残ったファイルを確認できます。
+
+収録はWindows標準の画面取得・動画エンコーダーと、同梱した[NAudio 3.1.0](https://www.nuget.org/packages/NAudio.Wasapi/3.1.0)を使います。MITのライセンス通知を`ThirdParty/NAudio-LICENSE.txt`へ同梱し、追加のFFmpegやアカウントは不要です。[撮影・収録の実装と検証記録](../progress/2026-10/2026-10-03_hover-pocket-capture.md)。
+
+画像の拡大、MP4/H.264動画の再生・シーク、PDFのページ移動をポケット内で操作できます。プレビューは上端パネル自体を素材の寸法に合わせて拡大し、F11または全画面ボタンで現在のモニターへ広げます。Escは全画面からの復帰、次にプレビュー終了です。画像はEXIF方向とPNG透明度を反映し、PDFは選択したページだけを生成します。対応外の形式も原本保存・取り出しが可能です。48MPのJPEGは縮小デコードし、32MPを超える他の画像形式はメモリ予算を守るためプレビューを制限します。動画の形式対応はWindowsとWebView2のメディア機能に依存します。アプリへのFFmpeg導入は不要です。
+
+PDF描画は同梱実行ファイルの読み取り専用子プロセスで行い、30秒の未使用後に終了、次のページ要求で再開します。これはWindows標準PDF/DXGIの終了時例外を本体から分離するためで、追加ソフトの導入は不要です。結果を返した後の子プロセス終了はOSによる資源解放を使い、本体の通常の終了手順は維持します。
+
+保存先は`%LOCALAPPDATA%\HoverPocket\AssetLibrary`です。DBとUUID名の原本を正本とし、サムネイルは再生成できます。ドラッグ・クリップボード・OSで開く操作では、管理原本から独立した作業コピーを渡します。「外部コピーを整理…」で使用済みコピーをWindowsのゴミ箱へ移せます。復元前に版・ハッシュ・分類参照を検証し、既存ライブラリを置き換える場合は現在のDBと原本を日時付きフォルダへ退避します。DBのみのスナップショットは完全バックアップとは別です。[共通契約](../shared/asset-library/README.md)と[実装・検証記録](../progress/2026-10/2026-10-03_hover-pocket-asset-library.md)を参照してください。
 
 Calendarには今日と7日先までの天気を表示します。設定で世界の都市を検索するか、47都道府県から選択し、温度を自動・摂氏・華氏へ切り替えられます。Windowsの位置情報許可は「現在地を使用」を押したときだけ要求します。予報は地点・座標・温度単位ごとに保存し、通信できない場合は保存済み予報であることを明示します。位置情報を使用できない場合も都市・都道府県を選択できます。天気情報は[Open-Meteo](https://open-meteo.com/)から取得します。
 
@@ -197,6 +221,9 @@ python3 script/verify_release_readback.py --windows-tag auto --windows-signing-g
 残る物理gateは別です。通常ユーザーのWindows実機で、署名済みShell + signed per-machine MSIを使ったSettingsの明示操作からだけUAC secure desktopへ1回到達すること、固定Program Files helper/object identity/publisher readback、UAC取消・tamper時の副作用0、setup完了後のno-UAC positive confinement canary、Host-owned credential delivery、実モデル生成readbackを確認する必要があります。これらのphysical UAC / signed-host canaryが完了するまではproduction setup/generation/activation flagsをfalseのまま維持し、完了したとは扱いません。
 
 ## Local privacy notes
+
+通常起動の診断記録は `%APPDATA%\HoverPocket\diagnostics\session-*.jsonl` に保存します。起動・準備完了・トレイからの終了・Windowsセッション終了・未処理例外・WebViewプロセス障害を記録し、時刻・PID・バージョン・例外型・エラー番号・コードのメソッド名に限定します。例外本文、画像やファイル名、入力内容、認証情報は保存しません。強制終了など、OSが終了イベントを渡さない場合の理由は記録だけでは断定できません。
+
 
 AI command lane の audit log は `%APPDATA%\HoverPocket\auditlog\ailane-YYYYMMDD.jsonl` に保存します。
 保存する内容は `timestamp`、`action`、`actionType`、`result`、`eventId`、`calendarId` の最小メタデータだけです。

@@ -54,6 +54,7 @@ internal sealed class ProviderRegistry
                 "note",
                 "Board grid provider",
                 "Create, edit, color, reorder, archive, delete, undo, and drag notes."),
+            new ProviderDescriptor("assets", "Assets", "assets", "Local asset library", "Save, classify, search, and preview images, videos, PDFs, and other files offline."),
             new ProviderDescriptor(
                 "timer",
                 "Timer",

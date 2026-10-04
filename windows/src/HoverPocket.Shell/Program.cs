@@ -11,6 +11,11 @@ internal static class Program
     [STAThread]
     public static void Main(string[] args)
     {
+        if (args.Length == 1 && args[0] == Providers.Assets.PdfRenderWorker.Argument)
+        {
+            Providers.Assets.PdfRenderWorker.Run();
+            return;
+        }
         if (args.Contains(CodexCredentialBrokerHelper.Argument, StringComparer.Ordinal))
         {
             Environment.ExitCode = CodexCredentialBrokerHelper.Run();
@@ -35,7 +40,10 @@ internal static class Program
             ArpDisplayVersionRepairService.TryRepairFromCurrentLocator();
         }
 
+        if (!options.IsVerify && !options.SecondInstanceProbe && !applicationData.IsIsolatedVoiceE2E) AppDiagnostics.Start(applicationData.RootDirectory);
         var app = new App();
+        app.DispatcherUnhandledException += (_, eventArgs) => AppDiagnostics.Record("dispatcher.unhandled", eventArgs.Exception);
+        app.SessionEnding += (_, _) => AppDiagnostics.Record("windows.sessionEnding");
         app.ConfigureStartup(options, applicationData);
         app.Run();
     }

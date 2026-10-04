@@ -1,0 +1,53 @@
+{
+  "version": 1,
+  "createdAt": "2026-10-02T00:00:00Z",
+  "assets": [
+    {
+      "id": "11111111-1111-4111-8111-111111111111",
+      "name": "ＡＢＣ_猫.txt",
+      "extension": "txt",
+      "kind": "other",
+      "sha256": "81ddd820080e6ef073617135f66c6ab91264bc6dbcf68d7a1466d021f8a5db5a",
+      "sizeBytes": 35,
+      "createdAt": "2026-10-02T00:00:00Z",
+      "favorite": true,
+      "trashed": true,
+      "internetOrigin": true,
+      "folderIds": [
+        "22222222-2222-4222-8222-222222222222"
+      ],
+      "tagIds": [
+        "33333333-3333-4333-8333-333333333333"
+      ]
+    }
+  ],
+  "folders": [
+    {
+      "id": "22222222-2222-4222-8222-222222222222",
+      "name": "資料",
+      "parentId": null
+    }
+  ],
+  "tags": [
+    {
+      "id": "33333333-3333-4333-8333-333333333333",
+      "name": "Ｈａｌｆ幅",
+      "parentId": null
+    }
+  ],
+  "searches": [
+    {
+      "id": "44444444-4444-4444-8444-444444444444",
+      "name": "猫の素材",
+      "filter": {
+        "text": "猫",
+        "view": "recent",
+        "kind": null,
+        "folderId": null,
+        "tagId": null,
+        "offset": 0,
+        "limit": 80
+      }
+    }
+  ]
+}

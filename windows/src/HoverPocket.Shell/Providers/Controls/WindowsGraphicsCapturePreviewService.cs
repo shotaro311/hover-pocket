@@ -459,7 +459,7 @@ internal sealed class WindowsGraphicsCapturePreviewService : IMediaPreviewServic
 
     private sealed record EncodedFrame(string DataUrl, bool LikelyBlack);
 
-    private static IDirect3DDevice CreateDirect3DDevice()
+    internal static IDirect3DDevice CreateDirect3DDevice()
     {
         const uint createDeviceBgraSupport = 0x20;
         var result = D3D11CreateDevice(
@@ -509,7 +509,9 @@ internal sealed class WindowsGraphicsCapturePreviewService : IMediaPreviewServic
         }
     }
 
-    private static GraphicsCaptureItem CreateCaptureItemForWindow(nint windowHandle)
+    internal static GraphicsCaptureItem CreateCaptureItemForWindow(nint windowHandle) => CreateCaptureItem(windowHandle, false);
+    internal static GraphicsCaptureItem CreateCaptureItemForMonitor(nint monitorHandle) => CreateCaptureItem(monitorHandle, true);
+    private static GraphicsCaptureItem CreateCaptureItem(nint handle, bool monitor)
     {
         using var factory = WinRT.ActivationFactory.Get("Windows.Graphics.Capture.GraphicsCaptureItem");
         var interopId = typeof(IGraphicsCaptureItemInterop).GUID;
@@ -518,7 +520,8 @@ internal sealed class WindowsGraphicsCapturePreviewService : IMediaPreviewServic
         {
             var interop = (IGraphicsCaptureItemInterop)Marshal.GetObjectForIUnknown(interopPointer);
             var itemId = new Guid("79C3F95B-31F7-4EC2-A464-632EF5D30760");
-            ThrowIfFailed(interop.CreateForWindow(windowHandle, ref itemId, out var itemPointer));
+            nint itemPointer;
+            ThrowIfFailed(monitor ? interop.CreateForMonitor(handle, ref itemId, out itemPointer) : interop.CreateForWindow(handle, ref itemId, out itemPointer));
             try
             {
                 return WinRT.ComWrappersSupport.CreateRcwForComObject<GraphicsCaptureItem>(itemPointer);

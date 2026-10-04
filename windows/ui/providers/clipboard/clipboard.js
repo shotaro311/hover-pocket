@@ -441,6 +441,14 @@ function renderPreview(previewRef) {
   );
 
   if (previewRef.kind === "image") {
+    preview.querySelector(".clipboard-preview-header").append(renderIconButton("▣", tx("素材に保存", "Save to Assets"), async () => {
+      const target = preview.querySelector('[data-clipboard-action="save-to-assets"]');
+      try {
+        const saved = await bridgeRequest("assets.importClipboardHistory", {id:item.id});
+        target?.setAttribute("title", saved?.status === "saved" || saved?.status === "duplicate" ? tx("素材ライブラリへ保存しました", "Saved to Assets") : saved?.status === "restoreAvailable" ? tx("同じ素材がゴミ箱にあります。素材画面から復元できます。", "This asset is in Trash. Restore it from Assets.") : tx("保存できませんでした。空き容量とアクセス権を確認してください。", "Save failed. Check free space and permissions."));
+        if (target) target.textContent = saved?.status === "saved" || saved?.status === "duplicate" ? "✓" : "!";
+      } catch (error) { target?.setAttribute("title", error.message); if (target) target.textContent = "!"; }
+    }, "", "save-to-assets"));
     const imageWrap = element("div", { className: "clipboard-preview-image" });
     if (item.dataUrl) {
       imageWrap.append(element("img", { src: item.dataUrl, alt: tx("クリップボード画像", "Clipboard image") }));

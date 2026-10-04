@@ -34,6 +34,14 @@ internal sealed class ClipboardBridgeController : IDisposable
     }
 
     public event EventHandler? ExternalDragStarted;
+    public async Task<object?> SaveImageToLibraryAsync(HoverPocket.Assets.AssetStore library, string id, CancellationToken token)
+    {
+        if (!Guid.TryParse(id, out var parsed)) throw new ArgumentException("画像が見つかりません。");
+        var item = _store.ImageItems.FirstOrDefault(image => image.Id == parsed) ?? throw new ArgumentException("画像が見つかりません。");
+        var result = await library.ImportAsync(_store.ImagePath(item), internet: true, token: token);
+        if (result.Status == "saved" && result.AssetId is not null) await library.UpdateAsync([result.AssetId], "rename", $"クリップボード画像 {item.CreatedAt.LocalDateTime:yyyy-MM-dd HH-mm-ss}.png");
+        return result;
+    }
 
     public void Attach(BridgeDispatcher dispatcher)
     {

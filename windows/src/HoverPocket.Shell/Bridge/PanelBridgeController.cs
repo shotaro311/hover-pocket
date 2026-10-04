@@ -27,6 +27,9 @@ internal enum BridgeSurface
 
 internal sealed class PanelBridgeController : IDisposable
 {
+    public HoverPocket.Assets.AssetStore AssetLibrary { get; }
+    public Action<string?>? AssetCaptureRequested { get; set; }
+    public HoverPocket.Shell.Providers.Assets.AssetPlaybackOwner AssetPlayback { get; } = new();
     private readonly ProviderRegistry _providerRegistry;
     private readonly UserSettingsStore _settingsStore;
     private readonly IStartupRegistrationService _startupRegistration;
@@ -69,6 +72,23 @@ internal sealed class PanelBridgeController : IDisposable
     private VoiceLaneMode _resolvedVoiceLaneMode;
     private volatile bool _voiceRuntimeActive;
     private bool _disposed;
+    private string? _assetDropPreviousProvider;
+    private bool _assetDropCompleted;
+    public bool AssetsVisible => IsVisible("assets");
+    public async Task BeginAssetDropAsync()
+    {
+        if (!AssetsVisible || _assetDropPreviousProvider is not null) return;
+        _assetDropPreviousProvider = _selectedProviderId; _assetDropCompleted = false; _selectedProviderId = "assets";
+        await PublishStateAsync(CancellationToken.None);
+    }
+    public async Task CancelAssetDropAsync() { if (!_assetDropCompleted) await FinishAssetDropAsync(false); }
+    public async Task FinishAssetDropAsync(bool completed)
+    {
+        if (_assetDropPreviousProvider is null) return;
+        if (completed) { _assetDropCompleted = true; return; }
+        _selectedProviderId = IsVisible(_assetDropPreviousProvider) ? _assetDropPreviousProvider : ResolvePreferredProviderId();
+        _assetDropPreviousProvider = null; _assetDropCompleted = false; await PublishStateAsync(CancellationToken.None);
+    }
 
     public PanelBridgeController(
         ProviderRegistry providerRegistry,
@@ -86,6 +106,10 @@ internal sealed class PanelBridgeController : IDisposable
     {
         _providerRegistry = providerRegistry;
         _settingsStore = settingsStore;
+        var productionSettingsRoot = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "HoverPocket");
+        AssetLibrary = new HoverPocket.Assets.AssetStore(string.Equals(Path.GetFullPath(settingsStore.RootDirectory), Path.GetFullPath(productionSettingsRoot), StringComparison.OrdinalIgnoreCase)
+            ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "HoverPocket", "AssetLibrary")
+            : Path.Combine(settingsStore.RootDirectory, "AssetLibrary"), HoverPocket.Shell.Providers.Assets.AssetRecycle.MoveAsync);
         _weatherStore = new WeatherStore(Path.Combine(settingsStore.RootDirectory, "weather"));
         _startupRegistration = startupRegistration ?? new RunKeyStartupRegistrationService();
         _updaterService = updaterService ?? new UpdaterService();
@@ -491,6 +515,7 @@ internal sealed class PanelBridgeController : IDisposable
             _controlsBridgeController.Attach(dispatcher);
             _calendarBridgeController.Attach(dispatcher);
             _clipboardBridgeController.Attach(dispatcher);
+            if (surface == BridgeSurface.Panel) Register("assets.importClipboardHistory", (p, token) => _clipboardBridgeController.SaveImageToLibraryAsync(AssetLibrary, ReadRequiredString(p, "id"), token));
         }
         _stickyBridgeController.Attach(dispatcher);
         _timerBridgeHandlers.Register(dispatcher);
@@ -2181,7 +2206,7 @@ internal sealed class PanelBridgeController : IDisposable
     {
         _panelOpen = true;
         _voiceCoordinator.SetUiAttached(true);
-        if (!CurrentSettings.RememberLastSelectedProvider)
+        if (!CurrentSettings.RememberLastSelectedProvider && _assetDropPreviousProvider is null)
         {
             _selectedProviderId = ResolvePreferredProviderId();
         }
@@ -2192,6 +2217,7 @@ internal sealed class PanelBridgeController : IDisposable
 
     public async Task NotifyPanelClosedAsync()
     {
+        if (_assetDropPreviousProvider is not null) await FinishAssetDropAsync(false);
         _panelOpen = false;
         _voiceCoordinator.SetMuted(true);
         _voiceCoordinator.SetUiAttached(false);
@@ -2950,6 +2976,9 @@ internal sealed class PanelBridgeController : IDisposable
             ("today-focus", ProviderTextKind.Summary) => "今日の予定に集中",
             ("today-focus", ProviderTextKind.Body) => "予定を選び、タイマーと今日の目的をまとめて開始します。",
             ("clipboard", ProviderTextKind.Title) => "クリップボード",
+            ("assets", ProviderTextKind.Title) => "素材",
+            ("assets", ProviderTextKind.Summary) => "ローカル素材ライブラリ",
+            ("assets", ProviderTextKind.Body) => "画像・動画・PDF・ファイルを保存、分類、検索し、パネル内でプレビューします。",
             ("clipboard", ProviderTextKind.Summary) => "クリップボード履歴",
             ("clipboard", ProviderTextKind.Body) => "テキストと画像の履歴を確認し、お気に入り、全体プレビュー、コピー、個別削除を行えます。",
             ("sticky", ProviderTextKind.Title) => "付箋",

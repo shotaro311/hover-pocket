@@ -38,6 +38,9 @@ internal sealed class AccessSurfaceWindow : NoActivateWindow
     };
 
     public event EventHandler? HoverEntered;
+    public event Action<bool>? AssetDragChanged;
+    public event Action<System.Windows.IDataObject>? AssetDropped;
+    public Func<bool>? CanImportAssets { get; set; }
 
     public AccessSurfaceWindow()
     {
@@ -61,6 +64,10 @@ internal sealed class AccessSurfaceWindow : NoActivateWindow
         var root = new Grid { ClipToBounds = true };
         root.Children.Add(_surface);
         Content = root;
+        AllowDrop = true;
+        DragOver += (_, args) => { args.Effects = CanImportAssets?.Invoke() == true ? System.Windows.DragDropEffects.Copy : System.Windows.DragDropEffects.None; args.Handled = true; if (args.Effects != System.Windows.DragDropEffects.None) AssetDragChanged?.Invoke(true); };
+        DragLeave += (_, _) => AssetDragChanged?.Invoke(false);
+        Drop += (_, args) => { args.Handled = true; AssetDropped?.Invoke(args.Data); AssetDragChanged?.Invoke(false); };
 
         MouseEnter += (_, _) => HoverEntered?.Invoke(this, EventArgs.Empty);
     }
