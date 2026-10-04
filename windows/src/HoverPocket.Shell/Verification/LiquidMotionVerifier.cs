@@ -87,18 +87,26 @@ internal sealed class LiquidMotionVerifier(HoverShellController controller)
                     controller.SimulatePointerMoveForVerify(entry.Left + entry.Width / 2, entry.Top + 1);
                 await Task.Delay(600);
                 Require(panel.IsVisible && !panel.IsAnimating && panel.RevealForVerify == 1, "stationary entry hover oscillated or kept rendering");
+                var motionReduced = controller.PanelBridgeController.CurrentSettings.ReduceMotion
+                    || !System.Windows.SystemParameters.ClientAreaAnimation;
                 var close = panel.CloseAsync(controller.ActiveLayoutForVerify!);
-                await Task.Delay(70);
+                if (motionReduced)
+                    Require(!panel.IsVisible && !panel.IsAnimating && panel.RevealForVerify == 0, "system Reduce Motion animated close");
+                else
+                    await Task.Delay(70);
                 var value = panel.RevealForVerify;
                 var visibleBefore = panel.IsVisible;
                 var reversalTimer = Stopwatch.StartNew();
                 var opening = panel.OpenAsync(controller.ActiveLayoutForVerify!, target);
-                Require(Math.Abs(value - panel.RevealForVerify) < .000001,
-                    $"reversal reset reveal position: before={value:R}, after={panel.RevealForVerify:R}, visible_before={visibleBefore}, open_call_ms={reversalTimer.Elapsed.TotalMilliseconds:0.0}, system_animation={System.Windows.SystemParameters.ClientAreaAnimation}, reduce_motion={controller.PanelBridgeController.CurrentSettings.ReduceMotion}");
+                if (motionReduced)
+                    Require(panel.IsVisible && !panel.IsAnimating && panel.RevealForVerify == 1, "system Reduce Motion animated open");
+                else
+                    Require(Math.Abs(value - panel.RevealForVerify) < .000001,
+                        $"reversal reset reveal position: before={value:R}, after={panel.RevealForVerify:R}, visible_before={visibleBefore}, open_call_ms={reversalTimer.Elapsed.TotalMilliseconds:0.0}, system_animation={System.Windows.SystemParameters.ClientAreaAnimation}, reduce_motion={controller.PanelBridgeController.CurrentSettings.ReduceMotion}");
                 await Task.WhenAll(close, opening);
                 await controller.HidePanelForVerifyAsync();
                 Require(!panel.IsVisible && !panel.IsAnimating, "closed panel left a visible surface");
-                VerifyConsole.WriteLine($"PASS liquid native: size={size.Id}, mode={mode}, top_gap=0, stationary_hover=300, reversal=true, idle=true");
+                VerifyConsole.WriteLine($"PASS liquid native: size={size.Id}, mode={mode}, top_gap=0, stationary_hover=300, reversal={!motionReduced}, system_reduce_motion={motionReduced}, idle=true");
             }
             await Send("settings.setPanelAttachment", new { style = "preserveMenu", automatic = true });
             var settings = controller.PanelBridgeController.CurrentSettings;
@@ -122,12 +130,15 @@ internal sealed class LiquidMotionVerifier(HoverShellController controller)
                 await Task.Delay(150);
                 var before = controller.Panel.RevealForVerify;
                 controller.SimulatePointerMoveForVerify(entry.Left + entry.Width / 2, entry.Top + 1);
-                Require(Math.Abs(before - controller.Panel.RevealForVerify) < .000001, "polling reentry jumped");
+                if (System.Windows.SystemParameters.ClientAreaAnimation)
+                    Require(Math.Abs(before - controller.Panel.RevealForVerify) < .000001, "polling reentry jumped");
+                else
+                    Require(controller.Panel.RevealForVerify == 1 && !controller.Panel.IsAnimating, "system Reduce Motion animated polling reentry");
                 await Settle();
                 Require(controller.PanelExpectedVisibleForVerify && controller.Panel.IsOpening, "reentry did not cancel close");
                 await controller.HidePanelForVerifyAsync();
             }
-            VerifyConsole.WriteLine("PASS liquid native: reentry_reversals=30, automatic_manual_preserved=true, reduce_motion=true");
+            VerifyConsole.WriteLine($"PASS liquid native: reentry_cycles=30, animated_reversals={System.Windows.SystemParameters.ClientAreaAnimation}, automatic_manual_preserved=true, reduce_motion=true");
         }
         finally
         {
@@ -166,6 +177,19 @@ internal sealed class LiquidMotionVerifier(HoverShellController controller)
         for (var i = 0; i < 60; i++) a.Step(1.0 / 60, .32);
         for (var i = 0; i < 120; i++) b.Step(1.0 / 120, .32);
         Require(Math.Abs(a.Value - b.Value) < 1e-10 && Math.Abs(a.Velocity - b.Velocity) < 1e-10, "spring depends on refresh rate");
+        foreach (var rate in new[] { 60, 120 })
+        {
+            var reversal = new LiquidSpring(1) { Target = 0 };
+            for (var i = 0; i < rate / 12; i++) reversal.Step(1.0 / rate, .26);
+            var position = reversal.Value;
+            var velocity = reversal.Velocity;
+            Require(position > 0 && position < 1 && velocity < 0, "spring reversal fixture did not start closing");
+            reversal.Target = 1;
+            Require(reversal.Value == position && reversal.Velocity == velocity, "spring reversal reset position or velocity");
+            for (var i = 0; i < rate; i++) reversal.Step(1.0 / rate, .32);
+            Require(reversal.Settled(), "reversed spring failed to settle open");
+        }
+        VerifyConsole.WriteLine("PASS liquid spring reversal: refresh_rate=60/120, position_and_velocity_preserved=true, settled_open=true");
         var hitTests = 0;
         foreach (var size in PanelSizeCatalog.All)
         foreach (var origin in new[] { 72.0, 168.0 })
