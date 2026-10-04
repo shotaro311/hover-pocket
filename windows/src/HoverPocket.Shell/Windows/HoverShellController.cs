@@ -60,6 +60,7 @@ internal sealed class HoverShellController : IDisposable
     private UserSettings _lastAppliedSettings;
     private bool _systemEventsSubscribed;
     private bool _panelExpectedVisible;
+    private bool _previewFocusDismissed;
     private AssetOrganizerWindow? _assetOrganizer;
     private bool _assetDragActive;
     private int _assetDragRevision;
@@ -167,7 +168,7 @@ internal sealed class HoverShellController : IDisposable
             var pointer = GetPointerPosition();
             var inside = IsPointerInHoverRegion(pointer, out var hoveredLayout);
             TraceHover("close-delay", pointer, inside, hoveredLayout, inside ? "keep-open" : "close");
-            if (!_timerAlertActive && !_panel.AssetLayout.Active && !_assetDragActive && !inside)
+            if (!_timerAlertActive && !_panel.AssetLayout.PinOnly && !_assetDragActive && !inside)
             {
                 _ = HidePanelAsync();
             }
@@ -350,6 +351,7 @@ internal sealed class HoverShellController : IDisposable
         bool bypassFullscreenSuppression = false)
     {
         if (_captureSuppressed) return;
+        if (bypassFullscreenSuppression) _previewFocusDismissed = false;
         if (!bypassFullscreenSuppression
             && _pointerOverrideForVerify is null
             && IsTopEdgeSuppressed())
@@ -436,8 +438,8 @@ internal sealed class HoverShellController : IDisposable
         }
 
         TraceHover("close", GetPointerPosition(), false, _activeLayout, "panel-close");
-        _panel.EndAssetPreview();
         _panelExpectedVisible = false;
+        _panel.EndAssetPreview();
         await _panel.CloseAsync(_activeLayout);
         if (!_panelExpectedVisible && !_panel.IsOpening)
             await _panelBridgeController.NotifyPanelClosedAsync();
@@ -473,8 +475,13 @@ internal sealed class HoverShellController : IDisposable
     private void PollPointer()
     {
         if (_captureSuppressed) return;
-        if (_panel.AssetLayout.Active || _assetDragActive) { _closeDelayTimer.Stop(); return; }
+        if (_panel.AssetLayout.PinOnly || _assetDragActive) { _closeDelayTimer.Stop(); return; }
         var pointer = GetPointerPosition();
+        if (_previewFocusDismissed)
+        {
+            if (IsPointerInHoverRegion(pointer, out _)) { _closeDelayTimer.Stop(); return; }
+            _previewFocusDismissed = false;
+        }
         if (_pointerOverrideForVerify is null
             && !_panel.IsVisible
             && IsTopEdgeSuppressed())
@@ -575,7 +582,7 @@ internal sealed class HoverShellController : IDisposable
 
     private WindowPlacement EffectivePanelTarget(DisplaySurfaceLayout layout)
     {
-        if (_panel.AssetLayout is { Active: true, PinOnly: false } asset)
+        if (_panel.AssetLayout is { Active: true } asset && (!asset.PinOnly || asset.Width > 0 && asset.Height > 0 || asset.Fullscreen || asset.Organizer))
         {
             var monitor = layout.Monitor;
             if (asset.Fullscreen)
@@ -743,6 +750,12 @@ internal sealed class HoverShellController : IDisposable
     {
         panel.AssetDragChanged += OnAssetDragChanged;
         panel.AssetOrganizerRequested += OpenAssetLibraryFromUser;
+        panel.AssetPreviewDismissRequested += () =>
+        {
+            if (panel != _panel) return;
+            _previewFocusDismissed = true;
+            _ = HidePanelAsync();
+        };
         panel.AssetLayoutChanged += value =>
         {
             if (value.Fullscreen) foreach (var surface in _accessSurfaces) surface.SetPeekVisible(false, immediate: true);
@@ -981,6 +994,7 @@ internal sealed class HoverShellController : IDisposable
 
     private void OnAccessSurfaceHoverEntered(object? sender, EventArgs e)
     {
+        if (_previewFocusDismissed) return;
         if (!_panel.IsVisible && IsTopEdgeSuppressed())
         {
             return;

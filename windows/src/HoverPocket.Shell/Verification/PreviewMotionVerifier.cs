@@ -71,9 +71,12 @@ internal static class PreviewMotionVerifier
             {
                 var placements = resizeCount;
                 VerifyConsole.WriteLine($"MOTION opening {cycle} {DateTimeOffset.UtcNow:O}");
-                await ClickCardAsync(web, id);
-                await Task.Delay(150);
-                KeyEvent(0x20, 0, 0, 0); KeyEvent(0x20, 0, 0x0002, 0);
+                await ClickCardAsync(web, id, doubleClick: cycle == 0);
+                if (cycle != 0)
+                {
+                    await Task.Delay(150);
+                    KeyEvent(0x20, 0, 0, 0); KeyEvent(0x20, 0, 0x0002, 0);
+                }
                 await Task.Delay(1800);
                 if (!controller.Panel.AssetLayout.Active || controller.Panel.IsAnimating)
                 { VerifyConsole.WriteLine("FAIL native preview open: " + await web.ExecuteScriptAsync("({clicks:window.__thumbnailClicks,previewHidden:document.querySelector('.assets-preview').hidden,selected:document.querySelector('.assets-selection').textContent})")); return 1; }
@@ -82,7 +85,8 @@ internal static class PreviewMotionVerifier
                 var openingPlacements = resizeCount - placements;
                 placements = resizeCount;
                 VerifyConsole.WriteLine($"MOTION closing {cycle} {DateTimeOffset.UtcNow:O}");
-                await web.ExecuteScriptAsync("document.querySelector('[data-action=endPreview]')?.click()");
+                if (cycle == 0) await DoubleClickMediaAsync(web);
+                else await web.ExecuteScriptAsync("document.querySelector('[data-action=endPreview]')?.click()");
                 await Task.Delay(1500);
                 if (controller.Panel.AssetLayout.Active || controller.Panel.IsAnimating) return 1;
                 var closingPlacements = resizeCount - placements;
@@ -90,6 +94,14 @@ internal static class PreviewMotionVerifier
                 { VerifyConsole.WriteLine($"FAIL preview native surface resized per frame: open={openingPlacements}, close={closingPlacements}"); return 1; }
                 VerifyConsole.WriteLine($"PASS preview native window resizes: open={openingPlacements}, close={closingPlacements}");
             }
+            VerifyConsole.WriteLine("PASS native thumbnail/image double-click: actual mouse clicks open preview and return to list");
+            await ClickCardAsync(web, id, doubleClick: true, name: true);
+            await Task.Delay(180);
+            if (await web.ExecuteScriptAsync("!!document.querySelector('.assets-root dialog[open] input')&&!document.querySelector('.assets-root.has-preview')") != "true")
+            { VerifyConsole.WriteLine("FAIL native filename double-click did not open rename"); return 1; }
+            await web.ExecuteScriptAsync("document.querySelector('.assets-root dialog[open]').dispatchEvent(new Event('cancel',{cancelable:true}))");
+            await Task.Delay(100);
+            VerifyConsole.WriteLine("PASS native filename double-click: rename dialog opens without preview and cancels cleanly");
             var normalTarget = controller.Panel.LiquidTargetForVerify;
             foreach (var delay in new[] { 30, 120, 300 })
             {
@@ -118,10 +130,22 @@ internal static class PreviewMotionVerifier
         }
     }
 
-    private static async Task ClickCardAsync(FrameworkElement surface, string id)
+    private static async Task ClickCardAsync(FrameworkElement surface, string id, bool doubleClick = false, bool name = false)
     {
         var web = (Microsoft.Web.WebView2.Wpf.WebView2CompositionControl)surface;
-        var raw = await web.ExecuteScriptAsync($$"""(()=>{const card=document.querySelector('[data-asset-id="{{id}}"]');card.scrollIntoView({block:'nearest'});const r=card.getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2};})()""");
+        var selector = name ? ".assets-card-name" : "img";
+        var raw = await web.ExecuteScriptAsync($$"""(()=>{const card=document.querySelector('[data-asset-id="{{id}}"]');card.scrollIntoView({block:'nearest'});const r=card.querySelector('{{selector}}').getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2};})()""");
+        await ClickBoundsAsync(surface, raw, doubleClick);
+    }
+
+    internal static async Task DoubleClickMediaAsync(Microsoft.Web.WebView2.Wpf.WebView2CompositionControl web)
+    {
+        var raw = await web.ExecuteScriptAsync("(()=>{const r=document.querySelector('.assets-media img,.assets-media video').getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2};})()");
+        await ClickBoundsAsync(web, raw, true);
+    }
+
+    private static async Task ClickBoundsAsync(FrameworkElement surface, string raw, bool doubleClick)
+    {
         using var bounds = JsonDocument.Parse(raw);
         var point = surface.PointToScreen(new Point(bounds.RootElement.GetProperty("x").GetDouble(), bounds.RootElement.GetProperty("y").GetDouble()));
         GetCursorPos(out var previous);
@@ -129,6 +153,7 @@ internal static class PreviewMotionVerifier
         {
             SetCursorPos((int)point.X, (int)point.Y);
             MouseEvent(0x0002, 0, 0, 0, 0); await Task.Delay(40); MouseEvent(0x0004, 0, 0, 0, 0); await Task.Delay(90);
+            if (doubleClick) { MouseEvent(0x0002, 0, 0, 0, 0); await Task.Delay(40); MouseEvent(0x0004, 0, 0, 0, 0); await Task.Delay(90); }
         }
         finally { MouseEvent(0x0004, 0, 0, 0, 0); SetCursorPos(previous.X, previous.Y); }
     }

@@ -1,4 +1,4 @@
-using HoverPocket.Assets;
+﻿using HoverPocket.Assets;
 using System.Security.Cryptography;
 using System.Text.Json;
 using Microsoft.Data.Sqlite;
@@ -22,6 +22,43 @@ Check(result.Status == "saved", "durable import"); var id = result.AssetId!;
 var saved = (await store.GetAsync(id))!;
 Check(Hash(source) == sourceHash && Hash(store.OriginalPath(saved)) == sourceHash, "original preserved byte-for-byte");
 Check((new FileInfo(source).Attributes & FileAttributes.ReadOnly) == 0, "source remains writable");
+using (var rangeStore = new AssetStore(Path.Combine(root, "selection-ranges")))
+{
+    for (var i = 0; i < 6; i++)
+    {
+        var rangeSource = Path.Combine(root, $"range-{i}.txt");
+        await File.WriteAllTextAsync(rangeSource, $"range fixture {i}" + new string('x', i * 3));
+        await rangeStore.ImportAsync(rangeSource);
+    }
+    var ordered = (await rangeStore.QueryAsync(new())).Items.Select(asset => asset.Id).ToArray();
+    foreach (var sort in new[] { "created", "name", "size" })
+    foreach (var descending in new[] { false, true })
+    {
+        var query = new AssetQuery(Version: 2, Extension: "txt", SortBy: sort, Descending: descending);
+        var all = (await rangeStore.QueryAsync(query)).Items;
+        var keys = all.Select(asset => sort == "name" ? asset.Name : sort == "size" ? asset.SizeBytes.ToString("D20") : asset.CreatedAt).ToArray();
+        Check(keys.SequenceEqual(descending ? keys.OrderDescending(StringComparer.Ordinal) : keys.Order(StringComparer.Ordinal)), $"{sort} sort direction {descending}");
+        Check((await rangeStore.QueryAsync(query with { Offset = 2, Limit = 2 })).Items.Select(a => a.Id).SequenceEqual(all.Skip(2).Take(2).Select(a => a.Id)), "paging follows global sort");
+        Check((await rangeStore.SelectionRangeAsync(query, all[1].Id, all[4].Id)).SequenceEqual(all[1..5].Select(a => a.Id)), "Shift selection follows global sort");
+    }
+    Check((await rangeStore.QueryAsync(new(Version: 2, Extension: "png"))).Total == 0, "format filter excludes other extensions");
+    Check(!(await rangeStore.MatchesAsync(new(Version: 2, Extension: "png"), ordered[0])), "selection matching follows format filter");
+    Check((await rangeStore.QueryAsync(new())).Extensions!.SequenceEqual(["txt"]), "format choices include stored extensions");
+    var legacyQuery = JsonSerializer.Deserialize<AssetQuery>("{\"text\":\"\",\"view\":\"recent\",\"offset\":0,\"limit\":80}", AssetFormat.Json)!;
+    Check((await rangeStore.QueryAsync(legacyQuery)).Items.Select(a => a.Id).SequenceEqual(ordered), "legacy query preserves date descending default");
+    await Reject(() => rangeStore.QueryAsync(new(Version: 2, SortBy: "name;DROP TABLE assets")), "unknown sort cannot enter SQL");
+    await Reject(() => rangeStore.QueryAsync(new(Version: 2, Extension: "' OR 1=1")), "invalid extension rejected");
+    await Reject(() => rangeStore.QueryAsync(new(Extension: "txt")), "new filter requires its explicit version");
+    var range = await rangeStore.SelectionRangeAsync(new(Offset: 4, Limit: 1), ordered[1], ordered[4]);
+    Check(range.SequenceEqual(ordered[1..5]), "selection range includes both endpoints beyond the visible page");
+    Check((await rangeStore.SelectionRangeAsync(new(), ordered[4], ordered[1])).SequenceEqual(range), "reverse selection uses displayed order");
+    Check((await rangeStore.SelectionRangeAsync(new(), ordered[2], ordered[2])).SequenceEqual([ordered[2]]), "same endpoint selects one item");
+    await rangeStore.UpdateAsync([ordered[2]], "trash");
+    Check((await rangeStore.SelectionRangeAsync(new(), ordered[1], ordered[4])).SequenceEqual(new[] { ordered[1], ordered[3], ordered[4] }), "range excludes hidden trash");
+    Check((await rangeStore.SelectionRangeAsync(new(), ordered[2], ordered[4])).Length == 0, "missing range anchor cannot select unrelated items");
+    await rangeStore.UpdateAsync([ordered[1], ordered[4]], "favorite");
+    Check((await rangeStore.SelectionRangeAsync(new(View: "favorites"), ordered[1], ordered[4])).SequenceEqual([ordered[1], ordered[4]]), "range follows active filter");
+}
 var duplicate = await store.ImportAsync(source, secondFolder);
 Check(duplicate.Status == "duplicate" && duplicate.AssetId == id, "SHA dedup");
 Check((await store.GetAsync(id))!.FolderIds.Length == 2, "duplicate merges memberships");
@@ -57,7 +94,7 @@ Check((await store.QueryAsync(new(Text: "' OR 1=1 --"))).Total == 0, "SQL metach
 Check((await store.QueryAsync(new(View: "uncategorized"))).Total == 0, "uncategorized is folder membership");
 await store.UpdateAsync([id], "favorite"); Check((await store.QueryAsync(new(View: "favorites"))).Total == 1, "favorite filter");
 await store.UpdateAsync([id], "rename", "改名済み.pdf"); Check(Hash(store.OriginalPath(saved)) == sourceHash && (await store.GetAsync(id))!.Extension == "png", "rename preserves ID, path, extension, bytes");
-await store.SaveSearchAsync("画像", new(Kind: "image"));
+await store.SaveSearchAsync("画像", new(Kind: "image", Version: 2, Extension: "png", SortBy: "name", Descending: false));
 var copy = await store.CopyOutAsync(id); await File.WriteAllTextAsync(copy, "external edit");
 Check(Hash(store.OriginalPath(saved)) == sourceHash, "external copy isolated");
 await store.UpdateAsync([id], "trash");
@@ -71,6 +108,8 @@ Check(after.Trashed && after.Favorite && after.InternetOrigin && after.FolderIds
 Check(Hash(restored.OriginalPath(after)) == sourceHash, "backup byte integrity");
 if (OperatingSystem.IsWindows()) Check((await File.ReadAllTextAsync(restored.OriginalPath(after)+":Zone.Identifier")).Contains("ZoneId=3"), "internet origin mark reapplied on restore");
 Check((await restored.QueryAsync(new(View: "trash"))).Searches.Length == 1, "saved search roundtrip");
+var restoredFilter = (await restored.QueryAsync(new())).Searches.Single().Filter;
+Check(restoredFilter is { Version: 2, Extension: "png", SortBy: "name", Descending: false }, "format and order survive backup roundtrip");
 await Reject(() => restored.RestoreAsync(backup), "nonempty restore refused");
 await Reject(() => store.ExportAsync(Path.Combine(store.Root, "bad")), "backup inside managed root refused");
 var manifestPath = Path.Combine(backup, "manifest.json"); var manifest = JsonSerializer.Deserialize<AssetManifest>(await File.ReadAllTextAsync(manifestPath), AssetFormat.Json)!;
@@ -90,6 +129,9 @@ using var shared = new AssetStore(Path.Combine(root, "shared-fixture")); await s
 var sharedAsset = (await shared.QueryAsync(new(View: "trash", Text: "abc 猫"))).Items.Single();
 Check(sharedAsset.InternetOrigin && sharedAsset.Favorite && sharedAsset.FolderIds.Length == 1 && sharedAsset.TagIds.Length == 1, "canonical shared fixture compatibility");
 Check((await shared.QueryAsync(new(View: "trash", Text: "half幅"))).Total == 1, "canonical normalization fixture");
+var sharedFilters = (await shared.QueryAsync(new())).Searches;
+Check(sharedFilters.Single(s => s.Filter.Version == 1).Filter is { Extension: null, SortBy: "created", Descending: true }, "canonical legacy saved search defaults");
+Check((await shared.QueryAsync(sharedFilters.Single(s => s.Filter.Version == 2).Filter)).Items.Single().Id == sharedAsset.Id, "canonical v2 format and sort fixture");
 var child = await store.AddCategoryAsync("folder", "子", folder);
 await Reject(() => store.ChangeCategoryAsync(folder, "move", parent: child), "folder cycle rejected");
 await store.ChangeCategoryAsync(folder, "delete");

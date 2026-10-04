@@ -258,7 +258,7 @@ public partial class App : System.Windows.Application
         {
             _captureController = new Capture.CaptureController(shellController.PanelBridgeController.AssetLibrary, effectiveApplicationData.RootDirectory,
                 shellController.HideForCaptureAsync, shellController.RestoreAfterCapture, shellController.OpenAssetLibraryFromUser);
-            shellController.PanelBridgeController.AssetCaptureRequested = folder => _captureController.Open(folder, useCurrentFolder: true);
+            shellController.PanelBridgeController.AssetCaptureRequested = _captureController.FromLibraryAsync;
             updaterService.BeforeRestart = _captureController.StopRecordingAsync;
             _trayIconService = new TrayIconService(shellController, updaterService, _captureController);
             if (shellController.PanelBridgeController.CurrentSettings.AutoCheckForUpdates)

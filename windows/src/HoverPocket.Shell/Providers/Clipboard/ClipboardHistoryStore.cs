@@ -351,8 +351,7 @@ internal sealed class ClipboardHistoryStore
                     width = item.Width,
                     height = item.Height,
                     favorite = item.Favorite,
-                    createdAt = item.CreatedAt,
-                    dataUrl = TryReadImageDataUrl(item)
+                    createdAt = item.CreatedAt
                 }).ToArray(),
                 lastErrorMessage = LastErrorMessage,
                 storage = new
@@ -529,16 +528,25 @@ internal sealed class ClipboardHistoryStore
         }
     }
 
-    private string? TryReadImageDataUrl(ClipboardImageHistoryItem item)
+    public string? ReadImageDataUrl(Guid id, bool thumbnail)
     {
+        ClipboardImageHistoryItem? item;
+        lock (_gate) item = _imageItems.FirstOrDefault(candidate => candidate.Id == id)?.Clone();
+        if (item is null) return null;
         try
         {
             var path = ImagePath(item);
-            return File.Exists(path)
-                ? $"data:image/png;base64,{Convert.ToBase64String(File.ReadAllBytes(path))}"
-                : null;
+            if (!File.Exists(path)) return null;
+            if (!thumbnail) return $"data:image/png;base64,{Convert.ToBase64String(File.ReadAllBytes(path))}";
+            using var stream = File.OpenRead(path);
+            var image = new BitmapImage(); image.BeginInit(); image.CacheOption = BitmapCacheOption.OnLoad;
+            image.StreamSource = stream;
+            if (item.Width >= item.Height) image.DecodePixelWidth = Math.Min(320, Math.Max(1, item.Width));
+            else image.DecodePixelHeight = Math.Min(320, Math.Max(1, item.Height));
+            image.EndInit(); image.Freeze();
+            return $"data:image/png;base64,{Convert.ToBase64String(EncodePng(image))}";
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException or InvalidOperationException)
         {
             return null;
         }

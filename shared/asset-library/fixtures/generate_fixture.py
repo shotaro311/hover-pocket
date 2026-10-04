@@ -22,4 +22,7 @@ manifest = {
                   "filter": {"text": "猫", "view": "recent", "kind": None, "folderId": None,
                              "tagId": None, "offset": 0, "limit": 80}}]
 }
+manifest["searches"].append({"id": "55555555-5555-4555-8555-555555555555", "name": "テキストを名前順",
+    "filter": {"version": 2, "text": "", "view": "trash", "offset": 0, "limit": 80,
+               "extension": "txt", "sortBy": "name", "descending": False}})
 (root / "manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")

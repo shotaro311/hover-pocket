@@ -1,4 +1,4 @@
-using System.Runtime.InteropServices;
+﻿using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Interop;
@@ -44,13 +44,8 @@ internal static class CaptureVerifier
             var pixels = Enumerable.Repeat((byte)235, 160 * 100 * 4).ToArray(); for (var i = 3; i < pixels.Length; i += 4) pixels[i] = 255;
             var source = BitmapSource.Create(160, 100, 96, 96, PixelFormats.Bgra32, null, pixels, 160 * 4); source.Freeze();
             var legacyPreferences = System.Text.Json.JsonSerializer.Deserialize<CapturePreferences>("{\"SystemAudio\":false}");
-            if (legacyPreferences?.OpenEditorAfterScreenshot != true) failures.Add("legacy editor default changed");
-            var editorOpened = false;
-            var direct = CaptureController.EditScreenshot(source, false, _ => { editorOpened = true; return null; });
-            if (editorOpened || direct?.Image != source || direct.KeepOriginal) failures.Add("editor disabled did not use direct capture");
-            var cancelledEdit = CaptureController.EditScreenshot(source, true, window => { editorOpened = true; window.Close(); return null; });
-            if (!editorOpened || cancelledEdit is not null) failures.Add("editor enabled/cancelled result");
-            VerifyConsole.WriteLine("PASS capture editor preference: legacy default on, bypass keeps original pixels, enabled/cancel routes correctly");
+            if (legacyPreferences?.OpenEditorAfterScreenshot != true || legacyPreferences.ScreenshotToastSeconds != 5) failures.Add("legacy editor default changed");
+            VerifyConsole.WriteLine("PASS capture preferences: legacy JSON remains readable; screenshots now edit in place");
             var crop = ScreenshotSelectionWindow.Crop(source, new(10, 10, 130, 80));
             if (crop.PixelWidth != 130 || crop.PixelHeight != 80) failures.Add("crop dimensions");
             editor = new ScreenshotEditorWindow(source); editor.Show(); await Task.Delay(120);
@@ -78,12 +73,29 @@ internal static class CaptureVerifier
             using (var secondKeys = new CaptureHotkeys(_ => { })) if (secondKeys.Apply("Ctrl+Alt+F21", "Ctrl+Alt+F22").Contains("使用中")) failures.Add("hotkeys not unregistered");
             using (var configuration = new CaptureController(store, root, () => Task.CompletedTask, () => { }, () => { }))
             {
-                configuration.SavePreferences(new("Ctrl+Alt+F23", "Ctrl+Alt+F24", false, true, folder, false));
+                configuration.SavePreferences(new("Ctrl+Alt+F23", "Ctrl+Alt+F24", false, true, folder, false, 7));
                 var savedPreferences = System.Text.Json.JsonSerializer.Deserialize<CapturePreferences>(File.ReadAllText(Path.Combine(root, "capture-settings.json")))!;
-                if (savedPreferences.FolderId != folder || savedPreferences.SystemAudio || !savedPreferences.Microphone || savedPreferences.OpenEditorAfterScreenshot) failures.Add("capture settings persistence");
+                if (savedPreferences.FolderId != folder || savedPreferences.SystemAudio || !savedPreferences.Microphone || savedPreferences.OpenEditorAfterScreenshot || savedPreferences.ScreenshotToastSeconds != 7) failures.Add("capture settings persistence");
+                try { configuration.SavePreferences(savedPreferences with { ScreenshotToastSeconds = 31 }); failures.Add("invalid toast duration accepted"); } catch (ArgumentOutOfRangeException) { }
+                await configuration.ScreenshotAsync(() => Task.FromResult<BitmapSource?>(null));
+                if (configuration.Busy || configuration.WindowPreferencesForVerify is not null || configuration.ToastForVerify is not null) failures.Add("screenshot cancellation opened settings/toast");
+                await configuration.ScreenshotAsync(() => Task.FromException<BitmapSource?>(new InvalidOperationException("fixture failure")));
+                if (configuration.Busy || configuration.WindowPreferencesForVerify is not null || configuration.ToastForVerify is not null) failures.Add("screenshot failure opened settings/toast");
+                await configuration.ScreenshotAsync(() => Task.FromResult<BitmapSource?>(source));
+                if (configuration.Busy || configuration.WindowPreferencesForVerify is not null || configuration.ToastForVerify?.IsVisible != true) failures.Add("screenshot success did not show toast without settings: " + configuration.Status);
+                var firstToast = configuration.ToastForVerify;
+                if (!(await store.QueryAsync(new(FolderId: folder))).Items.Any(asset => asset.Name.StartsWith("スクリーンショット"))) failures.Add("screenshot direct capture was not saved to its folder");
+                var beforeLibraryShot = (await store.QueryAsync(new())).Items.Select(asset => asset.Id).ToHashSet();
+                var libraryImage = new CroppedBitmap(source, new Int32Rect(0, 0, source.PixelWidth - 1, source.PixelHeight)); libraryImage.Freeze();
+                await configuration.ScreenshotAsync(() => Task.FromResult<BitmapSource?>(libraryImage), folderId: null, useCurrentFolder: true);
+                if (firstToast?.IsVisible == true || configuration.ToastForVerify?.IsVisible != true) failures.Add("new screenshot did not replace its toast");
+                var libraryShot = (await store.QueryAsync(new())).Items.SingleOrDefault(asset => !beforeLibraryShot.Contains(asset.Id));
+                if (libraryShot is null || libraryShot.FolderIds.Length != 0 || configuration.SettingsVisibleForVerify) failures.Add("library screenshot root override opened settings or used saved folder");
+                if (System.Text.Json.JsonSerializer.Deserialize<CapturePreferences>(File.ReadAllText(Path.Combine(root, "capture-settings.json")))!.FolderId != folder) failures.Add("library capture changed saved preferences");
                 var ownerHandle = nint.Zero;
                 await configuration.ToggleRecordingAsync(handle =>
                 {
+                    if (configuration.ToastForVerify is not null) failures.Add("toast retained during recording selection");
                     ownerHandle = handle;
                     var pickerOwner = HwndSource.FromHwnd(handle)?.RootVisual is Window { Content: null, ShowInTaskbar: false } and not CaptureWindow;
                     if (!IsWindow(handle) || !pickerOwner || configuration.WindowPreferencesForVerify is not null) failures.Add("recording opened settings or invalid picker owner");
@@ -93,7 +105,7 @@ internal static class CaptureVerifier
                 var errors = 0; configuration.RecordingError += _ => errors++;
                 await configuration.ToggleRecordingAsync(_ => throw new IOException("verification picker failure"));
                 if (errors != 1 || configuration.Busy || configuration.WindowPreferencesForVerify is not null) failures.Add("recording picker error reporting/cleanup");
-                var nativePicker = configuration.ToggleRecordingAsync();
+                var nativePicker = LaunchPickerFromGestureAsync(() => configuration.FromLibraryAsync("recording", null));
                 VerifyConsole.WriteLine($"PICKER native: foreground_owned={Interop.NativeMethods.ForegroundBelongsToCurrentProcess()}, owner_visible={IsWindowVisible(configuration.RecordingOwnerForVerify)}");
                 var pickerClosed = false;
                 var pickerDeadline = DateTime.UtcNow.AddSeconds(20);
@@ -122,12 +134,20 @@ internal static class CaptureVerifier
                 await nativePicker.WaitAsync(TimeSpan.FromSeconds(3));
                 if (!pickerClosed || errors != 1 || configuration.WindowPreferencesForVerify is not null || configuration.Busy) failures.Add($"native recording picker without settings/cancel: owned_picker={pickerClosed}, errors={errors}, busy={configuration.Busy}, status={configuration.Status}");
                 else VerifyConsole.WriteLine("PASS recording native picker: system picker shown without settings, native cancel returns cleanly");
+                configuration.SavePreferences(savedPreferences with { ScreenshotToastSeconds = 0 });
+                await configuration.ScreenshotAsync(() => Task.FromResult<BitmapSource?>(source));
+                if (configuration.ToastForVerify is not null) failures.Add("disabled screenshot toast was displayed");
+                configuration.SavePreferences(savedPreferences);
                 configuration.Open(); configuration.Open(null, useCurrentFolder: true);
+                if (configuration.WindowPreferencesForVerify?.ScreenshotToastSeconds != 7) failures.Add("toast duration settings field lost saved value");
                 if (configuration.WindowPreferencesForVerify?.FolderId is not null) failures.Add("root capture folder before load");
                 await Task.Delay(100);
                 if (configuration.WindowPreferencesForVerify?.FolderId is not null) failures.Add("root capture folder after load");
                 configuration.Open(folder, useCurrentFolder: true);
                 if (configuration.WindowPreferencesForVerify?.FolderId != folder) failures.Add("current named capture folder");
+                await configuration.ScreenshotAsync(() => Task.FromResult<BitmapSource?>(null));
+                if (configuration.SettingsVisibleForVerify) failures.Add("screenshot restored settings after cancellation");
+                VerifyConsole.WriteLine("PASS screenshot: success/cancel/failure without constructing settings, existing settings stay hidden, saved folder preserved");
                 using var selection = new DisposableWindow(new ScreenshotSelectionWindow(source, new System.Drawing.Rectangle(100, 100, 480, 300)));
                 selection.Window.Show(); await Task.Delay(100); GetWindowRect(new WindowInteropHelper(selection.Window).Handle, out var rect);
                 if (rect.Left != 100 || rect.Top != 100 || rect.Right - rect.Left != 480 || rect.Bottom - rect.Top != 300) failures.Add("native screenshot selection bounds");
@@ -169,8 +189,10 @@ internal static class CaptureVerifier
                 var decoded = new BitmapImage(); decoded.BeginInit(); decoded.CacheOption = BitmapCacheOption.OnLoad; decoded.UriSource = new Uri(Path.Combine(screenshotStage, $"edited-{attempt}.png")); decoded.EndInit();
                 if (!ReadPixels(decoded).SequenceEqual(ReadPixels(rendered))) failures.Add("screenshot PNG pixels changed");
             }
-            var whole = SelectSnapshot(desktopSnapshot, nativeBounds, window => SelectionKey(window, System.Windows.Input.Key.Enter));
-            if (whole.Error is not null || !ReferenceEquals(whole.Result, desktopSnapshot)) failures.Add("screenshot Enter full screen");
+            await ScreenshotOverlayVerifier.RunAsync(desktopSnapshot, nativeBounds, failures);
+            await ScreenshotToastVerifier.RunAsync(store, annotated, failures);
+            var whole = SelectSnapshot(desktopSnapshot, nativeBounds, window => window.CompleteSelection(null));
+            if (whole.Error is not null || whole.Result?.PixelWidth != desktopSnapshot.PixelWidth || whole.Result.PixelHeight != desktopSnapshot.PixelHeight) failures.Add("screenshot full screen crop");
             var cancelled = SelectSnapshot(desktopSnapshot, nativeBounds, window => SelectionKey(window, System.Windows.Input.Key.Escape));
             if (cancelled.Error is not null || cancelled.Result is not null) failures.Add("screenshot Escape cancel");
             var invalid = SelectSnapshot(desktopSnapshot, nativeBounds, window => window.CompleteSelection(new(-1, 0, 10, 10)));
@@ -188,7 +210,7 @@ internal static class CaptureVerifier
                     SendMessage(handle, 0x0202, 0, new nint((210 << 16) | 255));
                 }
                 finally { SetCursorPos(cursor.X, cursor.Y); }
-                if (window.IsVisible) { failures.Add("native screenshot drag did not close selection"); window.Close(); }
+                if (window.EditorForVerify is null) { failures.Add("native screenshot drag did not enter inline editing"); window.Close(); }
             });
             if (selectedByMouse.Error is not null || selectedByMouse.Result is not { PixelWidth: >= 194 and <= 196, PixelHeight: >= 119 and <= 121 }) failures.Add("native screenshot drag crop");
             await AssetRecycle.MoveAsync(screenshotStage);
@@ -196,8 +218,8 @@ internal static class CaptureVerifier
             var item = WindowsGraphicsCapturePreviewService.CreateCaptureItemForWindow(new WindowInteropHelper(fixture).Handle);
             using (var shortcut = new CaptureController(store, Path.Combine(root, "shortcut"), () => Task.CompletedTask, () => { }, () => { }))
             {
-                shortcut.SavePreferences(new("Ctrl+Alt+F23", "Ctrl+Alt+F24", false, false, folder, false));
-                await shortcut.ToggleRecordingAsync(_ => Task.FromResult<global::Windows.Graphics.Capture.GraphicsCaptureItem?>(item));
+                shortcut.SavePreferences(new("Ctrl+Alt+F23", "Ctrl+Alt+F24", false, false, null, false));
+                await shortcut.ToggleRecordingAsync(_ => Task.FromResult<global::Windows.Graphics.Capture.GraphicsCaptureItem?>(item), folderId: folder, useCurrentFolder: true);
                 await Task.Delay(500);
                 if (!shortcut.Recording || shortcut.WindowPreferencesForVerify is not null) failures.Add("recording shortcut opened settings");
                 shortcut.Open();
@@ -207,6 +229,7 @@ internal static class CaptureVerifier
                 var shortcuts = await store.QueryAsync(new(FolderId: folder));
                 var recorded = shortcuts.Items.SingleOrDefault(asset => asset.Kind == "video");
                 if (shortcut.Recording || shortcut.Busy || recorded is null) failures.Add("recording shortcut stop/save");
+                if (System.Text.Json.JsonSerializer.Deserialize<CapturePreferences>(File.ReadAllText(Path.Combine(root, "shortcut", "capture-settings.json")))!.FolderId is not null) failures.Add("library recording changed saved destination");
                 if (recorded is not null) await store.UpdateAsync([recorded.Id], "trash", null);
                 VerifyConsole.WriteLine("PASS recording shortcut: hidden valid picker owner, cancel/error cleanup, saved options, no settings on start/stop, settings close keeps recording, classified save");
             }
@@ -222,7 +245,7 @@ internal static class CaptureVerifier
             using (var audio = new NAudio.Wave.MediaFoundationReader(videoPath))
             { var samples = audio.ToSampleProvider(); var data = new float[48000 * 2]; var count = samples.Read(data.AsSpan()); soundEnergy = data.Take(count).Select(value => (double)value * value).Sum(); if (count == 0 || soundEnergy < .00001) failures.Add("loopback AAC audio missing"); }
             CaptureFiles.MarkComplete(videoStage, [videoPath], folder); await captureFiles.ImportCompletedAsync(videoStage);
-            page = await store.QueryAsync(new(FolderId: folder)); if (page.Total != 2 || page.Items.All(asset => asset.Kind != "video")) failures.Add("recording library classification");
+            page = await store.QueryAsync(new(FolderId: folder)); if (page.Total != 3 || page.Items.Count(asset => asset.Kind == "image") != 2 || page.Items.Count(asset => asset.Kind == "video") != 1) failures.Add("recording library classification");
             VerifyConsole.WriteLine($"PASS recording: frames={recorder.VideoFrames}, duration_ms={properties.Duration.TotalMilliseconds:0}, dimensions={properties.Width}x{properties.Height}, audio_track_nonzero={soundEnergy > .00001}, microphone_packets={recorder.MicrophonePackets}, automatic_import=true");
             var silentStage = captureFiles.CreateStage(); var silentPath = Path.Combine(silentStage, "silent.mp4"); using (File.Create(silentPath)) { }
             using (var silent = await ScreenRecorder.StartAsync(item, silentPath, false, false))
@@ -253,6 +276,28 @@ internal static class CaptureVerifier
         }
         catch (Exception ex) { VerifyConsole.WriteLine($"FAIL capture: {ex}"); return 1; }
         finally { editor?.Close(); fixture?.Close(); await AssetRecycle.MoveAsync(root); }
+    }
+    private static async Task LaunchPickerFromGestureAsync(Func<Task> open)
+    {
+        // Windows can cancel a capture picker opened without foreground permission.
+        // Exercise the same input permission as a real user clicking the capture button.
+        var button = new System.Windows.Controls.Button { Content = "Open generated recording picker fixture", Padding = new(12) };
+        using var fixture = new DisposableWindow(new Window { Title = "HoverPocket picker verification", Width = 380, Height = 110, Topmost = true, WindowStartupLocation = WindowStartupLocation.CenterScreen, Content = button });
+        Task? operation = null; button.Click += (_, _) => { operation ??= open(); };
+        var prior = System.Windows.Forms.Cursor.Position;
+        try
+        {
+            fixture.Window.Show(); await Task.Delay(120);
+            var point = button.PointToScreen(new System.Windows.Point(button.ActualWidth / 2, button.ActualHeight / 2));
+            SetCursorPos((int)point.X, (int)point.Y); await Task.Delay(60);
+            MouseEvent(0x0002, 0, 0, 0, 0); await Task.Delay(30); MouseEvent(0x0004, 0, 0, 0, 0);
+            var deadline = DateTime.UtcNow.AddSeconds(3);
+            while (operation is null && DateTime.UtcNow < deadline) await Task.Delay(30);
+            if (operation is null) throw new TimeoutException("Recording picker fixture did not receive its native click.");
+            fixture.Window.Topmost = false;
+            await operation;
+        }
+        finally { MouseEvent(0x0004, 0, 0, 0, 0); SetCursorPos(prior.X, prior.Y); }
     }
     private static async Task VerifyImageEditingAsync(string root, BitmapSource original, BitmapSource edited, List<string> failures)
     {
@@ -347,7 +392,7 @@ internal static class CaptureVerifier
         Exception? error = null;
         selection.Loaded += (_, _) => selection.Dispatcher.BeginInvoke(new Action(() =>
         {
-            try { interact(selection); }
+            try { interact(selection); selection.EditorForVerify?.Save(); }
             catch (Exception ex) { error = ex; selection.Close(); }
         }), System.Windows.Threading.DispatcherPriority.ApplicationIdle);
         selection.ShowDialog();
@@ -359,6 +404,7 @@ internal static class CaptureVerifier
     [StructLayout(LayoutKind.Sequential)] private struct CursorPoint { public int X, Y; }
     [DllImport("user32.dll")] private static extern bool GetCursorPos(out CursorPoint point);
     [DllImport("user32.dll")] private static extern bool SetCursorPos(int x, int y);
+    [DllImport("user32.dll", EntryPoint = "mouse_event")] private static extern void MouseEvent(uint flags, uint dx, uint dy, uint data, nuint extra);
     [StructLayout(LayoutKind.Sequential)] private struct WindowRect { public int Left, Top, Right, Bottom; }
     [DllImport("user32.dll")] private static extern bool GetWindowRect(nint hwnd, out WindowRect rect);
     private sealed class DisposableWindow(Window window) : IDisposable { public Window Window => window; public void Dispose() => window.Close(); }

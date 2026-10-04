@@ -21,6 +21,7 @@ internal sealed class ClipboardVerifier
             VerifyTrim(root);
             VerifyFavoritesAndLegacyCompatibility(root);
             VerifyPngNormalizationAndDedup(root);
+            VerifyLazyImages(root);
             VerifyPersistenceAndRestore(root);
             VerifyCorruptJsonRecovery(root);
             VerifyPrivateModeTransitions(root).GetAwaiter().GetResult();
@@ -290,6 +291,33 @@ internal sealed class ClipboardVerifier
         {
             _failures.Add("corrupt JSON: defaults were not restored with an error message");
         }
+    }
+
+    private void VerifyLazyImages(string root)
+    {
+        var store = NewStore(root, "lazy-images");
+        var bitmap = new System.Windows.Media.Imaging.TransformedBitmap(ClipboardHistoryStore.CreateProbeBitmap(), new System.Windows.Media.ScaleTransform(30, 20));
+        bitmap.Freeze(); store.AddImage(bitmap);
+        var item = store.ImageItems.Single();
+        var original = File.ReadAllBytes(store.ImagePath(item));
+        using (var locked = new FileStream(store.ImagePath(item), FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+        {
+            using var state = JsonDocument.Parse(JsonSerializer.Serialize(store.BuildState(true, false, true)));
+            if (state.RootElement.GetProperty("imageItems")[0].TryGetProperty("dataUrl", out _)) _failures.Add("lazy images: list includes original image bytes");
+        }
+        var full = store.ReadImageDataUrl(item.Id, false);
+        var thumb = store.ReadImageDataUrl(item.Id, true);
+        if (full is null || !Convert.FromBase64String(full.Split(',')[1]).SequenceEqual(original)) _failures.Add("lazy images: full preview changed original bytes");
+        if (thumb is null) _failures.Add("lazy images: thumbnail absent");
+        else
+        {
+            using var stream = new MemoryStream(Convert.FromBase64String(thumb.Split(',')[1]));
+            var decoded = System.Windows.Media.Imaging.BitmapDecoder.Create(stream, System.Windows.Media.Imaging.BitmapCreateOptions.None, System.Windows.Media.Imaging.BitmapCacheOption.OnLoad).Frames[0];
+            if (decoded.PixelWidth > 320 || decoded.PixelHeight > 320 || Math.Abs((double)decoded.PixelWidth / decoded.PixelHeight - 1.5) > .02) _failures.Add("lazy images: thumbnail size/aspect ratio");
+        }
+        store.DeleteItem(ClipboardHistoryItemKind.Image, item.Id);
+        if (store.ReadImageDataUrl(item.Id, true) is not null || store.ReadImageDataUrl(Guid.NewGuid(), false) is not null) _failures.Add("lazy images: deleted/unknown ID still readable");
+        VerifyConsole.WriteLine("PASS clipboard images: metadata-only list without file access, bounded thumbnail, byte-identical full preview, deleted/unknown IDs rejected");
     }
 
     private async Task VerifyPrivateModeTransitions(string root)

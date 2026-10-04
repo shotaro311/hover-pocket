@@ -48,6 +48,20 @@
         "offset": 0,
         "limit": 80
       }
+    },
+    {
+      "id": "55555555-5555-4555-8555-555555555555",
+      "name": "テキストを名前順",
+      "filter": {
+        "version": 2,
+        "text": "",
+        "view": "trash",
+        "offset": 0,
+        "limit": 80,
+        "extension": "txt",
+        "sortBy": "name",
+        "descending": false
+      }
     }
   ]
 }

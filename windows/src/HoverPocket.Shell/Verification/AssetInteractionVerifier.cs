@@ -1,4 +1,4 @@
-using System.Runtime.InteropServices;
+﻿using System.Runtime.InteropServices;
 using System.Text.Json;
 using System.Windows;
 using System.Windows.Controls;
@@ -9,6 +9,7 @@ using HoverPocket.Shell.Windows;
 using Microsoft.Web.WebView2.Core;
 using Button = System.Windows.Controls.Button;
 using Point = System.Windows.Point;
+using Size = System.Windows.Size;
 
 namespace HoverPocket.Shell.Verification;
 
@@ -18,8 +19,10 @@ internal static class AssetInteractionVerifier
     {
         var target = controller.ActiveLayoutForVerify!.PanelTarget.PhysicalRect;
         controller.SimulatePointerMoveForVerify(target.Left + target.Width / 2, target.Top + 60);
+        void OnDismiss() => VerifyConsole.WriteLine("TRACE inline focus dismissed: " + Environment.StackTrace);
+        controller.Panel.AssetPreviewDismissRequested += OnDismiss;
         try { await VerifyAsync(controller, imageId, failures); }
-        finally { controller.SetPointerSimulationForVerify(target.Left + target.Width / 2, target.Top + 60); await controller.ShowPanelForUiVerifyAsync(); }
+        finally { controller.Panel.AssetPreviewDismissRequested -= OnDismiss; controller.SetPointerSimulationForVerify(target.Left + target.Width / 2, target.Top + 60); await controller.ShowPanelForUiVerifyAsync(); }
     }
     private static async Task VerifyAsync(HoverShellController controller, string imageId, List<string> failures)
     {
@@ -30,42 +33,121 @@ internal static class AssetInteractionVerifier
         await UntilAsync(async () => await web.ExecuteScriptAsync($$"""!!document.querySelector('[data-asset-id="{{imageId}}"]')""") == "true");
         var original = (await store.GetAsync(imageId))!;
         var originalBytes = await File.ReadAllBytesAsync(store.ReadOriginalPath(original));
+        if (Environment.GetEnvironmentVariable("HOVERPOCKET_VERIFY_LOG") is { Length: > 0 } dropdownLog)
+        {
+            foreach (var selector in new[] { ".assets-format", ".assets-sort-by" })
+            {
+                await ClickSurfaceAsync(web, web.CoreWebView2, selector);
+                await Task.Delay(180);
+                if (Interop.NativeMethods.TryGetWindowRect(controller.Panel.Hwnd, out var popupBounds))
+                {
+                    var snapshot = await Task.Run(() => ScreenshotSelectionWindow.CaptureDesktop(new System.Drawing.Rectangle(popupBounds.Left, popupBounds.Top, popupBounds.Width, popupBounds.Height)));
+                    await CaptureFiles.WritePngAsync(Path.Combine(Path.GetDirectoryName(Path.GetFullPath(dropdownLog))!, selector[1..] + "-popup.png"), snapshot);
+                }
+                KeyEvent(0x1B, 0, 0, 0); KeyEvent(0x1B, 0, 0x0002, 0); await Task.Delay(100);
+            }
+        }
+        await ClickSurfaceAsync(web, web.CoreWebView2, $"[data-asset-id='{imageId}'] .assets-card-favorite");
+        await UntilAsync(async () => (await store.GetAsync(imageId))!.Favorite != original.Favorite);
+        await UntilAsync(async () => await web.ExecuteScriptAsync($"document.querySelector(\"[data-asset-id='{imageId}'] .assets-card-favorite\").getAttribute('aria-pressed')==='{(!original.Favorite).ToString().ToLowerInvariant()}'") == "true");
+        await ClickSurfaceAsync(web, web.CoreWebView2, $"[data-asset-id='{imageId}'] .assets-card-favorite");
+        await UntilAsync(async () => (await store.GetAsync(imageId))!.Favorite == original.Favorite);
+        await UntilAsync(async () => await web.ExecuteScriptAsync($"document.querySelector(\"[data-asset-id='{imageId}'] .assets-card-favorite\").getAttribute('aria-pressed')==='{original.Favorite.ToString().ToLowerInvariant()}'") == "true");
+        await ClickSurfaceAsync(web, web.CoreWebView2, $"[data-asset-id='{imageId}']", rightButton: true);
+        await UntilAsync(async () => await web.ExecuteScriptAsync("!!document.querySelector('.assets-context-menu[open]')") == "true");
+        if (await web.ExecuteScriptAsync("document.querySelector('.assets-preview').hidden && document.querySelector('.assets-footer').contains(document.querySelector('.assets-summary')) && parseFloat(getComputedStyle(document.querySelector('.hp-provider')).paddingTop)===0") != "true") failures.Add("assets: context actions changed preview/footer or retained outer padding");
+        if (Environment.GetEnvironmentVariable("HOVERPOCKET_VERIFY_LOG") is { Length: > 0 } menuLog)
+        {
+            using var screenshot = File.Create(Path.Combine(Path.GetDirectoryName(Path.GetFullPath(menuLog))!, "library-context-menu.png"));
+            await web.CoreWebView2.CapturePreviewAsync(CoreWebView2CapturePreviewImageFormat.Png, screenshot);
+        }
+        KeyEvent(0x1B, 0, 0, 0); KeyEvent(0x1B, 0, 0x0002, 0);
+        await UntilAsync(async () => await web.ExecuteScriptAsync("!document.querySelector('.assets-context-menu').open") == "true");
+        VerifyConsole.WriteLine("PASS native library controls: hover star toggles and restores favorite, right-click opens menu, Escape closes, footer count and compact header verified");
         var before = (await store.QueryAsync(new(Limit: 200))).Items.Select(item => item.Id).ToHashSet();
         await web.ExecuteScriptAsync($$"""
             window.__editProbeDone=false;
             (async()=>{
               document.querySelector('[data-asset-id="{{imageId}}"]')?.dispatchEvent(new MouseEvent('dblclick',{bubbles:true}));
               for(let i=0;i<100&&!document.querySelector('.assets-edit-image');i++) await new Promise(r=>setTimeout(r,30));
-              document.querySelector('.assets-edit-image')?.click();
             })();
             """);
-        ScreenshotEditorWindow? editor = null;
+        await UntilAsync(async () => await web.ExecuteScriptAsync("!!document.querySelector('.assets-edit-image') && !document.querySelector('.assets-edit-image').disabled") == "true");
+        await UntilAsync(() => Task.FromResult(!controller.Panel.IsAnimating));
+        await web.ExecuteScriptAsync("document.querySelector('.assets-edit-image').click()");
+        ScreenshotEditorView? editor = null;
         try
         {
-            await UntilAsync(() => Task.FromResult((editor = System.Windows.Application.Current.Windows.OfType<ScreenshotEditorWindow>().FirstOrDefault(window => window.IsVisible)) is not null));
+            await UntilAsync(() => Task.FromResult((editor = Descendants<ScreenshotEditorView>(controller.Panel).FirstOrDefault()) is not null));
+            if (Window.GetWindow(editor) != controller.Panel || System.Windows.Application.Current.Windows.OfType<ScreenshotEditorWindow>().Any(window => window.IsVisible)) failures.Add("assets: inline edit opened another window");
+            var previewBounds = controller.Panel.LiquidTargetForVerify;
+            await controller.RunHealthCheckForVerifyAsync();
+            controller.Panel.DismissAssetPreviewOnFocusLoss();
+            if (controller.Panel.LiquidTargetForVerify != previewBounds || !controller.Panel.AssetLayout.PinOnly) failures.Add("assets: inline editing lost preview bounds or pin");
+            await UntilAsync(() => Task.FromResult(editor!.IsLoaded && Descendants<Button>(editor).Any(button => button.Content as string == "編集したコピーを保存")));
+            var headerBounds = await RectAsync(web.CoreWebView2, ".hp-header");
+            var headerBottom = (headerBounds.Y + headerBounds.Height) * web.ActualWidth /
+                JsonSerializer.Deserialize<double>(await web.ExecuteScriptAsync("innerWidth"));
+            if (!web.IsVisible || !web.IsHitTestVisible || Math.Abs(editor!.TranslatePoint(new Point(), web).Y - headerBottom) > 1)
+                failures.Add("assets: inline editor hides or overlaps the shell header");
+            await web.ExecuteScriptAsync("window.__editorHeaderClicks=0;document.querySelector('.hp-header').addEventListener('click',e=>{if(e.isTrusted)window.__editorHeaderClicks++})");
+            var previousSize = JsonSerializer.Deserialize<string>(await web.ExecuteScriptAsync("document.querySelector('[data-size-id][aria-pressed=true]').dataset.sizeId"));
+            var otherSize = JsonSerializer.Deserialize<string>(await web.ExecuteScriptAsync("document.querySelector('[data-size-id][aria-pressed=false]').dataset.sizeId"));
+            await ClickSurfaceAsync(web, web.CoreWebView2, $"[data-size-id='{otherSize}']");
+            try { await UntilAsync(async () => await web.ExecuteScriptAsync($"document.querySelector('[data-size-id={otherSize}]').getAttribute('aria-pressed')==='true'") == "true"); }
+            catch (TimeoutException) { throw new TimeoutException($"Native header: active={controller.Panel.IsActive}, animating={controller.Panel.IsAnimating}; " + await web.ExecuteScriptAsync("({clicks:window.__editorHeaderClicks,focus:document.activeElement.tagName,pressed:document.querySelector('[data-size-id][aria-pressed=true]').dataset.sizeId,hit:window.__surfaceClickTarget})")); }
+            await ClickSurfaceAsync(web, web.CoreWebView2, $"[data-size-id='{previousSize}']");
+            await UntilAsync(async () => await web.ExecuteScriptAsync($"document.querySelector('[data-size-id={previousSize}]').getAttribute('aria-pressed')==='true'") == "true");
+            await ClickSurfaceAsync(web, web.CoreWebView2, "[data-refresh]");
+            await UntilAsync(async () => await web.ExecuteScriptAsync("window.__editorHeaderClicks===3") == "true");
+            if (!editor!.IsVisible || controller.Panel.LiquidTargetForVerify != previewBounds || !controller.Panel.AssetLayout.PinOnly)
+                failures.Add("assets: shell header interaction dismissed or resized inline editing");
+            VerifyConsole.WriteLine("PASS inline header: original header visible above editor, native size/refresh clicks, editing and bounds preserved");
             editor!.AddAnnotationsForVerify();
             if (Environment.GetEnvironmentVariable("HOVERPOCKET_VERIFY_LOG") is { Length: > 0 } log)
             {
                 var evidence = Path.Combine(Path.GetDirectoryName(Path.GetFullPath(log))!, "library-editor.png");
                 if (!File.Exists(evidence))
                 {
-                    var bitmap = new RenderTargetBitmap((int)editor.ActualWidth, (int)editor.ActualHeight, 96, 96, PixelFormats.Pbgra32);
-                    bitmap.Render(editor); bitmap.Freeze(); await CaptureFiles.WritePngAsync(evidence, bitmap);
+                    var surface = (FrameworkElement)editor.Parent;
+                    var bitmap = new RenderTargetBitmap((int)surface.ActualWidth, (int)surface.ActualHeight, 96, 96, PixelFormats.Pbgra32);
+                    bitmap.Render(surface); bitmap.Freeze(); await CaptureFiles.WritePngAsync(evidence, bitmap);
                 }
             }
             var save = Descendants<Button>(editor).Single(button => button.Content as string == "編集したコピーを保存");
-            save.RaiseEvent(new RoutedEventArgs(Button.ClickEvent)); editor = null;
+            var write = editor.SaveAsync;
+            editor.SaveAsync = _ => throw new IOException("Synthetic save failure");
+            save.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            await UntilAsync(() => Task.FromResult(editor.IsEnabled));
+            if (!editor.IsVisible || !Descendants<TextBlock>(editor).Any(text => text.Text.Contains("編集内容は残っています"))) failures.Add("assets: failed inline save discarded editing state");
+            editor.SaveAsync = write;
+            save.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            await UntilAsync(() => Task.FromResult(!Descendants<ScreenshotEditorView>(controller.Panel).Any()));
+            editor = null;
             await UntilAsync(async () => (await store.QueryAsync(new(Limit: 200))).Items.Any(item => !before.Contains(item.Id)));
             var saved = (await store.QueryAsync(new(Limit: 200))).Items.Single(item => !before.Contains(item.Id));
             if (!(await File.ReadAllBytesAsync(store.ReadOriginalPath(original))).SequenceEqual(originalBytes) || saved.Id == original.Id)
                 failures.Add("assets: preview annotation save modified source");
-            VerifyConsole.WriteLine("PASS library editor: double click -> edit button -> native annotations -> save button -> new asset and original byte readback");
+            VerifyConsole.WriteLine("PASS inline library editor: same window/bounds, focus pin, native annotations, failed save retained/retried, new asset and original byte readback");
         }
-        finally { editor?.Close(); }
+        finally { editor?.Cancel(); }
+        await UntilAsync(async () => await web.ExecuteScriptAsync("document.querySelector('.assets-root').getAttribute('aria-busy') !== 'true' && !!document.querySelector('.assets-edit-image')") == "true");
+        await UntilAsync(() => Task.FromResult(!controller.Panel.IsAnimating));
+        await web.ExecuteScriptAsync("document.querySelector('.assets-edit-image')?.click()");
+        await UntilAsync(() => Task.FromResult(Descendants<ScreenshotEditorView>(controller.Panel).Any()));
+        var cancelledEditor = Descendants<ScreenshotEditorView>(controller.Panel).Single();
+        cancelledEditor.AddAnnotationsForVerify(); cancelledEditor.Cancel();
+        await UntilAsync(() => Task.FromResult(!Descendants<ScreenshotEditorView>(controller.Panel).Any()));
+        await UntilAsync(async () => await web.ExecuteScriptAsync("document.querySelector('.assets-root').getAttribute('aria-busy') !== 'true'") == "true");
+        if ((await store.QueryAsync(new(Limit: 200))).Items.Length != before.Count + 1) failures.Add("assets: cancelling inline edit created an asset");
+        VerifyConsole.WriteLine("PASS inline cancel: preview restored without creating an asset");
+        if (!controller.Panel.IsVisible || !controller.PanelExpectedVisibleForVerify) failures.Add("assets: inline cancel unexpectedly hid the preview");
         await web.ExecuteScriptAsync("document.querySelector('[data-action=\"endPreview\"]')?.click()");
         await UntilAsync(() => Task.FromResult(!controller.Panel.IsAnimating && !controller.Panel.AssetLayout.Active));
         await UntilAsync(async () => await web.ExecuteScriptAsync($$"""!!document.querySelector('[data-asset-id="{{imageId}}"]')""") == "true");
 
+        VerifyConsole.WriteLine($"MEASURE after inline edit: visible={controller.Panel.IsVisible}, expected={controller.PanelExpectedVisibleForVerify}, reveal={controller.Panel.RevealForVerify}, keyboard={controller.Panel.KeyboardInteractionEnabled}");
+        if (!controller.Panel.IsVisible) { failures.Add("assets: returning from inline edit hid the list"); await controller.ShowPanelForUiVerifyAsync(); }
         await NativeDropAsync(web, web.CoreWebView2, () => controller.Panel.InternalAssetDragForVerify, imageId, intoTrash: false);
         if ((await store.GetAsync(imageId))!.Trashed) failures.Add("assets: non-trash drop archived media");
         await NativeDropAsync(web, web.CoreWebView2, () => controller.Panel.InternalAssetDragForVerify, imageId, intoTrash: true);
@@ -76,6 +158,19 @@ internal static class AssetInteractionVerifier
         await UntilAsync(async () => !(await store.GetAsync(imageId))!.Trashed);
         if (!(await File.ReadAllBytesAsync(store.ReadOriginalPath(original))).SequenceEqual(originalBytes)) failures.Add("assets: drag undo changed original");
         VerifyConsole.WriteLine("PASS native drag: outside target preserves item, bottom target archives, undo restores identical original bytes");
+        await UntilAsync(async () => await web.ExecuteScriptAsync($$"""!!document.querySelector('[data-asset-id="{{imageId}}"]')""") == "true");
+        await web.ExecuteScriptAsync("window.__deleteKeys=[];document.addEventListener('keydown',e=>window.__deleteKeys.push({key:e.key,code:e.code,target:e.target.tagName,trusted:e.isTrusted}),{capture:true})");
+        await ClickSurfaceAsync(web, web.CoreWebView2, $"[data-asset-id='{imageId}']");
+        await UntilAsync(async () => await web.ExecuteScriptAsync($$"""document.querySelector('[data-asset-id="{{imageId}}"]')?.getAttribute('aria-selected')==='true'""") == "true");
+        KeyEvent(0x2E, 0x53, 0x0001, 0); KeyEvent(0x2E, 0x53, 0x0003, 0);
+        try { await UntilAsync(async () => (await store.GetAsync(imageId))!.Trashed); }
+        catch (TimeoutException) { throw new TimeoutException($"Native Delete: active={controller.Panel.IsActive}, keyboard={controller.Panel.KeyboardInteractionEnabled}; " + await web.ExecuteScriptAsync("({keys:window.__deleteKeys,focus:document.activeElement.outerHTML,selection:document.querySelector('.assets-selection').textContent,status:document.querySelector('.assets-status').textContent})")); }
+        if (!File.Exists(store.ReadOriginalPath(original))) failures.Add("assets: Delete removed the original file");
+        try { KeyEvent(0x11, 0, 0, 0); KeyEvent(0x5A, 0, 0, 0); KeyEvent(0x5A, 0, 0x0002, 0); }
+        finally { KeyEvent(0x11, 0, 0x0002, 0); }
+        await UntilAsync(async () => !(await store.GetAsync(imageId))!.Trashed);
+        if (!(await File.ReadAllBytesAsync(store.ReadOriginalPath(original))).SequenceEqual(originalBytes)) failures.Add("assets: Delete/Undo changed original bytes");
+        VerifyConsole.WriteLine("PASS native Delete/Ctrl+Z: selected image moved to library trash and restored, original bytes preserved");
         controller.OpenAssetLibraryFromUser();
         var organizer = System.Windows.Application.Current.Windows.OfType<AssetOrganizerWindow>().Single(window => window.IsVisible);
         try
@@ -91,6 +186,18 @@ internal static class AssetInteractionVerifier
             await UntilAsync(async () => !(await store.GetAsync(imageId))!.Trashed);
             if (!(await File.ReadAllBytesAsync(store.ReadOriginalPath(original))).SequenceEqual(originalBytes)) failures.Add("assets: organizer trash/undo changed source");
             VerifyConsole.WriteLine("PASS organizer native drag: outside target unchanged, DOM trash target archives, undo restores original bytes");
+            await UntilAsync(async () => await libraryWeb.ExecuteScriptAsync($$"""!!document.querySelector('[data-asset-id="{{imageId}}"]')""") == "true");
+            var bounds = new Size(organizer.ActualWidth, organizer.ActualHeight);
+            await libraryWeb.ExecuteScriptAsync($$"""document.querySelector('[data-asset-id="{{imageId}}"]')?.dispatchEvent(new MouseEvent('dblclick',{bubbles:true}));""");
+            await UntilAsync(async () => await libraryWeb.ExecuteScriptAsync("!!document.querySelector('.assets-edit-image') && !document.querySelector('.assets-edit-image').disabled") == "true");
+            await libraryWeb.ExecuteScriptAsync("document.querySelector('.assets-edit-image').click()");
+            await UntilAsync(() => Task.FromResult(Descendants<ScreenshotEditorView>(organizer).Any()));
+            var organizerEditor = Descendants<ScreenshotEditorView>(organizer).Single();
+            if (Window.GetWindow(organizerEditor) != organizer || bounds != new Size(organizer.ActualWidth, organizer.ActualHeight)) failures.Add("assets: organizer edit changed window or bounds");
+            organizerEditor.Cancel();
+            await UntilAsync(async () => await libraryWeb.ExecuteScriptAsync("document.querySelector('.assets-root').getAttribute('aria-busy') !== 'true'") == "true");
+            if (!organizer.WebSurfaceForVerify.IsVisible || (await store.QueryAsync(new(Limit: 200))).Items.Length != before.Count + 1) failures.Add("assets: organizer edit cancellation did not restore preview");
+            VerifyConsole.WriteLine("PASS organizer inline edit/cancel: same window/bounds, preview restored, no new asset");
         }
         finally { organizer.Close(); }
 
@@ -149,6 +256,33 @@ internal static class AssetInteractionVerifier
         finally { MouseEvent(0x0004, 0, 0, 0, 0); SetCursorPos(previous.X, previous.Y); }
     }
 
+    private static async Task ClickSurfaceAsync(FrameworkElement surface, CoreWebView2 web, string selector, bool rightButton = false)
+    {
+        await web.ExecuteScriptAsync($"document.querySelector({JsonSerializer.Serialize(selector)}).scrollIntoView({{block:'nearest',inline:'nearest'}})");
+        if (Window.GetWindow(surface) is PanelWindow panel) await UntilAsync(() => Task.FromResult(!panel.IsAnimating && panel.RevealForVerify == 1));
+        await Task.Delay(100);
+        surface.UpdateLayout();
+        var rawBounds = await web.ExecuteScriptAsync($$"""
+            (()=>{const el=document.querySelector({{JsonSerializer.Serialize(selector)}}), r=el.getBoundingClientRect(), s=el.closest('.assets-scroll')?.getBoundingClientRect();
+            const x=Math.max(0,r.left,s?.left||0), y=Math.max(0,r.top,s?.top||0), right=Math.min(innerWidth,r.right,s?.right||innerWidth), bottom=Math.min(innerHeight,r.bottom,s?.bottom||innerHeight);
+            return JSON.stringify({x,y,width:right-x,height:bottom-y});})()
+            """);
+        using var visible = JsonDocument.Parse(JsonSerializer.Deserialize<string>(rawBounds)!);
+        var b = visible.RootElement; var bounds = new Rect(b.GetProperty("x").GetDouble(), b.GetProperty("y").GetDouble(), Math.Max(0,b.GetProperty("width").GetDouble()), Math.Max(0,b.GetProperty("height").GetDouble()));
+        if (bounds.Width == 0 || bounds.Height == 0) throw new InvalidOperationException("Native click target is outside the viewport: " + selector);
+        var ratio = surface.ActualWidth / JsonSerializer.Deserialize<double>(await web.ExecuteScriptAsync("innerWidth"));
+        var position = surface.PointToScreen(new Point((bounds.X + bounds.Width / 2) * ratio, (bounds.Y + bounds.Height / 2) * ratio));
+        VerifyConsole.WriteLine($"MEASURE native click: target={selector}, right={rightButton}, visible={bounds}, ratio={ratio:0.###}");
+        await web.ExecuteScriptAsync($"window.__surfaceClickTarget=document.elementFromPoint({bounds.X + bounds.Width / 2},{bounds.Y + bounds.Height / 2})?.outerHTML");
+        GetCursorPos(out var previous);
+        try
+        {
+            SetCursorPos((int)position.X, (int)position.Y); await Task.Delay(80);
+            MouseEvent(rightButton ? 0x0008u : 0x0002u, 0, 0, 0, 0); await Task.Delay(40);
+            MouseEvent(rightButton ? 0x0010u : 0x0004u, 0, 0, 0, 0); await Task.Delay(80);
+        }
+        finally { MouseEvent(rightButton ? 0x0010u : 0x0004u, 0, 0, 0, 0); SetCursorPos(previous.X, previous.Y); }
+    }
     private static async Task<Rect> RectAsync(CoreWebView2 web, string selector)
     {
         var raw = await web.ExecuteScriptAsync($"JSON.stringify(document.querySelector({JsonSerializer.Serialize(selector)}).getBoundingClientRect().toJSON())");
@@ -168,5 +302,6 @@ internal static class AssetInteractionVerifier
     [StructLayout(LayoutKind.Sequential)] private struct NativePoint { public int X, Y; }
     [DllImport("user32.dll")] private static extern bool GetCursorPos(out NativePoint point);
     [DllImport("user32.dll")] private static extern bool SetCursorPos(int x, int y);
+    [DllImport("user32.dll", EntryPoint = "keybd_event")] private static extern void KeyEvent(byte key, byte scan, uint flags, nuint extra);
     [DllImport("user32.dll", EntryPoint = "mouse_event")] private static extern void MouseEvent(uint flags, uint x, uint y, uint data, nuint extra);
 }

@@ -28,7 +28,8 @@ internal enum BridgeSurface
 internal sealed class PanelBridgeController : IDisposable
 {
     public HoverPocket.Assets.AssetStore AssetLibrary { get; }
-    public Action<string?>? AssetCaptureRequested { get; set; }
+    internal ClipboardHistoryStore ClipboardHistoryForVerify => _clipboardBridgeController.StoreForVerify;
+    public Func<string, string?, Task>? AssetCaptureRequested { get; set; }
     public HoverPocket.Shell.Providers.Assets.AssetPlaybackOwner AssetPlayback { get; } = new();
     private readonly ProviderRegistry _providerRegistry;
     private readonly UserSettingsStore _settingsStore;

@@ -8,6 +8,8 @@ let activeTab = "all";
 let activeMount = 0;
 let refreshPromise = null;
 let renderCount = 0;
+const imageCache = new Map(), imageRequests = new Map();
+let imageObserver = null;
 
 /**
  * @param {{ container: HTMLElement, request: (method: string, params?: unknown) => Promise<unknown> }} options
@@ -33,6 +35,7 @@ export function renderClipboardProvider(options) {
     refresh: refreshState,
     dispose() {
       if (mount === activeMount) {
+        imageObserver?.disconnect();
         containerEl = null;
         bridgeRequest = null;
       }
@@ -126,6 +129,8 @@ function applyClipboardState(state, forceRender) {
   const changed = nextSignature !== clipboardStateSignature;
   clipboardState = state;
   clipboardStateSignature = nextSignature;
+  const imageIds = new Set((state?.imageItems ?? []).map(item => item.id));
+  for (const [key, value] of imageCache) if (!imageIds.has(value.id)) imageCache.delete(key);
   validateViewState();
   if (forceRender || changed) {
     render();
@@ -180,6 +185,12 @@ function render() {
   }
 
   const scrollState = captureScrollState();
+  imageObserver?.disconnect();
+  imageObserver = new IntersectionObserver(entries => {
+    for (const entry of entries) if (entry.isIntersecting) {
+      imageObserver.unobserve(entry.target); entry.target.__loadClipboardImage?.();
+    }
+  }, {root:containerEl, rootMargin:"80px"});
   const root = element("section", { className: "clipboard-root" });
   renderCount++;
   root.append(renderHeader());
@@ -380,11 +391,7 @@ function renderImageItem(item) {
   });
 
   const preview = element("div", { className: "clipboard-image-preview" });
-  if (item.dataUrl) {
-    preview.append(element("img", { src: item.dataUrl, alt: tx("クリップボード画像", "Clipboard image") }));
-  } else {
-    preview.append(element("span", {}, tx("画像", "Image")));
-  }
+  preview.append(clipboardImage(item, true));
 
   const meta = element("div", { className: "clipboard-image-meta" }, formatTime(item.createdAt));
   tile.append(preview, element("div", { className: "clipboard-image-footer" }, meta, renderItemActions(item, "image")));
@@ -450,11 +457,7 @@ function renderPreview(previewRef) {
       } catch (error) { target?.setAttribute("title", error.message); if (target) target.textContent = "!"; }
     }, "", "save-to-assets"));
     const imageWrap = element("div", { className: "clipboard-preview-image" });
-    if (item.dataUrl) {
-      imageWrap.append(element("img", { src: item.dataUrl, alt: tx("クリップボード画像", "Clipboard image") }));
-    } else {
-      imageWrap.append(element("span", {}, tx("画像を表示できません", "Image unavailable")));
-    }
+    imageWrap.append(clipboardImage(item, false));
     preview.append(imageWrap);
   } else {
     preview.append(element("pre", { className: "clipboard-preview-text", "data-scroll-key": "preview-text" }, item.text ?? ""));
@@ -470,6 +473,37 @@ function togglePreview(kind, id) {
     activePreview = { kind, id };
   }
   render();
+}
+
+function clipboardImage(item, thumbnail) {
+  const image = element("img", {alt:tx("クリップボード画像", "Clipboard image"), decoding:"async"});
+  const key = `${item.id}:${thumbnail ? "thumb" : "full"}`, mount = activeMount;
+  const cached = imageCache.get(key)?.dataUrl;
+  if (cached) { image.src = cached; return image; }
+  const thumb = imageCache.get(`${item.id}:thumb`)?.dataUrl;
+  if (thumb) image.src = thumb;
+  image.__loadClipboardImage = async () => {
+    try {
+      let pending = imageRequests.get(key);
+      if (!pending) {
+        pending = send("clipboard.getImage", {id:item.id,thumbnail}).then(result => {
+          if (result?.dataUrl && findItem("image",item.id)) {
+            // Keep one original for the active preview; the grid caches small images.
+            if (!thumbnail) for (const existing of imageCache.keys()) if (existing.endsWith(":full")) imageCache.delete(existing);
+            imageCache.set(key,{id:item.id,dataUrl:result.dataUrl});
+          }
+          return result?.dataUrl;
+        }).finally(() => imageRequests.delete(key));
+        imageRequests.set(key,pending);
+      }
+      const dataUrl = await pending;
+      if (mount !== activeMount || !image.isConnected) return;
+      if (dataUrl) image.src = dataUrl;
+      else image.alt = tx("画像を表示できません", "Image unavailable");
+    } catch { if (image.isConnected) image.alt = tx("画像を表示できません", "Image unavailable"); }
+  };
+  imageObserver.observe(image);
+  return image;
 }
 
 function findItem(kind, id) {
