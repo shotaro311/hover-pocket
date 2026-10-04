@@ -90,8 +90,11 @@ internal sealed class LiquidMotionVerifier(HoverShellController controller)
                 var close = panel.CloseAsync(controller.ActiveLayoutForVerify!);
                 await Task.Delay(70);
                 var value = panel.RevealForVerify;
+                var visibleBefore = panel.IsVisible;
+                var reversalTimer = Stopwatch.StartNew();
                 var opening = panel.OpenAsync(controller.ActiveLayoutForVerify!, target);
-                Require(Math.Abs(value - panel.RevealForVerify) < .000001, "reversal reset reveal position");
+                Require(Math.Abs(value - panel.RevealForVerify) < .000001,
+                    $"reversal reset reveal position: before={value:R}, after={panel.RevealForVerify:R}, visible_before={visibleBefore}, open_call_ms={reversalTimer.Elapsed.TotalMilliseconds:0.0}, system_animation={System.Windows.SystemParameters.ClientAreaAnimation}, reduce_motion={controller.PanelBridgeController.CurrentSettings.ReduceMotion}");
                 await Task.WhenAll(close, opening);
                 await controller.HidePanelForVerifyAsync();
                 Require(!panel.IsVisible && !panel.IsAnimating, "closed panel left a visible surface");

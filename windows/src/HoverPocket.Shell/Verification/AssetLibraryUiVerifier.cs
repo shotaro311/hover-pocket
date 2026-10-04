@@ -156,7 +156,8 @@ internal static class AssetLibraryUiVerifier
         var dropData=new System.Windows.DataObject(System.Windows.DataFormats.FileDrop,new[]{dropFolder});
         await controller.Panel.ReceiveAssetDropAsync(dropData);
         deadline=DateTime.UtcNow.AddSeconds(8); AssetPage? droppedPage=null;
-        while(DateTime.UtcNow<deadline) { droppedPage=await store.QueryAsync(new()); if(droppedPage.Items.Any(a=>a.Name=="任意形式.dat"))break; await Task.Delay(50); }
+        // The importer enumerates files and directories independently of their creation order.
+        while(DateTime.UtcNow<deadline) { droppedPage=await store.QueryAsync(new()); if(droppedPage.Items.Any(a=>a.Name=="任意形式.dat") && droppedPage.Folders.Any(c=>c.Name=="空フォルダ"))break; await Task.Delay(50); }
         if(droppedPage is null || !droppedPage.Folders.Any(c=>c.Name=="空フォルダ") || !droppedPage.Items.Any(a=>a.Name=="任意形式.dat")) failures.Add("assets: native file-drop payload or empty folder hierarchy failed");
         await bridge.SelectProviderFromShellAsync("controls");
         var savedPreference = bridge.CurrentSettings.LastSelectedProviderId;
