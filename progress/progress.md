@@ -2,13 +2,14 @@
 project_slug: hover-menu-preview
 updated: 2026-10-04
 updated_by: codex
-status: windows-0.2.10-local.9-screenshot-toast-running; public-windows-0.2.9; reported-freeze-incident-unconfirmed-reproduced-preview-races-fixed; published-macos-644; macos-asset-library-pending
+status: windows-0.2.10-installed; public-windows-0.2.10; reported-freeze-incident-unconfirmed-reproduced-preview-races-fixed; published-macos-644; macos-asset-library-pending
 ---
 
-## 2026-10-04 Windows 0.2.10 更新配信の準備
+## 2026-10-04 Windows 0.2.10 本番配信完了
 
-- ユーザー承認に基づき、検証済みlocal.9の素材・クリップボード・スクショ修正を専用worktreeへ切り出して0.2.10へまとめた。音声機能の並行変更は保持し、配信対象へ含めていない。
-- 保存コア93項目が通過。公開・配布用検査とインストールreadbackは[配信記録](2026-10/2026-10-04_hover-pocket-windows-0210-release.md)へ追記する。
+- 素材一覧・プレビュー編集・クリップボード読み込み・スクショ装飾と画像付き通知の修正を`eba3774`へコミット/プッシュし、[PR #43](https://github.com/shotaro311/hover-pocket/pull/43)をmainへ統合。[Windows 0.2.10](https://github.com/shotaro311/hover-pocket/releases/tag/win-v0.2.10)を22:44 JSTに配信した。並行中の音声変更は保持し、配信へ含めていない。
+- 保存コア93項目、Windows CI、公開8 assetsとMac更新先のreadback、0.2.9↔0.2.10の更新/復帰/再インストールCIが成功。Mac appcastとLatestを維持した。
+- 22:45 JSTにこのPCの正規インストール先を0.2.10へ更新しPID80956で起動。公開DLL一致・準備完了・例外0件、設定・素材13件とDB全内容・クリップボード内容・自動起動先の保持を確認。[配信と検証の記録](2026-10/2026-10-04_hover-pocket-windows-0210-release.md)。
 
 ## 2026-10-04 スクショ通知からの画像ドラッグとメニュー配色
 
