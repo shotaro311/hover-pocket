@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hoverpocket.app/contracts/asset-library/manifest-v1",
+  "title": "HoverPocket Asset Library Backup v1",
+  "type": "object",
+  "required": ["version", "createdAt", "assets", "folders", "tags", "searches"],
+  "properties": {
+    "version": { "const": 1 },
+    "createdAt": { "type": "string", "format": "date-time" },
+    "excludedPending": { "type": "integer", "minimum": 0, "default": 0, "description": "Uncommitted imports excluded from this backup snapshot." },
+    "assets": { "type": "array", "items": { "$ref": "#/$defs/asset" } },
+    "folders": { "type": "array", "items": { "$ref": "#/$defs/category" } },
+    "tags": { "type": "array", "items": { "$ref": "#/$defs/category" } },
+    "searches": { "type": "array", "items": { "$ref": "#/$defs/search" } }
+  },
+  "$defs": {
+    "ids": { "type": "array", "uniqueItems": true, "items": { "type": "string", "format": "uuid" } },
+    "asset": {
+      "type": "object", "required": ["id", "name", "extension", "kind", "sha256", "sizeBytes", "createdAt", "favorite", "trashed", "internetOrigin", "folderIds", "tagIds"],
+      "properties": {
+        "id": { "type": "string", "format": "uuid" }, "name": { "type": "string", "minLength": 1 },
+        "extension": { "type": "string", "pattern": "^[a-z0-9]{0,32}$" },
+        "kind": { "enum": ["image", "video", "pdf", "other"] },
+        "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "sizeBytes": { "type": "integer", "minimum": 0 }, "createdAt": { "type": "string", "format": "date-time" },
+        "favorite": { "type": "boolean" }, "trashed": { "type": "boolean" }, "internetOrigin": { "type": "boolean" },
+        "folderIds": { "$ref": "#/$defs/ids" }, "tagIds": { "$ref": "#/$defs/ids" }
+      }
+    },
+    "category": {
+      "type": "object", "required": ["id", "name", "parentId"],
+      "properties": { "id": { "type": "string", "format": "uuid" }, "name": { "type": "string", "minLength": 1 }, "parentId": { "type": ["string", "null"] } }
+    },
+    "filter": {
+      "type": "object", "required": ["text", "view", "offset", "limit"],
+      "properties": { "version": { "const": 1, "default": 1 }, "text": { "type": "string" }, "view": { "enum": ["recent", "favorites", "uncategorized", "trash"] }, "kind": { "enum": [null, "image", "video", "pdf", "other"] }, "folderId": { "type": ["string", "null"] }, "tagId": { "type": ["string", "null"] }, "folderIds": { "oneOf": [{ "$ref": "#/$defs/ids" }, { "type": "null" }] }, "tagIds": { "oneOf": [{ "$ref": "#/$defs/ids" }, { "type": "null" }] }, "createdAfter": { "type": ["string", "null"], "format": "date-time", "description": "Inclusive UTC boundary, computed from the user's local date." }, "createdBefore": { "type": ["string", "null"], "format": "date-time", "description": "Exclusive UTC boundary, computed from the next local day." }, "offset": { "type": "integer", "minimum": 0 }, "limit": { "type": "integer", "minimum": 1, "maximum": 200 } }
+    },
+    "search": {
+      "type": "object", "required": ["id", "name", "filter"],
+      "properties": { "id": { "type": "string", "format": "uuid" }, "name": { "type": "string", "minLength": 1 }, "filter": { "$ref": "#/$defs/filter" } }
+    }
+  }
+}

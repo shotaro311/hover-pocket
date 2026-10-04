@@ -11,6 +11,7 @@ using HoverPocket.Shell.Providers.Clipboard;
 using HoverPocket.Shell.Providers.Controls;
 using HoverPocket.Shell.Providers.Sticky;
 using HoverPocket.Shell.Providers.Timer;
+using HoverPocket.Shell.Providers.Weather;
 using HoverPocket.Shell.PocketApps;
 using HoverPocket.Shell.Services;
 using HoverPocket.Shell.Settings;
@@ -26,12 +27,17 @@ internal enum BridgeSurface
 
 internal sealed class PanelBridgeController : IDisposable
 {
+    public HoverPocket.Assets.AssetStore AssetLibrary { get; }
+    public Action<string?>? AssetCaptureRequested { get; set; }
+    public HoverPocket.Shell.Providers.Assets.AssetPlaybackOwner AssetPlayback { get; } = new();
     private readonly ProviderRegistry _providerRegistry;
     private readonly UserSettingsStore _settingsStore;
     private readonly IStartupRegistrationService _startupRegistration;
     private readonly UpdaterService _updaterService;
     private readonly CalculatorBridgeHandlers _calculatorBridgeHandlers = new();
     private readonly CalendarBridgeController _calendarBridgeController;
+    private readonly WeatherStore _weatherStore;
+    private readonly WeatherService _weatherService = new();
     private readonly ClipboardBridgeController _clipboardBridgeController;
     private readonly ControlsBridgeController _controlsBridgeController = new();
     private readonly StickyBridgeController _stickyBridgeController;
@@ -66,6 +72,23 @@ internal sealed class PanelBridgeController : IDisposable
     private VoiceLaneMode _resolvedVoiceLaneMode;
     private volatile bool _voiceRuntimeActive;
     private bool _disposed;
+    private string? _assetDropPreviousProvider;
+    private bool _assetDropCompleted;
+    public bool AssetsVisible => IsVisible("assets");
+    public async Task BeginAssetDropAsync()
+    {
+        if (!AssetsVisible || _assetDropPreviousProvider is not null) return;
+        _assetDropPreviousProvider = _selectedProviderId; _assetDropCompleted = false; _selectedProviderId = "assets";
+        await PublishStateAsync(CancellationToken.None);
+    }
+    public async Task CancelAssetDropAsync() { if (!_assetDropCompleted) await FinishAssetDropAsync(false); }
+    public async Task FinishAssetDropAsync(bool completed)
+    {
+        if (_assetDropPreviousProvider is null) return;
+        if (completed) { _assetDropCompleted = true; return; }
+        _selectedProviderId = IsVisible(_assetDropPreviousProvider) ? _assetDropPreviousProvider : ResolvePreferredProviderId();
+        _assetDropPreviousProvider = null; _assetDropCompleted = false; await PublishStateAsync(CancellationToken.None);
+    }
 
     public PanelBridgeController(
         ProviderRegistry providerRegistry,
@@ -83,6 +106,11 @@ internal sealed class PanelBridgeController : IDisposable
     {
         _providerRegistry = providerRegistry;
         _settingsStore = settingsStore;
+        var productionSettingsRoot = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "HoverPocket");
+        AssetLibrary = new HoverPocket.Assets.AssetStore(string.Equals(Path.GetFullPath(settingsStore.RootDirectory), Path.GetFullPath(productionSettingsRoot), StringComparison.OrdinalIgnoreCase)
+            ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "HoverPocket", "AssetLibrary")
+            : Path.Combine(settingsStore.RootDirectory, "AssetLibrary"), HoverPocket.Shell.Providers.Assets.AssetRecycle.MoveAsync);
+        _weatherStore = new WeatherStore(Path.Combine(settingsStore.RootDirectory, "weather"));
         _startupRegistration = startupRegistration ?? new RunKeyStartupRegistrationService();
         _updaterService = updaterService ?? new UpdaterService();
         _openAIRealtimeCredentialStore = openAIRealtimeCredentialStore
@@ -370,6 +398,8 @@ internal sealed class PanelBridgeController : IDisposable
         Register("settings.setPreferredProvider", SetPreferredProviderAsync);
         Register("settings.setHandleIcon", SetHandleIconAsync);
         Register("settings.setShowTopHandleSideArea", SetShowTopHandleSideAreaAsync);
+        Register("settings.setAutoHideTopHandle", SetAutoHideTopHandleAsync);
+        Register("settings.setPanelAttachment", SetPanelAttachmentAsync);
         Register("settings.setDisableTopEdgeInFullscreen", SetDisableTopEdgeInFullscreenAsync);
         Register("settings.setStartWithWindows", SetStartWithWindowsAsync);
         Register("settings.setAutoCheckForUpdates", SetAutoCheckForUpdatesAsync);
@@ -462,12 +492,30 @@ internal sealed class PanelBridgeController : IDisposable
                     cancellationToken));
             _pocketAppGenerationController?.AttachSettings(dispatcher, approvalOwner);
         }
+        dispatcher.Register("weather.getForecast", async (parameters, token) =>
+            await _weatherStore.LoadAsync(CurrentSettings.WeatherLocation, CurrentSettings.WeatherTemperatureUnit,
+                parameters is { } value && value.TryGetProperty("force", out var force) && force.ValueKind == JsonValueKind.True, token));
+        dispatcher.Register("weather.openAttribution", (_, token) =>
+        {
+            token.ThrowIfCancellationRequested();
+            Process.Start(new ProcessStartInfo("https://open-meteo.com/") { UseShellExecute = true });
+            return Task.FromResult<object?>(new { opened = true });
+        });
+        if (surface == BridgeSurface.Settings)
+        {
+            dispatcher.Register("weather.search", async (parameters, token) =>
+                await _weatherService.SearchAsync(ReadRequiredString(parameters, "query"), ToWireValue(CurrentSettings.Language), token));
+            dispatcher.Register("weather.setLocation", SetWeatherLocationAsync);
+            dispatcher.Register("weather.setUnit", SetWeatherUnitAsync);
+            dispatcher.Register("weather.useCurrentLocation", UseCurrentWeatherLocationAsync);
+        }
         _calculatorBridgeHandlers.Register(dispatcher);
         if (_externalIntegrationsEnabled)
         {
             _controlsBridgeController.Attach(dispatcher);
             _calendarBridgeController.Attach(dispatcher);
             _clipboardBridgeController.Attach(dispatcher);
+            if (surface == BridgeSurface.Panel) Register("assets.importClipboardHistory", (p, token) => _clipboardBridgeController.SaveImageToLibraryAsync(AssetLibrary, ReadRequiredString(p, "id"), token));
         }
         _stickyBridgeController.Attach(dispatcher);
         _timerBridgeHandlers.Register(dispatcher);
@@ -552,6 +600,8 @@ internal sealed class PanelBridgeController : IDisposable
                 displayPlacement = ToWireValue(CurrentSettings.DisplayPlacement),
                 panelSize = ToWireValue(CurrentSettings.PanelSize),
                 textSize = ToWireValue(CurrentSettings.TextSize),
+                weatherLocation = CurrentSettings.WeatherLocation,
+                weatherTemperatureUnit = CurrentSettings.WeatherTemperatureUnit,
                 switchingMode = ToWireValue(CurrentSettings.SwitchingMode),
                 language = ToWireValue(CurrentSettings.Language),
                 startWithWindows = CurrentSettings.StartWithWindows,
@@ -570,10 +620,16 @@ internal sealed class PanelBridgeController : IDisposable
                 lastSelectedProviderId = CurrentSettings.LastSelectedProviderId,
                 handleIcon = ToWireValue(CurrentSettings.HandleIconStyle),
                 showTopHandleSideArea = CurrentSettings.ShowTopHandleSideArea,
+                autoHideTopHandle = CurrentSettings.AutoHideTopHandle,
+                panelAttachmentStyle = PanelAttachment.WireValue(CurrentSettings.PanelAttachmentStyle),
+                effectivePanelAttachmentStyle = PanelAttachment.WireValue(PanelAttachment.Resolve(CurrentSettings)),
+                automaticScreenEdgeAttachment = CurrentSettings.AutomaticScreenEdgeAttachment,
+                reduceMotion = CurrentSettings.ReduceMotion,
                 disableTopEdgeInFullscreen = CurrentSettings.DisableTopEdgeInFullscreen,
                 providerOrder = EffectiveProviderOrder(),
                 providerVisibility = CurrentSettings.ProviderVisibility
             },
+            weatherRegions = WeatherRegions.All,
             updater = _updaterService.Snapshot,
             panel = new
             {
@@ -911,6 +967,42 @@ internal sealed class PanelBridgeController : IDisposable
         return await PublishStateAsync(cancellationToken);
     }
 
+    private async Task<object?> SetWeatherLocationAsync(JsonElement? parameters, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (parameters is not { } value || !value.TryGetProperty("location", out var item))
+            throw new InvalidOperationException("Choose a weather location.");
+        var location = item.Deserialize<WeatherLocation>(BridgeJson.Options);
+        if (location is not { IsValid: true }) throw new InvalidOperationException("Invalid weather location.");
+        var updated = CurrentSettings.Clone();
+        updated.WeatherLocation = location;
+        SaveSettings(updated);
+        return await PublishStateAsync(cancellationToken);
+    }
+
+    private async Task<object?> SetWeatherUnitAsync(JsonElement? parameters, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var unit = ReadRequiredString(parameters, "unit");
+        if (unit is not ("automatic" or "celsius" or "fahrenheit"))
+            throw new InvalidOperationException("Invalid temperature unit.");
+        var updated = CurrentSettings.Clone();
+        updated.WeatherTemperatureUnit = unit;
+        SaveSettings(updated);
+        return await PublishStateAsync(cancellationToken);
+    }
+
+    private async Task<object?> UseCurrentWeatherLocationAsync(JsonElement? parameters, CancellationToken cancellationToken)
+    {
+        _ = parameters;
+        var location = await WindowsWeatherLocation.GetAsync(cancellationToken);
+        cancellationToken.ThrowIfCancellationRequested();
+        var updated = CurrentSettings.Clone();
+        updated.WeatherLocation = location;
+        SaveSettings(updated);
+        return await PublishStateAsync(cancellationToken);
+    }
+
     private async Task<object?> SetDisplayPlacementAsync(JsonElement? parameters, CancellationToken cancellationToken)
     {
         var placement = ParseDisplayPlacement(ReadRequiredString(parameters, "displayPlacement"));
@@ -1069,6 +1161,35 @@ internal sealed class PanelBridgeController : IDisposable
             SaveSettings(updated);
         }
 
+        return await PublishStateAsync(cancellationToken);
+    }
+
+    private async Task<object?> SetPanelAttachmentAsync(JsonElement? parameters, CancellationToken cancellationToken)
+    {
+        var updated = CurrentSettings.Clone();
+        if (parameters is { } p)
+        {
+            if (p.TryGetProperty("style", out var style))
+            {
+                updated.PanelAttachmentStyle = style.GetString() switch
+                {
+                    "preserveMenu" => PanelAttachmentStyle.PreserveMenu,
+                    "coverMenu" => PanelAttachmentStyle.CoverMenu,
+                    _ => throw new ArgumentException("Unknown panel attachment style.")
+                };
+            }
+            if (p.TryGetProperty("automatic", out var automatic)) updated.AutomaticScreenEdgeAttachment = automatic.GetBoolean();
+            if (p.TryGetProperty("reduceMotion", out var reduce)) updated.ReduceMotion = reduce.GetBoolean();
+        }
+        SaveSettings(updated);
+        return await PublishStateAsync(cancellationToken);
+    }
+
+    private async Task<object?> SetAutoHideTopHandleAsync(JsonElement? parameters, CancellationToken cancellationToken)
+    {
+        var updated = CurrentSettings.Clone();
+        updated.AutoHideTopHandle = ReadRequiredBool(parameters, "enabled");
+        SaveSettings(updated);
         return await PublishStateAsync(cancellationToken);
     }
 
@@ -2085,7 +2206,7 @@ internal sealed class PanelBridgeController : IDisposable
     {
         _panelOpen = true;
         _voiceCoordinator.SetUiAttached(true);
-        if (!CurrentSettings.RememberLastSelectedProvider)
+        if (!CurrentSettings.RememberLastSelectedProvider && _assetDropPreviousProvider is null)
         {
             _selectedProviderId = ResolvePreferredProviderId();
         }
@@ -2096,6 +2217,7 @@ internal sealed class PanelBridgeController : IDisposable
 
     public async Task NotifyPanelClosedAsync()
     {
+        if (_assetDropPreviousProvider is not null) await FinishAssetDropAsync(false);
         _panelOpen = false;
         _voiceCoordinator.SetMuted(true);
         _voiceCoordinator.SetUiAttached(false);
@@ -2612,6 +2734,7 @@ internal sealed class PanelBridgeController : IDisposable
         {
             "small" => PanelSize.Small,
             "large" => PanelSize.Large,
+            "extralarge" => PanelSize.ExtraLarge,
             _ => PanelSize.Medium
         };
     }
@@ -2649,6 +2772,7 @@ internal sealed class PanelBridgeController : IDisposable
         {
             "small" => PanelTextSize.Small,
             "large" => PanelTextSize.Large,
+            "extralarge" => PanelTextSize.ExtraLarge,
             _ => PanelTextSize.Medium
         };
     }
@@ -2699,6 +2823,7 @@ internal sealed class PanelBridgeController : IDisposable
     {
         _ = sender;
         TimerAlertFired?.Invoke(this, alert);
+        _ = PostEventOnUiThreadAsync("timer.alert", new { alert, state = _timerBridgeHandlers.GetSnapshot() });
     }
 
     private void OnTimerAlertChanged(object? sender, TimerAlert? alert)
@@ -2720,6 +2845,7 @@ internal sealed class PanelBridgeController : IDisposable
         {
             PanelSize.Small => "small",
             PanelSize.Large => "large",
+            PanelSize.ExtraLarge => "extraLarge",
             _ => "medium"
         };
     }
@@ -2750,6 +2876,7 @@ internal sealed class PanelBridgeController : IDisposable
         {
             PanelTextSize.Small => "small",
             PanelTextSize.Large => "large",
+            PanelTextSize.ExtraLarge => "extraLarge",
             _ => "medium"
         };
     }
@@ -2849,6 +2976,9 @@ internal sealed class PanelBridgeController : IDisposable
             ("today-focus", ProviderTextKind.Summary) => "今日の予定に集中",
             ("today-focus", ProviderTextKind.Body) => "予定を選び、タイマーと今日の目的をまとめて開始します。",
             ("clipboard", ProviderTextKind.Title) => "クリップボード",
+            ("assets", ProviderTextKind.Title) => "素材",
+            ("assets", ProviderTextKind.Summary) => "ローカル素材ライブラリ",
+            ("assets", ProviderTextKind.Body) => "画像・動画・PDF・ファイルを保存、分類、検索し、パネル内でプレビューします。",
             ("clipboard", ProviderTextKind.Summary) => "クリップボード履歴",
             ("clipboard", ProviderTextKind.Body) => "テキストと画像の履歴を確認し、お気に入り、全体プレビュー、コピー、個別削除を行えます。",
             ("sticky", ProviderTextKind.Title) => "付箋",

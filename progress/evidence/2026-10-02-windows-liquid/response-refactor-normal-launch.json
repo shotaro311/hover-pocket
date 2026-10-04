@@ -1,0 +1,11 @@
+{
+  "checked_at_utc": "2026-10-02T13:28:39.6191586Z",
+  "process_id": 86368,
+  "executable": "C:\\Users\\shotaro\\Downloads\\hover-pocket-windows-liquid-20261002\\windows\\src\\HoverPocket.Shell\\bin\\Debug\\net10.0-windows10.0.22621.0\\HoverPocket.Shell.exe",
+  "product_version": "0.2.9-local.6+c35b102186ed6dc68f24c8955bf823bbbd1c70e3",
+  "exe_sha256": "3F9FEA5DD20C1CDA154E667779B5A92B1126200FA38872A412DE15B52680A567",
+  "dll_sha256": "D10CFD31121DC33DC866252FC96E75AEAEFE7983D8D9C0D548A181170F198E47",
+  "auto_hide_top_handle": true,
+  "settings_hash_unchanged": true,
+  "launch": "normal-no-arguments"
+}

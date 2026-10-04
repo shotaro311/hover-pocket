@@ -75,6 +75,37 @@ internal sealed class SettingsVerifier
         using var panelAttachment = controller.Attach(panelDispatcher, BridgeSurface.Panel);
 
         VerifyDefaults(store, registry, startup);
+        var legacyStore = UserSettingsStore.CreateTemporary("LiquidLegacySettings");
+        Directory.CreateDirectory(Path.GetDirectoryName(legacyStore.SettingsPath)!);
+        File.WriteAllText(legacyStore.SettingsPath, """{"language":"english","panelSize":"extraLarge","textSize":"large"}""");
+        var legacy = legacyStore.Load(registry.ProviderIds);
+        if (legacy.Language != AppLanguage.English || legacy.PanelSize != PanelSize.ExtraLarge
+            || legacy.TextSize != PanelTextSize.Large || legacy.PanelAttachmentStyle != PanelAttachmentStyle.PreserveMenu
+            || legacy.AutomaticScreenEdgeAttachment || legacy.ReduceMotion || legacy.AutoHideTopHandle)
+            _failures.Add("legacy settings lost existing choices or gained automatic attachment/motion overrides");
+        await Send(dispatcher, """{"id":"liquid0","method":"settings.setPanelAttachment","params":{"style":"preserveMenu","automatic":true,"reduceMotion":true}}""");
+        var attachmentReadback = store.ReloadOrDefault(registry.ProviderIds);
+        if (attachmentReadback.PanelAttachmentStyle != PanelAttachmentStyle.PreserveMenu
+            || !attachmentReadback.AutomaticScreenEdgeAttachment || !attachmentReadback.ReduceMotion
+            || PanelAttachment.Resolve(attachmentReadback) != PanelAttachmentStyle.CoverMenu
+            || PanelAttachment.Resolve(attachmentReadback, hasNotch: true) != PanelAttachmentStyle.PreserveMenu)
+            _failures.Add("liquid attachment settings did not preserve manual selection or resolve per screen");
+        await Send(dispatcher, """{"id":"liquid1","method":"settings.setPanelAttachment","params":{"automatic":false,"reduceMotion":false}}""");
+        var manualReadback = store.ReloadOrDefault(registry.ProviderIds);
+        if (PanelAttachment.Resolve(manualReadback) != PanelAttachmentStyle.PreserveMenu)
+            _failures.Add("automatic attachment disabled did not restore manual selection");
+        await Send(dispatcher, """{"id":"liquid2","method":"settings.resetDefaults"}""");
+        await Send(dispatcher, """{"id":"peek-on","method":"settings.setAutoHideTopHandle","params":{"enabled":true}}""");
+        if (!store.ReloadOrDefault(registry.ProviderIds).AutoHideTopHandle)
+            _failures.Add("auto-hide top handle was not persisted");
+        var invalidPeek = await dispatcher.ProcessRawMessageAsync("""{"id":"peek-invalid","method":"settings.setAutoHideTopHandle","params":{"enabled":"false"}}""");
+        if (invalidPeek?.Contains("handler_error", StringComparison.Ordinal) != true
+            || !controller.CurrentSettings.AutoHideTopHandle || !store.ReloadOrDefault(registry.ProviderIds).AutoHideTopHandle)
+            _failures.Add("invalid auto-hide request changed settings or was accepted");
+        await Send(dispatcher, """{"id":"peek-off","method":"settings.setAutoHideTopHandle","params":{"enabled":false}}""");
+        if (store.ReloadOrDefault(registry.ProviderIds).AutoHideTopHandle)
+            _failures.Add("auto-hide top handle did not return to always-visible");
+
         VerifyWebViewSecurityPolicy();
         await VerifyCodexSandboxFailClosedAsync(registry);
         VerifyVoiceAvailabilityWireValues();
@@ -283,6 +314,36 @@ internal sealed class SettingsVerifier
         await Send(dispatcher, """{"id":"9","method":"settings.resetDefaults"}""");
         VerifyDefaults(store, registry, startup);
         await VerifyResetDisablesGenerationAsync(registry);
+        await VerifyWeatherSettingsAsync(controller, dispatcher, panelDispatcher, store, registry);
+    }
+
+    private async Task VerifyWeatherSettingsAsync(PanelBridgeController controller, BridgeDispatcher dispatcher,
+        BridgeDispatcher panelDispatcher, UserSettingsStore store, ProviderRegistry registry)
+    {
+        var location = Providers.Weather.WeatherRegions.All.Single(region => region.Id == "40").Location;
+        var request = JsonSerializer.Serialize(new { id = "weather-location", method = "weather.setLocation", @params = new { location } }, BridgeJson.Options);
+        await Send(dispatcher, request);
+        await Send(dispatcher, """{"id":"weather-unit","method":"weather.setUnit","params":{"unit":"fahrenheit"}}""");
+        await Send(dispatcher, """{"id":"weather-size","method":"settings.setPanelSize","params":{"panelSize":"extraLarge"}}""");
+        var state = await Send(dispatcher, """{"id":"weather-text","method":"settings.setTextSize","params":{"textSize":"extraLarge"}}""");
+        var saved = store.ReloadOrDefault(registry.ProviderIds);
+        if (saved.WeatherLocation != location || saved.WeatherTemperatureUnit != "fahrenheit"
+            || saved.PanelSize != PanelSize.ExtraLarge || saved.TextSize != PanelTextSize.ExtraLarge
+            || !state.Contains("\"panelSize\":\"extraLarge\"", StringComparison.Ordinal))
+            _failures.Add("weather / XL settings did not roundtrip through bridge and disk");
+        foreach (var method in new[] { "weather.setLocation", "weather.setUnit", "weather.search", "weather.useCurrentLocation" })
+        {
+            var denied = await panelDispatcher.ProcessRawMessageAsync(JsonSerializer.Serialize(new { id = "weather-panel", method }));
+            if (denied?.Contains("unknown_method", StringComparison.Ordinal) != true)
+                _failures.Add("panel exposed Settings-only weather method: " + method);
+        }
+        var invalid = await dispatcher.ProcessRawMessageAsync("""{"id":"weather-invalid","method":"weather.setUnit","params":{"unit":"kelvin"}}""");
+        if (invalid?.Contains("handler_error", StringComparison.Ordinal) != true || controller.CurrentSettings.WeatherTemperatureUnit != "fahrenheit")
+            _failures.Add("invalid weather unit was accepted");
+        await Send(dispatcher, """{"id":"weather-reset","method":"settings.resetDefaults"}""");
+        saved = store.ReloadOrDefault(registry.ProviderIds);
+        if (saved.WeatherLocation.Id != "13" || saved.WeatherTemperatureUnit != "automatic")
+            _failures.Add("weather reset did not restore defaults");
     }
 
     private void VerifyVoiceAvailabilityWireValues()
@@ -1098,6 +1159,10 @@ internal sealed class SettingsVerifier
             || defaults.PreferredProviderId != "controls"
             || defaults.HandleIconStyle != HandleIconStyle.B
             || !defaults.ShowTopHandleSideArea
+            || defaults.PanelAttachmentStyle != PanelAttachmentStyle.PreserveMenu
+            || defaults.AutomaticScreenEdgeAttachment
+            || defaults.ReduceMotion
+            || defaults.AutoHideTopHandle
             || !defaults.DisableTopEdgeInFullscreen)
         {
             _failures.Add("defaults were not restored");

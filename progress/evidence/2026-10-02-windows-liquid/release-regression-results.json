@@ -1,0 +1,86 @@
+[
+  {
+    "target": "ui",
+    "exit_code": 0,
+    "elapsed_seconds": 76.5509174,
+    "log": "C:\\Users\\shotaro\\Downloads\\hover-pocket-windows-liquid-20261002\\progress\\evidence\\2026-10-02-windows-liquid\\release-ui-115042.log"
+  },
+  {
+    "target": "shell",
+    "exit_code": 0,
+    "elapsed_seconds": 146.8127746,
+    "log": "C:\\Users\\shotaro\\Downloads\\hover-pocket-windows-liquid-20261002\\progress\\evidence\\2026-10-02-windows-liquid\\release-shell-115159.log"
+  },
+  {
+    "target": "display",
+    "exit_code": 0,
+    "elapsed_seconds": 0.8607649,
+    "log": "C:\\Users\\shotaro\\Downloads\\hover-pocket-windows-liquid-20261002\\progress\\evidence\\2026-10-02-windows-liquid\\release-display-115426.log"
+  },
+  {
+    "target": "settings",
+    "exit_code": 0,
+    "elapsed_seconds": 1.8369587,
+    "log": "C:\\Users\\shotaro\\Downloads\\hover-pocket-windows-liquid-20261002\\progress\\evidence\\2026-10-02-windows-liquid\\release-settings-115426.log"
+  },
+  {
+    "target": "ui-model",
+    "exit_code": 0,
+    "elapsed_seconds": 0.4587463,
+    "log": "C:\\Users\\shotaro\\Downloads\\hover-pocket-windows-liquid-20261002\\progress\\evidence\\2026-10-02-windows-liquid\\release-ui-model-115428.log"
+  },
+  {
+    "target": "weather",
+    "exit_code": 0,
+    "elapsed_seconds": 0.1780672,
+    "log": "C:\\Users\\shotaro\\Downloads\\hover-pocket-windows-liquid-20261002\\progress\\evidence\\2026-10-02-windows-liquid\\release-weather-115429.log"
+  },
+  {
+    "target": "voice",
+    "exit_code": 0,
+    "elapsed_seconds": 0.8652409,
+    "log": "C:\\Users\\shotaro\\Downloads\\hover-pocket-windows-liquid-20261002\\progress\\evidence\\2026-10-02-windows-liquid\\release-voice-115429.log"
+  },
+  {
+    "target": "timer",
+    "exit_code": 0,
+    "elapsed_seconds": 0.207916,
+    "log": "C:\\Users\\shotaro\\Downloads\\hover-pocket-windows-liquid-20261002\\progress\\evidence\\2026-10-02-windows-liquid\\release-timer-115430.log"
+  },
+  {
+    "target": "calendar",
+    "exit_code": 0,
+    "elapsed_seconds": 0.2226321,
+    "log": "C:\\Users\\shotaro\\Downloads\\hover-pocket-windows-liquid-20261002\\progress\\evidence\\2026-10-02-windows-liquid\\release-calendar-115430.log"
+  },
+  {
+    "target": "calc",
+    "exit_code": 0,
+    "elapsed_seconds": 0.1221395,
+    "log": "C:\\Users\\shotaro\\Downloads\\hover-pocket-windows-liquid-20261002\\progress\\evidence\\2026-10-02-windows-liquid\\release-calc-115430.log"
+  },
+  {
+    "target": "sticky",
+    "exit_code": 0,
+    "elapsed_seconds": 0.2108898,
+    "log": "C:\\Users\\shotaro\\Downloads\\hover-pocket-windows-liquid-20261002\\progress\\evidence\\2026-10-02-windows-liquid\\release-sticky-115430.log"
+  },
+  {
+    "target": "clipboard",
+    "exit_code": 0,
+    "elapsed_seconds": 0.5729155,
+    "log": "C:\\Users\\shotaro\\Downloads\\hover-pocket-windows-liquid-20261002\\progress\\evidence\\2026-10-02-windows-liquid\\release-clipboard-115431.log"
+  },
+  {
+    "target": "pocket-surface",
+    "exit_code": 0,
+    "elapsed_seconds": 7.2844158,
+    "log": "C:\\Users\\shotaro\\Downloads\\hover-pocket-windows-liquid-20261002\\progress\\evidence\\2026-10-02-windows-liquid\\release-pocket-surface-115431.log"
+  },
+  {
+    "target": "voice-e2e-isolation",
+    "exit_code": 0,
+    "elapsed_seconds": 0.232314,
+    "log": "C:\\Users\\shotaro\\Downloads\\hover-pocket-windows-liquid-20261002\\progress\\evidence\\2026-10-02-windows-liquid\\release-voice-e2e-isolation-115438.log"
+  }
+]

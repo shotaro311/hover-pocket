@@ -2,7 +2,43 @@
 
 WPF の常駐シェルと WebView2 のパネルで構成する Windows 版です。画面上端の access surface、非アクティブ表示のパネル、タスクトレイ、設定画面を提供します。
 
-Windows 版の provider は Controls、Calendar、Clipboard、Sticky Notes、Timer、Calculator です。Mirror と Microphone は Windows 版の対象外で、macOS 版の実装には影響しません。
+Windows 版の provider は Controls、Calendar、Clipboard、Sticky Notes、Assets（素材）、Timer、Calculator です。Mirror と Microphone は Windows 版の対象外で、macOS 版の実装には影響しません。
+
+素材はEagle・アカウント・APIキーを必要としないローカルライブラリです。ファイル／フォルダの選択、上端へのドロップ、コピーした画像・ファイルの貼り付けで独立した原本を保存します。フォルダ・タグ・お気に入り、検索条件の保存、アプリ内のゴミ箱と復元、完全バックアップを扱います。素材の通常ウィンドウはトレイの「素材ライブラリを開く」から開き、ポケット内の素材機能を非表示にしていても使えます。
+
+公開ベータ`0.2.9`は撮影・収録と画像の注釈編集に対応します。`Ctrl+Alt+S`で範囲を選び、撮影直後にペン、テキスト、四角、楕円、矢印で注釈を付けてPNGを保存できます。色、太さ、消しゴム、選択・移動、削除、Undo/Redoに対応し、「元画像も保存」を選べます。範囲選択のEnterは画面全体、Escはキャンセルです。
+
+トレイの「撮影・収録の設定…」で「撮影後に編集画面を開く」をオフにして「設定を保存」を押すと、撮影画像をそのまま保存できます。素材をダブルクリックして「画像を編集」を押すと、同じ編集画面から原本を残して編集済みPNGを追加できます。フォルダとタグは引き継ぎます。保存後の注釈は画素に統合されます。
+
+素材をドラッグすると下部にゴミ箱が現れ、そこへドロップした項目をアプリ内のゴミ箱へ移します。Ctrl+Zまたはゴミ箱から復元できます。画像・動画などの外部アプリへのドラッグは従来どおり作業コピーを渡します。Space長押しによるプレビューの連続開閉を抑止し、拡大中の描画面の再作成を減らしています。
+
+`local.13`では、プレビューの切り替え前から表示を保ち、文字や画像を固定した大きさで見せながら外枠を動かすようにしました。拡大途中の横ずれと細かい文字のちらつきを抑えています。[修正と検証記録](../docs/report/20261003-windows-preview-smooth-recording-shortcut.md)。収録の上下反転は`local.12`で修正済みです。既存の収録ファイルは保持し、新しい収録から正しい向きで保存します。`local.14`では、素材一覧の再描画でサムネイルが一瞬消える問題と、切替の終わりに保持画像を本体の再表示より先に外す順序を修正しました（検証は[作業記録](../progress/2026-10/2026-10-04_hover-pocket-claude-flicker.md)を参照）。`local.15`では、プレビューを開く際にウィンドウを到着寸法へ移す瞬間、古い切り抜き範囲が残って小さい枠の横に黒い面が出る問題を修正しました。[修正と検証記録](../progress/2026-10/2026-10-04_hover-pocket-claude-opening.md)。
+
+`local.9`では範囲選択後のクラッシュを修正しました。`local.10`では原本欠損時の保存判定、絞り込み後の複数選択、撮影フォルダの引き継ぎ、壊れた保存待ちによる後続停止を修正し、機能切り替えの不要な描画とフェード時間を減らしました。[修正・計測・検証記録](../docs/report/20261003-windows-review-fixes-response.md)。
+
+`Ctrl+Alt+R`は画面収録の開始・停止です。ショートカットでは設定画面を開かず、Windowsの画面/ウィンドウ選択だけを表示します。音声と保存先は、トレイの「撮影・収録の設定…」で変更して「設定を保存」を押してください。PCの再生音とマイクを個別にオン/オフできます。停止するとMP4を確定し、保存した設定のフォルダへ登録します。収録中に設定画面を閉じても収録は続き、トレイのメニューとツールチップに収録中と表示します。縦横比を保持して最大1920×1080・30fps、音声はAACです。既定のモノラル/ステレオの音声デバイスを使い、マイクの利用にはWindowsの許可が必要です。対象のサイズ変更や終了、空き容量512MiB未満では収録を終了して保存します。
+
+素材画面の「撮影・収録」またはトレイの「撮影・収録の設定…」から、保存先とショートカットを変更できます。他アプリとのキー競合を表示し、撮影/収録のボタンでも操作できます。設定は既存の設定と同じ領域の`capture-settings.json`へ保存し、既存の`settings.json`を変更しません。確定済みの保存失敗は「保存待ちを再試行」から再登録できます。強制終了で未確定のMP4は自動登録せず、「保存待ちフォルダを開く」で残ったファイルを確認できます。
+
+収録はWindows標準の画面取得・動画エンコーダーと、同梱した[NAudio 3.1.0](https://www.nuget.org/packages/NAudio.Wasapi/3.1.0)を使います。MITのライセンス通知を`ThirdParty/NAudio-LICENSE.txt`へ同梱し、追加のFFmpegやアカウントは不要です。[撮影・収録の実装と検証記録](../progress/2026-10/2026-10-03_hover-pocket-capture.md)。
+
+画像の拡大、MP4/H.264動画の再生・シーク、PDFのページ移動をポケット内で操作できます。プレビューは上端パネル自体を素材の寸法に合わせて拡大し、F11または全画面ボタンで現在のモニターへ広げます。Escは全画面からの復帰、次にプレビュー終了です。画像はEXIF方向とPNG透明度を反映し、PDFは選択したページだけを生成します。対応外の形式も原本保存・取り出しが可能です。48MPのJPEGは縮小デコードし、32MPを超える他の画像形式はメモリ予算を守るためプレビューを制限します。動画の形式対応はWindowsとWebView2のメディア機能に依存します。アプリへのFFmpeg導入は不要です。
+
+PDF描画は同梱実行ファイルの読み取り専用子プロセスで行い、30秒の未使用後に終了、次のページ要求で再開します。これはWindows標準PDF/DXGIの終了時例外を本体から分離するためで、追加ソフトの導入は不要です。結果を返した後の子プロセス終了はOSによる資源解放を使い、本体の通常の終了手順は維持します。
+
+保存先は`%LOCALAPPDATA%\HoverPocket\AssetLibrary`です。DBとUUID名の原本を正本とし、サムネイルは再生成できます。ドラッグ・クリップボード・OSで開く操作では、管理原本から独立した作業コピーを渡します。「外部コピーを整理…」で使用済みコピーをWindowsのゴミ箱へ移せます。復元前に版・ハッシュ・分類参照を検証し、既存ライブラリを置き換える場合は現在のDBと原本を日時付きフォルダへ退避します。DBのみのスナップショットは完全バックアップとは別です。[共通契約](../shared/asset-library/README.md)と[実装・検証記録](../progress/2026-10/2026-10-03_hover-pocket-asset-library.md)を参照してください。
+
+Calendarには今日と7日先までの天気を表示します。設定で世界の都市を検索するか、47都道府県から選択し、温度を自動・摂氏・華氏へ切り替えられます。Windowsの位置情報許可は「現在地を使用」を押したときだけ要求します。予報は地点・座標・温度単位ごとに保存し、通信できない場合は保存済み予報であることを明示します。位置情報を使用できない場合も都市・都道府県を選択できます。天気情報は[Open-Meteo](https://open-meteo.com/)から取得します。
+
+パネルと文字サイズは小・中・大・特大の4段階です。特大パネルは780×560 DIPsで、Voiceの展開領域にも対応します。
+
+設定の「上端とのつながり」で「細い入口を残す」「上端まで覆う」を選べます。入口とパネルは同じ輪郭を使って液体のように開閉し、途中で戻っても位置と速度を引き継ぎます。「ノッチがない画面では自動で上端まで覆う」は既定オフで、オンにしても保存済みの手動選択を保持します。「動きを減らす」またはWindowsのアニメーション無効時は即時に切り替えます。
+
+Windows実機の検証範囲と再実行手順は[液体アニメーションの記録](../progress/2026-10/2026-10-02_hover-pocket-windows-liquid.md)を参照してください。
+
+初回表示とホバー判定の処理削減、計測の条件と結果は[表示応答の改善記録](../progress/2026-10/2026-10-02_hover-pocket-response-refactor.md)を参照してください。
+
+同じ設定欄の「上部の入口を自動で隠す」をオンにすると、上部の黒い入口を普段は隠せます。上部の入口付近へマウスを近づけると入口だけが現れ、入口にホバーするとパネルが開きます。入口へ一気に移動しても、入口の表示アニメーションを待たずに開きます。反応する領域は初版の縦横2倍です。パネルを閉じて離れると入口も隠れます。既定はオフで、設定を保存します。[二段階表示の検証記録](../progress/2026-10/2026-10-02_hover-pocket-top-entry-peek.md)。
 
 Controlsでは再生速度を「− / ＋」で0.25倍刻みに変更し、Windowsメディアセッションの読み戻し値を表示します。再生サムネイルを押すと、一意に特定できた再生元ウィンドウだけを前面へ表示してパネルを閉じます。Timerはストップウォッチ、タイマー、ポモドーロの3種類を横並びの追加カードから登録できます。実行中項目は1列のコンパクトなリストへ表示し、ストップウォッチとカウントダウンを各4件まで独立して扱います。ストップウォッチは100分の1秒表示で、providerを切り替えたりパネルを閉じたりしてもアプリ稼働中は計測を続けます。
 
@@ -45,6 +81,8 @@ dotnet run --project .\windows\src\HoverPocket.Shell\HoverPocket.Shell.csproj --
 dotnet run --project .\windows\src\HoverPocket.Shell\HoverPocket.Shell.csproj -- --verify controls
 dotnet run --project .\windows\src\HoverPocket.Shell\HoverPocket.Shell.csproj -- --verify ui
 dotnet run --project .\windows\src\HoverPocket.Shell\HoverPocket.Shell.csproj -- --verify settings
+dotnet run --project .\windows\src\HoverPocket.Shell\HoverPocket.Shell.csproj -- --verify weather
+dotnet run --project .\windows\tests\Weather.Core\Weather.Core.csproj --configuration Release
 dotnet run --project .\windows\src\HoverPocket.Shell\HoverPocket.Shell.csproj -- --verify pocket-surface
 dotnet run --project .\windows\src\HoverPocket.Shell\HoverPocket.Shell.csproj -- --verify capabilities
 dotnet run --project .\windows\src\HoverPocket.Shell\HoverPocket.Shell.csproj -- --verify broker
@@ -54,6 +92,8 @@ dotnet run --project .\windows\src\HoverPocket.Shell\HoverPocket.Shell.csproj --
 
 `--verify display` は現在のモニター構成を列挙し、`Main` / `Sub` / `All` の対象 display 数、`Sub` のサブなし fallback、access surface / panel / collapsed rect の画面内収まり、DIPs と物理ピクセルの round-trip を検査して exit code で返します。WinExe のため標準出力が空になる場合があります。
 
+`--verify weather` と `Weather.Core` は同じ実装を使い、47都道府県、温度単位、8日間の予報、世界の都市検索、キャッシュの分離・破損・通信失敗、取消、不正データ拒否、特大サイズを検証します。テストは通信をfixtureへ置き換え、実際の位置情報許可を要求しません。`--verify settings` は地点・単位・特大サイズの保存後読み戻し、設定画面以外からの天気設定変更拒否、不正単位の拒否、既定値への復元も確認します。
+
 `--verify controls` は音量・ミュート・輝度・メディア操作・再生元ウィンドウ解決の決定的テストと、実機の読み取り専用 probe を実行します。外部ディスプレイの輝度は DDC/CI 非対応や応答遅延を許容し、パネル全体を停止させずに非対応表示へフォールバックします。
 
 `--verify ui` はWebView2とbridgeに加え、Controlsの実描画・領域内収まり・サムネイル/倍速操作、Timerの3種類の追加カード・複数ストップウォッチ・領域内収まり、Clipboardの同一provider再描画抑止、通常/お気に入りタブ、中央split view、全体プレビュー、個別削除UI、Calculator履歴サイドバーを検査します。
@@ -61,6 +101,10 @@ dotnet run --project .\windows\src\HoverPocket.Shell\HoverPocket.Shell.csproj --
 `--verify pocket-surface` はPocket App DSLのToday Focus fixtureを厳格に読み込み、未知のcomponent・query・workflow、host境界違反、asset path traversal、深さ・node数・文字数・文書サイズ超過をfail-closedで拒否し、同じ入力から同じ描画モデルが得られることを検査します。Capability実行やProvider Storeへの書き込みは行いません。
 
 `--verify updater` は Velopack のローカルフォルダーフィードを一時生成し、更新なし / 更新ありの dry-run を確認します。実ダウンロードと適用は行いません。
+
+`--verify ui` はバックグラウンドから送ったイベントがWebView2へ届くことと、一時データで開始した無音タイマーが、非表示パネルを満了時に再表示することも確認します。実際の通知音やWindowsのスリープはこの検証に含みません。
+
+`0.2.9-local.2` はWindows公開版 `win-v0.2.8` を基準にしたローカル安定化候補です。タイマー等からWebView2への送信をUIスレッドへ移し、終了済みパネルへの遅延送信を無視します。タイマー満了イベントは接続中の各画面へ送信し、設定画面の開閉でパネルへの通知を失わないようにしています。公開releaseは作成していません。
 
 `--verify release-config` は、配布成果物がRelease構成・期待バージョン・Windows更新channel・Google OAuth AssemblyMetadataを持ち、ビルド時の設定と一致することを値を表示せず確認します。
 
@@ -120,6 +164,8 @@ production resolverは、固定先のexact binaryと準備済みcontrol-planeが
 
 ## Windows updates and release packaging
 
+`0.2.9`は、実機で確認済みのlocal.15を配布版へ反映したものです。素材管理、撮影・収録、注釈編集、プレビューの表示改善を含みます。[配信記録](../progress/2026-10/2026-10-04_hover-pocket-windows-029-release.md)。
+
 Windows 版の更新確認は Velopack と GitHub Releases (`shotaro311/hover-pocket`) を使います。トレイと Settings の `Check for Updates` は Windows channel `win` の feed (`releases.win.json`) へ接続し、更新が見つかった場合はダウンロード前と適用/再起動前に確認します。起動時の自動チェックは既定オンで、失敗しても起動を止めません。
 更新後の通常起動では、実インストールのrootと既存ARP entryの`InstallLocation`が一致する場合だけ、HKCUの`HoverPocketWin` entryにある`DisplayVersion`を現在versionへ補正します。portable、verify、second-instance probe、path不一致、keyなしでは変更しません。
 
@@ -177,6 +223,9 @@ python3 script/verify_release_readback.py --windows-tag auto --windows-signing-g
 残る物理gateは別です。通常ユーザーのWindows実機で、署名済みShell + signed per-machine MSIを使ったSettingsの明示操作からだけUAC secure desktopへ1回到達すること、固定Program Files helper/object identity/publisher readback、UAC取消・tamper時の副作用0、setup完了後のno-UAC positive confinement canary、Host-owned credential delivery、実モデル生成readbackを確認する必要があります。これらのphysical UAC / signed-host canaryが完了するまではproduction setup/generation/activation flagsをfalseのまま維持し、完了したとは扱いません。
 
 ## Local privacy notes
+
+通常起動の診断記録は `%APPDATA%\HoverPocket\diagnostics\session-*.jsonl` に保存します。起動・準備完了・トレイからの終了・Windowsセッション終了・未処理例外・WebViewプロセス障害を記録し、時刻・PID・バージョン・例外型・エラー番号・コードのメソッド名に限定します。例外本文、画像やファイル名、入力内容、認証情報は保存しません。強制終了など、OSが終了イベントを渡さない場合の理由は記録だけでは断定できません。
+
 
 AI command lane の audit log は `%APPDATA%\HoverPocket\auditlog\ailane-YYYYMMDD.jsonl` に保存します。
 保存する内容は `timestamp`、`action`、`actionType`、`result`、`eventId`、`calendarId` の最小メタデータだけです。

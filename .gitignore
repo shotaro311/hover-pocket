@@ -18,3 +18,4 @@ dist/
 .wrangler/
 __pycache__/
 *.pyc
+artifacts/

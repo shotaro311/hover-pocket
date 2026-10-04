@@ -13,6 +13,7 @@ internal static class VoicePanelGeometry
     {
         PanelSize.Small => 190,
         PanelSize.Large => 250,
+        PanelSize.ExtraLarge => 280,
         _ => 220
     };
 

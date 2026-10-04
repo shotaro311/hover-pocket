@@ -1,0 +1,1 @@
+PASS timer verify: start, pause, resume, stop, stopwatch, persistence, expired discard, absolute time

@@ -4,5 +4,6 @@ internal enum PanelTextSize
 {
     Small,
     Medium,
-    Large
+    Large,
+    ExtraLarge
 }

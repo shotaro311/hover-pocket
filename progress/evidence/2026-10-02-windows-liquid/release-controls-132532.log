@@ -1,0 +1,27 @@
+controls_deterministic=ok
+controls_brightness_detection_race=ok
+controls_brightness_cached_merge=ok
+volume_available=True
+volume_value=50
+mute_value=False
+volume_readback_verified=True
+mute_readback_verified=True
+display_initial_read_ms=186.1
+display_cached_read_ms=0.0
+display_count=1
+display=Generic PnP Monitor|id=ddc:10001:0|supported=True|value=5|error=
+brightness_change=skipped
+media_available=False
+media_title=
+media_artist=
+media_source=
+media_position=0.00
+media_duration=0.00
+media_playing=False
+media_preview_window=
+media_toggle=skipped
+preview_no_session_safe=True
+preview_no_window_safe=True
+preview_fallback_mode=fallback_no_window
+preview_fallback=True
+controls_verify=ok

@@ -1,0 +1,23 @@
+shell stage: VerifySecondInstanceAsync
+shell stage: VerifyPollingOnlyOpenAsync
+shell stage: VerifyAccessSurfaceHealthRecoveryAsync
+shell stage: VerifyPanelHealthRecoveryAsync
+shell stage: VerifyUnrecoverableWindowRecreationAsync
+shell stage: VerifyStagedRecoverySchedulerAsync
+shell stage: VerifyPanelPositionStableWhilePointerMovesAsync
+shell stage: VerifyPointerOutsideClosesPanelAsync
+shell stage: VerifyLiquidCloseAsync
+PASS top-entry peek: size=small, wide=True, hidden=true, proximity_only=true, hover_open=true, leave_hide=true, idle=true
+PASS top-entry peek: size=small, wide=False, hidden=true, proximity_only=true, hover_open=true, leave_hide=true, idle=true
+PASS top-entry peek: size=medium, wide=True, hidden=true, proximity_only=true, hover_open=true, leave_hide=true, idle=true
+PASS top-entry peek: size=medium, wide=False, hidden=true, proximity_only=true, hover_open=true, leave_hide=true, idle=true
+PASS top-entry peek: size=large, wide=True, hidden=true, proximity_only=true, hover_open=true, leave_hide=true, idle=true
+PASS top-entry peek: size=large, wide=False, hidden=true, proximity_only=true, hover_open=true, leave_hide=true, idle=true
+PASS top-entry peek: size=extraLarge, wide=True, hidden=true, proximity_only=true, hover_open=true, leave_hide=true, idle=true
+PASS top-entry peek: size=extraLarge, wide=False, hidden=true, proximity_only=true, hover_open=true, leave_hide=true, idle=true
+FAIL shell: System.InvalidOperationException: Top-entry peek: repair did not restore native hidden state
+   at HoverPocket.Shell.Verification.TopHandlePeekVerifier.Require(Boolean condition, String message) in C:\Users\shotaro\Downloads\hover-pocket-windows-liquid-20261002\windows\src\HoverPocket.Shell\Verification\TopHandlePeekVerifier.cs:line 123
+   at HoverPocket.Shell.Verification.TopHandlePeekVerifier.RunAsync() in C:\Users\shotaro\Downloads\hover-pocket-windows-liquid-20261002\windows\src\HoverPocket.Shell\Verification\TopHandlePeekVerifier.cs:line 70
+   at HoverPocket.Shell.Verification.TopHandlePeekVerifier.RunAsync() in C:\Users\shotaro\Downloads\hover-pocket-windows-liquid-20261002\windows\src\HoverPocket.Shell\Verification\TopHandlePeekVerifier.cs:line 89
+   at HoverPocket.Shell.Verification.ShellVerifier.RunAsync() in C:\Users\shotaro\Downloads\hover-pocket-windows-liquid-20261002\windows\src\HoverPocket.Shell\Verification\ShellVerifier.cs:line 56
+   at HoverPocket.Shell.App.RunShellVerificationAsync() in C:\Users\shotaro\Downloads\hover-pocket-windows-liquid-20261002\windows\src\HoverPocket.Shell\App.xaml.cs:line 328

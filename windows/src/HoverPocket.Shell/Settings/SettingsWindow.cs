@@ -23,6 +23,7 @@ internal sealed class SettingsWindow : Window
     private IDisposable? _bridgeAttachment;
     private WebView2? _webView;
     private Task? _initializationTask;
+    internal WebView2? WebViewForVerify => _webView;
 
     public SettingsWindow(
         PanelBridgeController bridgeController,

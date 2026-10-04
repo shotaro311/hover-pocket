@@ -13,17 +13,27 @@ internal sealed class TrayIconService : IDisposable
     private readonly PanelBridgeController _bridgeController;
     private readonly WinForms.ToolStripMenuItem _openPanelItem;
     private readonly WinForms.ToolStripMenuItem _settingsItem;
+    private readonly WinForms.ToolStripMenuItem _assetsItem;
+    private readonly Capture.CaptureController _capture;
+    private readonly WinForms.ToolStripMenuItem _captureItem, _recordItem;
     private readonly WinForms.ToolStripMenuItem _checkForUpdatesItem;
     private readonly WinForms.ToolStripMenuItem _quitItem;
 
-    public TrayIconService(Windows.HoverShellController shellController, UpdaterService updaterService)
+    public TrayIconService(Windows.HoverShellController shellController, UpdaterService updaterService, Capture.CaptureController capture)
     {
+        _capture = capture;
         _updaterService = updaterService;
         _bridgeController = shellController.PanelBridgeController;
         var menu = new WinForms.ContextMenuStrip();
         _openPanelItem = new WinForms.ToolStripMenuItem();
         _openPanelItem.Click += (_, _) => shellController.ShowPanelFromUser();
         menu.Items.Add(_openPanelItem);
+        _assetsItem = new WinForms.ToolStripMenuItem();
+        _assetsItem.Click += (_, _) => shellController.OpenAssetLibraryFromUser();
+        menu.Items.Add(_assetsItem);
+        _captureItem = new WinForms.ToolStripMenuItem(); _captureItem.Click += async (_, _) => await capture.ScreenshotAsync(); menu.Items.Add(_captureItem);
+        _recordItem = new WinForms.ToolStripMenuItem(); _recordItem.Click += async (_, _) => await capture.ToggleRecordingAsync(); menu.Items.Add(_recordItem);
+        var captureSettings = new WinForms.ToolStripMenuItem("撮影・収録の設定…"); captureSettings.Click += (_, _) => capture.Open(); menu.Items.Add(captureSettings);
         _settingsItem = new WinForms.ToolStripMenuItem();
         _settingsItem.Click += (_, _) => shellController.OpenSettingsFromUser();
         menu.Items.Add(_settingsItem);
@@ -32,7 +42,7 @@ internal sealed class TrayIconService : IDisposable
         menu.Items.Add(_checkForUpdatesItem);
         menu.Items.Add(new WinForms.ToolStripSeparator());
         _quitItem = new WinForms.ToolStripMenuItem();
-        _quitItem.Click += (_, _) => System.Windows.Application.Current.Shutdown();
+        _quitItem.Click += async (_, _) => { AppDiagnostics.Record("tray.quit"); await capture.StopRecordingAsync(); System.Windows.Application.Current.Shutdown(); };
         menu.Items.Add(_quitItem);
 
         using var iconStream = typeof(TrayIconService).Assembly.GetManifestResourceStream("HoverPocket.AppIcon.ico")
@@ -52,6 +62,8 @@ internal sealed class TrayIconService : IDisposable
         _notifyIcon.DoubleClick += (_, _) => shellController.ShowPanelFromUser();
         _updaterService.StartupUpdateAvailable += OnStartupUpdateAvailable;
         _bridgeController.SettingsChanged += OnSettingsChanged;
+        _capture.StateChanged += OnCaptureChanged;
+        _capture.RecordingError += OnRecordingError;
         ApplyLanguage(_bridgeController.CurrentSettings.Language);
     }
 
@@ -59,6 +71,8 @@ internal sealed class TrayIconService : IDisposable
     {
         _updaterService.StartupUpdateAvailable -= OnStartupUpdateAvailable;
         _bridgeController.SettingsChanged -= OnSettingsChanged;
+        _capture.StateChanged -= OnCaptureChanged;
+        _capture.RecordingError -= OnRecordingError;
         _notifyIcon.Visible = false;
         _notifyIcon.Dispose();
         _applicationIcon.Dispose();
@@ -74,10 +88,16 @@ internal sealed class TrayIconService : IDisposable
     {
         var japanese = language != AppLanguage.English;
         _openPanelItem.Text = japanese ? "パネルを開く" : "Open Panel";
+        _assetsItem.Text = japanese ? "素材ライブラリを開く" : "Open Asset Library";
+        _captureItem.Text = japanese ? "スクリーンショットを撮影" : "Take Screenshot";
+        _recordItem.Text = _capture.Recording ? (japanese ? "■ 収録を停止して保存" : "Stop and Save Recording") : (japanese ? "画面収録を開始" : "Start Screen Recording");
+        _notifyIcon.Text = _capture.Recording ? "HoverPocket — ● 収録中" : "HoverPocket";
         _settingsItem.Text = japanese ? "設定" : "Settings";
         _checkForUpdatesItem.Text = japanese ? "更新を確認" : "Check for Updates";
         _quitItem.Text = japanese ? "終了" : "Quit";
     }
+    private void OnCaptureChanged() => ApplyLanguage(_bridgeController.CurrentSettings.Language);
+    private void OnRecordingError(string message) => _notifyIcon.ShowBalloonTip(6000, "HoverPocket — 画面収録", message, WinForms.ToolTipIcon.Error);
 
     private async Task CheckForUpdatesFromTrayAsync()
     {

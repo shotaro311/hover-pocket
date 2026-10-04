@@ -1,4 +1,5 @@
 import { on, request } from "./bridge.js";
+import { renderAssetsProvider } from "../providers/assets/assets.js";
 import { labelForSize, setLanguage, t } from "./i18n.js";
 import { renderCalculatorProvider, runCalculatorUiVerify } from "../providers/calculator/calculator.js";
 import { renderCalendarProvider } from "../providers/calendar/calendar.js";
@@ -9,6 +10,7 @@ import { renderTimerProvider } from "../providers/timer/timer.js";
 import { renderPocketSurfaceProvider, runPocketSurfaceUiVerify } from "../providers/pocket-surface/pocket-surface.js";
 
 const providerRenderers = {
+  assets: renderAssetsProvider,
   controls: renderControlsProvider,
   calculator: renderCalculatorProvider,
   calendar: renderCalendarProvider,
@@ -96,6 +98,7 @@ async function renderNow(state, options = {}) {
   document.documentElement.style.setProperty("--hp-header-height", `${state.panel.headerHeight}px`);
   document.documentElement.style.setProperty("--hp-voice-height", `${state.panel.voiceLaneHeight ?? 0}px`);
   document.documentElement.dataset.textSize = state.settings.textSize;
+  document.documentElement.dataset.panelAttachment = state.settings.effectivePanelAttachmentStyle;
   document.documentElement.dataset.panelSize = state.settings.panelSize;
   setLanguage(state.settings.language);
 
@@ -119,19 +122,26 @@ function renderTitle(state) {
  * @param {any} state
  */
 function renderSizeSwitch(state) {
-  sizeSwitchEl.replaceChildren();
-  for (const size of state.panel.sizes) {
-    const button = document.createElement("button");
-    button.className = "hp-size-button";
-    button.type = "button";
-    button.textContent = labelForSize(size.id);
-    button.setAttribute("aria-label", `${t("panelSize")} ${labelForSize(size.id)}`);
+  const buttons = new Map([...sizeSwitchEl.children].map(button => [button.dataset.sizeId, button]));
+  state.panel.sizes.forEach((size, index) => {
+    let button = buttons.get(size.id);
+    if (!button) {
+      button = document.createElement("button");
+      button.className = "hp-size-button";
+      button.type = "button";
+      button.dataset.sizeId = size.id;
+      button.addEventListener("click", () => {
+        request("settings.setPanelSize", { panelSize: size.id }).then(render);
+      });
+    }
+    buttons.delete(size.id);
+    if (sizeSwitchEl.children[index] !== button) sizeSwitchEl.insertBefore(button, sizeSwitchEl.children[index] ?? null);
+    const label = labelForSize(size.id);
+    if (button.textContent !== label) button.textContent = label;
+    button.setAttribute("aria-label", `${t("panelSize")} ${label}`);
     button.setAttribute("aria-pressed", String(size.id === state.settings.panelSize));
-    button.addEventListener("click", () => {
-      request("settings.setPanelSize", { panelSize: size.id }).then(render);
-    });
-    sizeSwitchEl.append(button);
-  }
+  });
+  for (const button of buttons.values()) button.remove();
 }
 
 /**
@@ -154,7 +164,10 @@ function renderProviderIcons(state) {
     if (providerIconsEl.children[index] !== button) {
       providerIconsEl.insertBefore(button, providerIconsEl.children[index] ?? null);
     }
-    button.innerHTML = iconSvg(provider.icon);
+    if (button.dataset.icon !== provider.icon) {
+      button.innerHTML = iconSvg(provider.icon);
+      button.dataset.icon = provider.icon;
+    }
     button.setAttribute("aria-label", provider.title);
     button.classList.toggle("is-selected", provider.selected);
     button.setAttribute("aria-pressed", String(provider.selected));
@@ -449,7 +462,9 @@ function providerRenderKey(state) {
   const surfaceIdentity = surface
     ? `:${surface.appId ?? ""}:${surface.version ?? ""}:${surface.manifestDigest ?? ""}`
     : "";
-  return `${state.selectedProvider?.id ?? "none"}:${state.settings.language}${surfaceIdentity}`;
+  const weatherIdentity = state.selectedProvider?.id === "calendar"
+    ? JSON.stringify([state.settings.weatherLocation, state.settings.weatherTemperatureUnit]) : "";
+  return `${state.selectedProvider?.id ?? "none"}:${state.settings.language}${surfaceIdentity}:${weatherIdentity}`;
 }
 
 function renderVoiceLane(state) {
@@ -1367,7 +1382,7 @@ function formatText(key, values) {
 }
 
 function renderCommands() {
-  refreshButtonEl.innerHTML = iconSvg("refresh");
+  if (!refreshButtonEl.firstElementChild) refreshButtonEl.innerHTML = iconSvg("refresh");
   refreshButtonEl.title = t("refresh");
   refreshButtonEl.setAttribute("aria-label", t("refresh"));
   refreshButtonEl.onclick = () => {
@@ -1378,7 +1393,7 @@ function renderCommands() {
     request("provider.refreshPlaceholder").then((state) => render(state, { forceProvider: true }));
   };
 
-  settingsButtonEl.innerHTML = iconSvg("settings");
+  if (!settingsButtonEl.firstElementChild) settingsButtonEl.innerHTML = iconSvg("settings");
   settingsButtonEl.title = t("settings");
   settingsButtonEl.setAttribute("aria-label", t("settings"));
   settingsButtonEl.onclick = () => request("settings.open");
@@ -1405,6 +1420,7 @@ function iconSvg(name) {
     calendar: '<svg viewBox="0 0 24 24" fill="none" stroke-width="1.8"><rect x="4" y="5" width="16" height="15" rx="2"/><path d="M8 3v4M16 3v4M4 10h16M8 14h.01M12 14h.01M16 14h.01M8 17h.01M12 17h.01"/></svg>',
     clipboard: '<svg viewBox="0 0 24 24" fill="none" stroke-width="1.8"><path d="M9 4h6l1 2h2v15H6V6h2z"/><path d="M9 4h6v4H9zM9 12h6M9 16h4"/></svg>',
     timer: '<svg viewBox="0 0 24 24" fill="none" stroke-width="1.8"><path d="M10 2h4M12 14l3-3"/><circle cx="12" cy="13" r="8"/></svg>',
+    assets: '<svg viewBox="0 0 24 24" fill="none" stroke-width="1.8"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="8" cy="8" r="2"/><path d="m3 18 6-6 4 4 4-5 4 7"/></svg>',
     target: '<svg viewBox="0 0 24 24" fill="none" stroke-width="1.8"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="4"/><path d="M12 2v3M22 12h-3M12 22v-3M2 12h3"/></svg>',
     note: '<svg viewBox="0 0 24 24" fill="none" stroke-width="1.8"><path d="M6 3h9l3 3v15H6z"/><path d="M14 3v4h4M9 11h6M9 15h4"/></svg>',
     refresh: '<svg viewBox="0 0 24 24" fill="none" stroke-width="1.8"><path d="M20 12a8 8 0 1 1-2.3-5.6"/><path d="M20 4v6h-6"/></svg>',

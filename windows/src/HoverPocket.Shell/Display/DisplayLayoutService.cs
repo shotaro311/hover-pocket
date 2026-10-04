@@ -91,7 +91,7 @@ internal sealed class DisplayLayoutService
         var panelWidth = Math.Min(DipToPhysical(panelMetrics.Width, monitor.ScaleX), monitor.Bounds.Width);
         var panelHeight = Math.Min(
             DipToPhysical(panelMetrics.TotalHeight, monitor.ScaleY),
-            Math.Max(1, monitor.Bounds.Height - accessHeight));
+            Math.Max(1, monitor.Bounds.Height - accessHeight)) + accessHeight;
 
         var access = new PhysicalRect(
             monitor.Bounds.Left + (monitor.Bounds.Width - accessWidth) / 2,
@@ -101,13 +101,13 @@ internal sealed class DisplayLayoutService
 
         var panelTarget = new PhysicalRect(
             monitor.Bounds.Left + (monitor.Bounds.Width - panelWidth) / 2,
-            monitor.Bounds.Top + access.Height,
+            monitor.Bounds.Top,
             panelWidth,
             panelHeight).ClampTo(monitor.Bounds);
 
         var collapsed = new PhysicalRect(
             panelTarget.Left + (panelTarget.Width - access.Width) / 2,
-            panelTarget.Top,
+            access.Top,
             access.Width,
             access.Height).ClampTo(monitor.Bounds);
 
@@ -121,8 +121,8 @@ internal sealed class DisplayLayoutService
     public PhysicalRect DipToPhysical(Rect dipRect, DisplayMonitor monitor)
     {
         return new PhysicalRect(
-            DipToPhysical(dipRect.Left, monitor.ScaleX),
-            DipToPhysical(dipRect.Top, monitor.ScaleY),
+            (int)Math.Round(dipRect.Left * monitor.ScaleX, MidpointRounding.AwayFromZero),
+            (int)Math.Round(dipRect.Top * monitor.ScaleY, MidpointRounding.AwayFromZero),
             DipToPhysical(dipRect.Width, monitor.ScaleX),
             DipToPhysical(dipRect.Height, monitor.ScaleY));
     }

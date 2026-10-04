@@ -1,4 +1,7 @@
+using System.Text.Json;
+using HoverPocket.Shell.Bridge;
 using HoverPocket.Shell.Windows;
+using HoverPocket.Shell.Settings;
 
 namespace HoverPocket.Shell.Verification;
 
@@ -15,9 +18,17 @@ internal sealed class UiVerifier
     public async Task<int> RunAsync()
     {
         VerifyConsole.WriteLine("UI verify: WebView2 host + bridge + provider registry + settings");
+        if (Environment.GetEnvironmentVariable("HOVERPOCKET_CAPTURE_VERIFY_ONLY") == "1") return await CaptureVerifier.RunAsync(_controller);
 
         try
         {
+            var entry = _controller.Layouts[0].AccessSurface.PhysicalRect;
+            var coldStart = System.Diagnostics.Stopwatch.StartNew();
+            _controller.SimulatePointerMoveForVerify(entry.Left + entry.Width / 2, entry.Top);
+            if (!_controller.Panel.IsVisible || !_controller.PanelExpectedVisibleForVerify)
+                _failures.Add("cold start: panel waited for WebView2 initialization before showing");
+            else
+                VerifyConsole.WriteLine($"PASS cold top-edge open: panel_visible_before_webview_ready=true, dispatch_ms={coldStart.Elapsed.TotalMilliseconds:0.0}");
             await _controller.ShowPanelForUiVerifyAsync();
             var ready = await _controller.Panel.WaitForUiReadyAsync(TimeSpan.FromSeconds(8));
             if (!ready)
@@ -25,6 +36,17 @@ internal sealed class UiVerifier
                 _failures.Add("webview: UI did not report ready within 8s");
             }
 
+            if (ready && Environment.GetEnvironmentVariable("HOVERPOCKET_RESPONSE_VERIFY_ONLY") == "1")
+                return await ProviderResponseVerifier.RunAsync(_controller.Panel.WebView!);
+            if (ready && Environment.GetEnvironmentVariable("HOVERPOCKET_PREVIEW_MOTION_VERIFY_ONLY") == "1")
+                return await PreviewMotionVerifier.RunAsync(_controller);
+            if (ready) _failures.AddRange(await AssetLibraryUiVerifier.RunAsync(_controller));
+            if (Environment.GetEnvironmentVariable("HOVERPOCKET_ASSET_VERIFY_ONLY") == "1")
+            {
+                foreach (var failure in _failures) VerifyConsole.WriteLine("FAIL " + failure);
+                return _failures.Count == 0 ? 0 : 1;
+            }
+            if (ready) LiquidMotionVerifier.MeasureStationaryWork(_controller.Panel);
             var result = ready ? await _controller.Panel.RunWebVerifyScriptAsync() : null;
             if (result is null)
             {
@@ -264,6 +286,22 @@ internal sealed class UiVerifier
                 }
             }
 
+            if (ready && !await _controller.Panel.VerifyBackgroundBridgePostAsync())
+            {
+                _failures.Add("bridge: background event was not received by WebView2");
+            }
+
+            if (ready)
+            {
+                await new TopHandlePeekVerifier(_controller).RunAsync();
+                await new LiquidMotionVerifier(_controller).RunAsync();
+                var monitor = _controller.Layouts[0].Monitor.Bounds;
+                _controller.SetPointerSimulationForVerify(monitor.Left + 10, monitor.Bottom - 10);
+                await VerifyHiddenPanelTimerAsync(withSecondaryView: true);
+                await VerifyHiddenPanelTimerAsync(withSecondaryView: false);
+                await VerifyLiquidSettingsSurfaceAsync();
+            }
+
             if (_controller.Panel.ProcessFailures.Count > 0)
             {
                 _failures.Add("webview process failures: " + string.Join(",", _controller.Panel.ProcessFailures));
@@ -274,10 +312,11 @@ internal sealed class UiVerifier
             _failures.Add(ex.GetType().Name + ": " + ex.Message);
         }
 
+        _controller.ClearPointerSimulationForVerify();
         if (_failures.Count == 0)
         {
             VerifyConsole.WriteLine(
-                "PASS ui verify: stable Controls refresh, source activation and rate actions, responsive Timer cards/input/stopwatch, media fallback, tabbed centered Clipboard split/full preview/trash actions, Calculator history sidebar, declarative PocketSurface renderer with host-owned approval, draggable stable icons, text scaling/input activation, stable Mac-style calendar editor, bridge/provider/settings round-trip");
+                "PASS ui verify: background bridge delivery, hidden-panel timer alert/reopen, stable Controls refresh, source activation and rate actions, responsive Timer cards/input/stopwatch, media fallback, tabbed centered Clipboard split/full preview/trash actions, Calculator history sidebar, declarative PocketSurface renderer with host-owned approval, draggable stable icons, text scaling/input activation, stable Mac-style calendar editor, bridge/provider/settings round-trip");
             return 0;
         }
 
@@ -288,5 +327,150 @@ internal sealed class UiVerifier
         }
 
         return 1;
+    }
+
+    private async Task VerifyLiquidSettingsSurfaceAsync()
+    {
+        var dataRoot = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "HoverPocket", "LiquidSettings", Guid.NewGuid().ToString("N"));
+        var settings = new SettingsWindow(_controller.PanelBridgeController, false, dataRoot, externalIntegrationsEnabled: false);
+        try
+        {
+            settings.Show();
+            var deadline = DateTime.UtcNow.AddSeconds(10);
+            while (DateTime.UtcNow < deadline)
+            {
+                if (settings.WebViewForVerify?.CoreWebView2 is not null
+                    && await settings.WebViewForVerify.ExecuteScriptAsync("document.querySelectorAll('[data-panel-attachment] button').length === 2") == "true") break;
+                await Task.Delay(50);
+            }
+            var web = settings.WebViewForVerify ?? throw new InvalidOperationException("settings UI failed to initialize");
+            await web.ExecuteScriptAsync("""
+                window.__liquidSettingsResult = null;
+                import('/js/bridge.js').then(async ({request}) => {
+                    const wait = async (predicate) => {
+                        for (let i = 0; i < 100; i++) {
+                            const state = await request('app.getState');
+                            if (predicate(state.settings)) return;
+                            await new Promise(resolve => setTimeout(resolve, 20));
+                        }
+                        throw new Error('settings surface readback timed out');
+                    };
+                    const hiddenEntry = document.querySelector('[data-auto-hide-handle]');
+                    hiddenEntry.checked = true; hiddenEntry.dispatchEvent(new Event('change'));
+                    await wait(s => s.autoHideTopHandle === true);
+                    hiddenEntry.checked = false; hiddenEntry.dispatchEvent(new Event('change'));
+                    await wait(s => s.autoHideTopHandle === false);
+                    document.querySelectorAll('[data-panel-attachment] button')[1].click();
+                    await wait(s => s.panelAttachmentStyle === 'coverMenu');
+                    const auto = document.querySelector('[data-automatic-attachment]');
+                    auto.checked = true; auto.dispatchEvent(new Event('change'));
+                    await wait(s => s.automaticScreenEdgeAttachment === true);
+                    document.querySelectorAll('[data-panel-attachment] button')[0].click();
+                    await wait(s => s.panelAttachmentStyle === 'preserveMenu' && s.effectivePanelAttachmentStyle === 'coverMenu');
+                    auto.checked = false; auto.dispatchEvent(new Event('change'));
+                    await wait(s => !s.automaticScreenEdgeAttachment && s.effectivePanelAttachmentStyle === 'preserveMenu');
+                    const reduced = document.querySelector('[data-reduce-motion]');
+                    reduced.checked = true; reduced.dispatchEvent(new Event('change'));
+                    await wait(s => s.reduceMotion === true);
+                    reduced.checked = false; reduced.dispatchEvent(new Event('change'));
+                    await wait(s => s.reduceMotion === false);
+                    window.__liquidSettingsResult = true;
+                }).catch(error => { window.__liquidSettingsResult = String(error); });
+                """);
+            deadline = DateTime.UtcNow.AddSeconds(10);
+            while (DateTime.UtcNow < deadline)
+            {
+                var result = await web.ExecuteScriptAsync("window.__liquidSettingsResult");
+                if (result == "true") { VerifyConsole.WriteLine("PASS liquid Settings WebView2: manual buttons, automatic/manual preservation, Reduce Motion controls, bridge readback"); return; }
+                if (result != "null") throw new InvalidOperationException("settings surface: " + result);
+                await Task.Delay(50);
+            }
+            throw new TimeoutException("liquid settings surface verification");
+        }
+        finally { settings.Close(); }
+    }
+
+    private async Task VerifyHiddenPanelTimerAsync(bool withSecondaryView)
+    {
+        var secondaryViewReceived = false;
+        using var secondaryView = withSecondaryView
+            ? _controller.PanelBridgeController.Attach(new BridgeDispatcher(json =>
+            {
+                using var message = JsonDocument.Parse(json);
+                if (message.RootElement.TryGetProperty("event", out var eventName)
+                    && eventName.GetString() == "timer.alert")
+                {
+                    secondaryViewReceived = true;
+                }
+
+                return Task.CompletedTask;
+            }))
+            : null;
+        var webView = _controller.Panel.WebView!;
+        await webView.ExecuteScriptAsync("""
+            window.__timerProbeStarted = false;
+            window.__timerProbeReceived = false;
+            import('/js/bridge.js').then(async ({ request, on }) => {
+                const state = await request('timer.getState');
+                window.__stopTimerProbeListener = on('timer.alert', ({ alert }) => {
+                    if (alert.title === 'Hidden panel verification') {
+                        window.__timerProbeReceived = true;
+                    }
+                });
+                await request('timer.start', { preset: {
+                    ...state.draftTimer, title: 'Hidden panel verification',
+                    durationSeconds: 2, isPomodoro: false, soundEnabled: false
+                }});
+                window.__timerProbeStarted = true;
+            });
+            """);
+        try
+        {
+            if (!await WaitForScriptFlagAsync("window.__timerProbeStarted === true"))
+            {
+                _failures.Add("timer: fixture timer did not start");
+                return;
+            }
+
+            await _controller.HidePanelForVerifyAsync();
+            if (_controller.Panel.IsVisible)
+            {
+                _failures.Add("timer: panel did not hide before timer expiry");
+            }
+
+            if (!await WaitForScriptFlagAsync("window.__timerProbeReceived === true")
+                || !_controller.Panel.IsVisible)
+            {
+                _failures.Add("timer: expiry did not deliver an alert and reopen the hidden panel");
+            }
+
+            if (withSecondaryView && !secondaryViewReceived)
+            {
+                _failures.Add("timer: attached secondary view did not receive the expiry event");
+            }
+        }
+        finally
+        {
+            await webView.ExecuteScriptAsync("""
+                window.__stopTimerProbeListener?.();
+                import('/js/bridge.js').then(({ request }) => request('timer.stopAlert'));
+                """);
+        }
+    }
+
+    private async Task<bool> WaitForScriptFlagAsync(string script)
+    {
+        var deadline = DateTimeOffset.UtcNow + TimeSpan.FromSeconds(5);
+        while (DateTimeOffset.UtcNow < deadline)
+        {
+            if (await _controller.Panel.WebView!.ExecuteScriptAsync(script) == "true")
+            {
+                return true;
+            }
+
+            await Task.Delay(50);
+        }
+
+        return false;
     }
 }

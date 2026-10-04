@@ -2,13 +2,21 @@
 project_slug: hover-pocket
 target: Windows version requirements
 created: 2026-07-05
-updated: 2026-09-10
+updated: 2026-10-03
 updated_by: codex
 status: draft-integrated
 source_app_release: v0.1.0-98
 ---
 
 # HoverPocket Windows 版 要件定義
+
+2026-10-03操作改善: 撮影後の編集画面の自動表示オプション、共通の画像編集UI、プレビューから原本を残した編集保存、ドラッグ中の下部ゴミ箱、Space拡大の安定化を追加。[素材ライブラリ要件§13](asset-library-v1.md#13-編集画面とドラッグ操作の改善2026-10-03追加)を正本とする。
+
+2026-10-03撮影機能: ユーザー指定でショートカットによるスクリーンショット・画面収録、PC音声とマイクの収録、撮影直後のペン/テキスト/図形による注釈、選択フォルダへの保存を追加。[素材ライブラリ要件§12](asset-library-v1.md#12-撮影画面収録と注釈2026-10-03追加)と[実装・検証](../../progress/2026-10/2026-10-03_hover-pocket-capture.md)を参照。
+
+2026-10-02追補: 開閉・途中反転・上端との接続・手動/自動設定は[Windows液体アニメーションの要件と契約](windows-liquid-motion-20261002.md)に従う。
+
+2026-10-03素材ライブラリ: Eagleを介さず、アカウント不要で任意形式の原本の保存・検索・分類・取り出しを行う。ユーザー指定により初期版に画像・動画・PDFのプレビュー、上端パネル自身の自動拡大、パネル内の再生/ページ移動、全画面切替を含める。実装範囲・保存と復元・UI・性能の正本は[素材ライブラリ初期版の要件](asset-library-v1.md)、理由と構成は[設計資料](../plan/20261002_ASSET_LIBRARY_DESIGN.md)を参照。Claude Opus 5.5/highのレビューと指摘対応は[レビュー記録](../report/20261002-asset-library-requirements-review.md)へ記録。Windows開発版0.2.9-local.7へ実装し、[検証結果と未完了の受入](../../progress/2026-10/2026-10-03_hover-pocket-asset-library.md)を記録した。macOS実装、基準機の性能受入、公開配布は未完了。既存のAI用「管理された機能ライブラリ」とは別の機能とする。
 
 ## 0. 結論
 
@@ -265,7 +273,7 @@ Must:
 - Expandedではパネル上端、幅、Header矩形、Provider矩形がCompact時と一致し、下端だけが下へ伸びる。
 - Expandedは左transcript / 右root-scoped session cardsの2列を維持し、Smallでもcard列を自動で隠さない。必要時は情報量を減らし、列内scrollする。
 - レーン背景のクリックでは表示モードが変わらず、明示controlだけが`aria-expanded`相当の状態を変更する。
-- fullscreenのstate、route、buttonが存在しない。
+- 音声欄自身の表示モードにはfullscreenのstate、route、buttonが存在しない。素材プレビューの全画面は別の機能として許可し、全画面中は音声欄を非表示にしてセッションを保持する。
 
 ## 4. Provider 機能要件
 
@@ -847,7 +855,7 @@ Must:
 - Voice OFFでは現在のパネル寸法、起動process、microphone requestが変わらない。
 - Voice ONでは全Provider共通のCompactが最下段へ表示され、Provider切り替え後も会話sessionが保持される。
 - Compactから明示controlでExpandedへ切り替えると、Provider矩形を変えずパネル下端だけが下へ伸びる。
-- macOSのSmall / Medium / Large / Extra LargeとWindowsのSmall / Medium / Largeで、off / compact / expandedのgeometry fixtureが通る。
+- macOSとWindowsのSmall / Medium / Large / Extra Largeで、off / compact / expandedのgeometry fixtureが通る。
 - `OS × size × built-in Provider / generated PocketSurface fixture × off/compact/expanded`の直積でShell contractを検査する。
 - macOS Voice E2Eは`Build → Run → ValidateIsolation → Validate → Stop → Readback → Cleanup`を別操作にし、CIは秘密値やマイクを使わない隔離契約まで、実機gateはユーザーがCodex app-serverへのChatGPTログインとマイクを明示操作した物理receiptまでを確認する。新規sessionは期待Providerを`codex_app_server`へ束縛し、BYOKまたは途中でProviderが変わったmedia attemptを物理証拠として受理しない。Run / Stop / Cleanupはsession単位のatomic lockで直列化し、ValidateIsolationはallowlist名だけでなくtop-level symlink、型、canonical root containmentを検査する。Stopはprocess不在とstopped receiptが両方通った後だけlifecycleを`stopped`へ確定し、Cleanupは記録PIDに加えてexact commandのprocess不在を再確認する。
 - macOS Voice E2EのChatGPTログインは、隔離runtime内のVoice専用Codex Homeにあるowner-only regular fileだけへ保存する。Hostの`~/.codex/auth.json`、Keychain、通常版HoverPocketの認証を参照・symlink・変更せず、session Cleanupで専用credentialもruntimeごと回収する。

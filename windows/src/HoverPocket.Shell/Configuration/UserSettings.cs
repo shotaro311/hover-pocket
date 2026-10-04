@@ -1,5 +1,6 @@
 using HoverPocket.Shell.Voice;
 using HoverPocket.Shell.Capabilities;
+using HoverPocket.Shell.Providers.Weather;
 
 namespace HoverPocket.Shell.Configuration;
 
@@ -14,6 +15,10 @@ internal sealed class UserSettings
     public ProviderSwitchingMode SwitchingMode { get; set; } = ProviderSwitchingMode.Click;
 
     public AppLanguage Language { get; set; } = AppLanguage.Japanese;
+
+    public WeatherLocation WeatherLocation { get; set; } = WeatherLocation.Default;
+
+    public string WeatherTemperatureUnit { get; set; } = "automatic";
 
     public bool StartWithWindows { get; set; }
 
@@ -41,7 +46,15 @@ internal sealed class UserSettings
 
     public HandleIconStyle HandleIconStyle { get; set; } = HandleIconStyle.B;
 
+    public PanelAttachmentStyle PanelAttachmentStyle { get; set; } = PanelAttachmentStyle.PreserveMenu;
+
+    public bool AutomaticScreenEdgeAttachment { get; set; }
+
+    public bool ReduceMotion { get; set; }
+
     public bool ShowTopHandleSideArea { get; set; } = true;
+
+    public bool AutoHideTopHandle { get; set; }
 
     public bool DisableTopEdgeInFullscreen { get; set; } = true;
 
@@ -56,6 +69,8 @@ internal sealed class UserSettings
             DisplayPlacement = DisplayPlacement,
             PanelSize = PanelSize,
             TextSize = TextSize,
+            WeatherLocation = WeatherLocation,
+            WeatherTemperatureUnit = WeatherTemperatureUnit,
             SwitchingMode = SwitchingMode,
             Language = Language,
             StartWithWindows = StartWithWindows,
@@ -71,7 +86,11 @@ internal sealed class UserSettings
             PreferredProviderId = PreferredProviderId,
             LastSelectedProviderId = LastSelectedProviderId,
             HandleIconStyle = HandleIconStyle,
+            PanelAttachmentStyle = PanelAttachmentStyle,
+            AutomaticScreenEdgeAttachment = AutomaticScreenEdgeAttachment,
+            ReduceMotion = ReduceMotion,
             ShowTopHandleSideArea = ShowTopHandleSideArea,
+            AutoHideTopHandle = AutoHideTopHandle,
             DisableTopEdgeInFullscreen = DisableTopEdgeInFullscreen,
             ProviderOrder = [.. ProviderOrder],
             ProviderVisibility = new Dictionary<string, bool>(ProviderVisibility, StringComparer.OrdinalIgnoreCase)

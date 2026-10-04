@@ -10,6 +10,7 @@ internal static class PanelSizeCatalog
         return panelSize switch
         {
             PanelSize.Small => new PanelSizeMetrics("small", "S", 520, 372, HeaderHeight, AiLaneHeight),
+            PanelSize.ExtraLarge => new PanelSizeMetrics("extraLarge", "XL", 780, 560, HeaderHeight, AiLaneHeight),
             PanelSize.Large => new PanelSizeMetrics("large", "L", 680, 488, HeaderHeight, AiLaneHeight),
             _ => new PanelSizeMetrics("medium", "M", 600, 430, HeaderHeight, AiLaneHeight)
         };
@@ -19,7 +20,8 @@ internal static class PanelSizeCatalog
     [
         Get(PanelSize.Small),
         Get(PanelSize.Medium),
-        Get(PanelSize.Large)
+        Get(PanelSize.Large),
+        Get(PanelSize.ExtraLarge)
     ];
 }
 

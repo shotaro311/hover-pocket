@@ -1,9 +1,14 @@
 import { on, request } from "../js/bridge.js";
 import { labelForSize, setLanguage, t } from "../js/i18n.js";
 import { createGenerationTargetState } from "./generation-target-state.mjs";
+import { createWeatherSettings } from "./weather-settings.js";
 
 const languageEl = document.querySelector("[data-language]");
 const displayPlacementEl = document.querySelector("[data-display-placement]");
+const attachmentEl = document.querySelector("[data-panel-attachment]");
+const autoHideHandleEl = document.querySelector("[data-auto-hide-handle]");
+const automaticAttachmentEl = document.querySelector("[data-automatic-attachment]");
+const reduceMotionEl = document.querySelector("[data-reduce-motion]");
 const panelSizeEl = document.querySelector("[data-panel-size]");
 const textSizeEl = document.querySelector("[data-text-size]");
 const switchingEl = document.querySelector("[data-switching]");
@@ -74,6 +79,7 @@ let currentState = null;
 let stickyState = null;
 let generationState = null;
 const generationTarget = createGenerationTargetState();
+const weatherSettings = createWeatherSettings(document.querySelector("[data-weather-settings]"), request, render);
 
 on("state.changed", (state) => render(state));
 
@@ -89,6 +95,7 @@ async function bootstrap() {
 function render(state) {
   currentState = state;
   setLanguage(state.settings.language);
+  weatherSettings.render(state);
   document.querySelectorAll("[data-i18n]").forEach((node) => {
     node.textContent = t(node.getAttribute("data-i18n"));
   });
@@ -111,7 +118,7 @@ function render(state) {
     label: labelForSize(size.id),
   })), state.settings.panelSize, (panelSize) => update("settings.setPanelSize", { panelSize }));
 
-  renderSegment(textSizeEl, ["small", "medium", "large"].map((size) => ({
+  renderSegment(textSizeEl, ["small", "medium", "large", "extraLarge"].map((size) => ({
     id: size,
     label: labelForSize(size),
   })), state.settings.textSize, (textSize) => update("settings.setTextSize", { textSize }));
@@ -177,6 +184,19 @@ function render(state) {
     { id: "c", label: "C" },
     { id: "none", label: t("none") },
   ], state.settings.handleIcon, (handleIcon) => update("settings.setHandleIcon", { handleIcon }));
+  const attachmentEnglish = state.settings.language === "en";
+  document.querySelector("[data-auto-hide-handle-label]").textContent = attachmentEnglish ? "Automatically hide the top entry" : "上部の入口を自動で隠す";
+  document.querySelector("[data-auto-hide-handle-note]").textContent = attachmentEnglish ? "Move near the top to reveal the entry, then hover over it to open the panel." : "上部にマウスを近づけると入口が現れ、入口にホバーするとパネルが開きます。";
+  autoHideHandleEl.checked = Boolean(state.settings.autoHideTopHandle);
+  document.querySelector("[data-attachment-heading]").textContent = attachmentEnglish ? "Screen edge attachment" : "上端とのつながり";
+  document.querySelector("[data-automatic-attachment-label]").textContent = attachmentEnglish ? "Automatically cover the top on screens without a notch" : "ノッチがない画面では自動で上端まで覆う";
+  document.querySelector("[data-reduce-motion-label]").textContent = attachmentEnglish ? "Reduce motion" : "動きを減らす";
+  renderSegment(attachmentEl, [
+    { id: "preserveMenu", label: attachmentEnglish ? "Keep narrow entry" : "細い入口を残す" },
+    { id: "coverMenu", label: attachmentEnglish ? "Cover screen edge" : "上端まで覆う" },
+  ], state.settings.panelAttachmentStyle, (style) => update("settings.setPanelAttachment", { style }));
+  automaticAttachmentEl.checked = Boolean(state.settings.automaticScreenEdgeAttachment);
+  reduceMotionEl.checked = Boolean(state.settings.reduceMotion);
   handleSideAreaEl.checked = state.settings.showTopHandleSideArea !== false;
   disableFullscreenEl.checked = state.settings.disableTopEdgeInFullscreen !== false;
   clipboardPrivateEl.checked = Boolean(state.settings.clipboardPrivateMode);
@@ -812,3 +832,7 @@ async function update(method, params = undefined) {
     render(currentState);
   }
 }
+
+automaticAttachmentEl.addEventListener("change", () => update("settings.setPanelAttachment", { automatic: automaticAttachmentEl.checked }));
+autoHideHandleEl.addEventListener("change", () => update("settings.setAutoHideTopHandle", { enabled: autoHideHandleEl.checked }));
+reduceMotionEl.addEventListener("change", () => update("settings.setPanelAttachment", { reduceMotion: reduceMotionEl.checked }));

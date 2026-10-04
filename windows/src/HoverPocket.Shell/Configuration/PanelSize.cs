@@ -4,5 +4,6 @@ internal enum PanelSize
 {
     Small,
     Medium,
-    Large
+    Large,
+    ExtraLarge
 }

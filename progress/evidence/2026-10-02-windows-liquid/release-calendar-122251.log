@@ -1,0 +1,10 @@
+calendar verify: oauth-configuration
+oauth_embedded_metadata=absent
+calendar verify: setup-instructions
+calendar verify: oauth-url/pkce
+calendar verify: loopback
+calendar verify: credential-manager
+calendar verify: request-builders
+calendar verify: month-grid
+calendar verify: read-only guards
+PASS calendar verify: oauth-configuration, setup-instructions, oauth-url/pkce, loopback, credential-manager, request-builders, month-grid, read-only guards

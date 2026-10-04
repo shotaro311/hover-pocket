@@ -110,6 +110,7 @@ const dictionaries = {
     small: "小",
     medium: "中",
     large: "大",
+    extraLarge: "特大",
     tool: "ツール",
     noTool: "ツールなし",
     noVisibleTool: "表示できるツールがありません。",
@@ -225,6 +226,7 @@ const dictionaries = {
     small: "S",
     medium: "M",
     large: "L",
+    extraLarge: "XL",
     tool: "Tool",
     noTool: "No tool",
     noVisibleTool: "No visible tool is available.",
@@ -243,5 +245,5 @@ export function t(key) {
 }
 
 export function labelForSize(size) {
-  return t(size === "small" ? "small" : size === "large" ? "large" : "medium");
+  return t(size === "extraLarge" ? "extraLarge" : size === "small" ? "small" : size === "large" ? "large" : "medium");
 }

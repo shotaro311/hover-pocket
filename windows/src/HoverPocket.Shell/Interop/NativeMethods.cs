@@ -95,12 +95,12 @@ internal static partial class NativeMethods
         _ = SetWindowLongPtr(hwnd, GwlExStyle, new IntPtr(styles));
     }
 
-    public static void SetTopmostNoActivate(IntPtr hwnd)
+    public static void SetTopmostNoActivate(IntPtr hwnd, bool topmost = true)
     {
-        _ = SetWindowPos(hwnd, HwndTopmost, 0, 0, 0, 0, SwpNoMove | SwpNoSize | SwpNoActivate);
+        _ = SetWindowPos(hwnd, topmost ? HwndTopmost : new IntPtr(-2), 0, 0, 0, 0, SwpNoMove | SwpNoSize | SwpNoActivate);
     }
 
-    public static void SetWindowBoundsNoActivate(IntPtr hwnd, int x, int y, int width, int height, bool show)
+    public static void SetWindowBoundsNoActivate(IntPtr hwnd, int x, int y, int width, int height, bool show, bool topmost = true)
     {
         var flags = SwpNoActivate;
         if (show)
@@ -108,13 +108,20 @@ internal static partial class NativeMethods
             flags |= SwpShowWindow;
         }
 
+        if (!topmost) flags |= SwpNoZOrder;
         _ = SetWindowPos(hwnd, HwndTopmost, x, y, width, height, flags);
     }
 
-    public static void ShowNoActivate(IntPtr hwnd)
+    public static void ShowNoActivate(IntPtr hwnd, bool topmost = true)
     {
         _ = ShowWindow(hwnd, SwShownoactivate);
-        _ = SetWindowPos(hwnd, HwndTopmost, 0, 0, 0, 0, SwpNoMove | SwpNoSize | SwpNoActivate | SwpShowWindow);
+        _ = SetWindowPos(hwnd, topmost ? HwndTopmost : IntPtr.Zero, 0, 0, 0, 0, SwpNoMove | SwpNoSize | SwpNoActivate | SwpShowWindow | (topmost ? 0 : SwpNoZOrder));
+    }
+
+    public static bool ForegroundBelongsToCurrentProcess()
+    {
+        GetWindowThreadProcessId(GetForegroundWindow(), out var processId);
+        return processId == Environment.ProcessId;
     }
 
     public static bool TryGetWindowRect(IntPtr hwnd, out NativeRect rect)

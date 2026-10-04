@@ -212,11 +212,15 @@ jobs:
             -MsiPath $msiFiles[0].FullName `
             -ExpectedProductVersion "0.2.7" `
             -ExpectedUpgradeCode "{9E28ABD6-A496-472E-98AB-AE8D70C27B48}"
+      - name: Verify weather model, cache, and settings
+        run: dotnet run --project .\windows\tests\Weather.Core\Weather.Core.csproj --configuration Release
 
       - name: Verify settings UI modules
         run: |
           node --check .\windows\ui\js\app.js
           node --check .\windows\ui\settings\settings.js
+          node --check .\windows\ui\settings\weather-settings.js
+          node --check .\windows\ui\providers\calendar\weather.js
           node .\windows\script\verify_settings_generation_target.mjs
           python .\script\verify_voice_foundation.py
 

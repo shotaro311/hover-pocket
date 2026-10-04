@@ -1,0 +1,15 @@
+shell stage: VerifySecondInstanceAsync
+shell stage: VerifyPollingOnlyOpenAsync
+shell stage: VerifyAccessSurfaceHealthRecoveryAsync
+shell stage: VerifyPanelHealthRecoveryAsync
+shell stage: VerifyUnrecoverableWindowRecreationAsync
+shell stage: VerifyStagedRecoverySchedulerAsync
+shell stage: VerifyPanelPositionStableWhilePointerMovesAsync
+shell stage: VerifyPointerOutsideClosesPanelAsync
+shell stage: VerifyLiquidCloseAsync
+FAIL shell: System.InvalidOperationException: Liquid: shape protrudes outside frame
+   at HoverPocket.Shell.Verification.LiquidMotionVerifier.Require(Boolean condition, String message) in C:\Users\shotaro\Downloads\hover-pocket-windows-liquid-20261002\windows\src\HoverPocket.Shell\Verification\LiquidMotionVerifier.cs:line 126
+   at HoverPocket.Shell.Verification.LiquidMotionVerifier.VerifySpringAndShapes() in C:\Users\shotaro\Downloads\hover-pocket-windows-liquid-20261002\windows\src\HoverPocket.Shell\Verification\LiquidMotionVerifier.cs:line 119
+   at HoverPocket.Shell.Verification.LiquidMotionVerifier.RunAsync() in C:\Users\shotaro\Downloads\hover-pocket-windows-liquid-20261002\windows\src\HoverPocket.Shell\Verification\LiquidMotionVerifier.cs:line 14
+   at HoverPocket.Shell.Verification.ShellVerifier.RunAsync() in C:\Users\shotaro\Downloads\hover-pocket-windows-liquid-20261002\windows\src\HoverPocket.Shell\Verification\ShellVerifier.cs:line 56
+   at HoverPocket.Shell.App.RunShellVerificationAsync() in C:\Users\shotaro\Downloads\hover-pocket-windows-liquid-20261002\windows\src\HoverPocket.Shell\App.xaml.cs:line 328
