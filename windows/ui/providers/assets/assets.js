@@ -119,15 +119,19 @@ export function renderAssetsProvider({ container, request, state }) {
     const items = page.items.slice(Math.max(0, wanted - query.offset), Math.max(0, wanted - query.offset) + rowsInWindow * columns);
     find(".assets-spacer-top").style.height = `${startRow * 152}px`;
     find(".assets-spacer-bottom").style.height = `${Math.max(0, Math.ceil(page.total / columns) - startRow - Math.ceil(items.length / columns)) * 152}px`;
+    // A new <img> paints empty until its data URL decodes; reuse decoded thumbnails so re-rendering does not blink.
+    const decoded = new Map(Array.from(grid.children, card => [card.dataset.assetId, card.querySelector("img")]).filter(([, image]) => image?.src));
     grid.style.gridTemplateColumns = `repeat(${columns},minmax(0,1fr))`; grid.replaceChildren();
     for (const asset of items) {
       const card = document.createElement("div"); card.className = "assets-card"; card.dataset.assetId = asset.id; card.setAttribute("role", "option"); card.setAttribute("aria-selected", selection.has(asset.id)); card.tabIndex = -1; card.draggable = true;
-      const image = document.createElement("img"); image.alt = ""; image.draggable = false; image.decoding = "async";
+      const reused = decoded.get(asset.id);
+      const image = reused ?? document.createElement("img"); image.alt = ""; image.draggable = false; image.decoding = "async";
       const placeholder = document.createElement("span"); placeholder.className = "assets-kind"; placeholder.textContent = asset.kind === "pdf" ? "PDF" : asset.kind === "video" ? "▶" : asset.kind === "image" ? "▧" : asset.extension.toUpperCase() || "FILE";
       const title = document.createElement("span"); title.className = "assets-card-name"; title.textContent = (asset.favorite ? "★ " : "") + asset.name; title.title = asset.name;
       const size = document.createElement("small"); size.textContent = bytes(asset.sizeBytes);
       card.append(placeholder, image, title, size); grid.append(card);
-      if (thumbnails.has(asset.id)) image.src = thumbnails.get(asset.id);
+      if (reused) { /* keep the decoded thumbnail */ }
+      else if (thumbnails.has(asset.id)) image.src = thumbnails.get(asset.id);
       else if (asset.kind !== "other" && !pendingThumbs.has(asset.id)) {
         pendingThumbs.add(asset.id);
         // The visible window bounds the number of requests and decoded images.
@@ -183,7 +187,10 @@ export function renderAssetsProvider({ container, request, state }) {
       for (const item of page.items.slice(Math.max(0, Math.min(first, last)), Math.max(first, last) + 1)) selection.add(item.id);
     } else if (event.ctrlKey || event.metaKey) { if (selection.has(asset.id)) selection.delete(asset.id); else selection.add(asset.id); anchor = asset.id; }
     else { selection = new Set([asset.id]); anchor = asset.id; }
-    selectedAsset = asset; renderGrid(); renderSelection(); renderDetails(); scroll.focus();
+    selectedAsset = asset;
+    // Keep the clicked card attached so the browser can deliver the second click and dblclick.
+    for (const card of grid.children) card.setAttribute("aria-selected", selection.has(card.dataset.assetId));
+    renderSelection(); renderDetails(); scroll.focus();
   }
   function renderSelection() {
     const tools = find(".assets-selection"); tools.replaceChildren(); if (!selectionReady || !selection.size || !selectedAsset) return;
@@ -278,8 +285,9 @@ export function renderAssetsProvider({ container, request, state }) {
     if (disposed || current !== previewGeneration) { await run("assets.transition", { cancel: transition?.revision || 0 }); return; }
     stopMedia(); preview = null; fullscreen = false; zoom = 1;
     media.replaceChildren(); find(".assets-preview").hidden = true; root.classList.remove("has-preview", "is-fullscreen"); document.body.classList.remove("assets-fullscreen");
-    await run("assets.endPreview"); await run("panel.endTextInput"); if (organizer) await run("assets.organizer");
+    // Finish the grid before the panel resizes so the arrival snapshot matches the live page.
     await run("assets.visibility", {visible:true}); renderGrid(); renderSelection(); renderDetails();
+    await run("assets.endPreview"); await run("panel.endTextInput"); if (organizer) await run("assets.organizer");
   }
   function applyZoom() { const image = media.querySelector("img"); if (image) { image.style.transform = `scale(${zoom})`; media.classList.toggle("is-zoomed", zoom > 1); } }
   async function toggleFullscreen() { if (!preview) return; fullscreen = !fullscreen; root.classList.toggle("is-fullscreen", fullscreen); if (!organizer) document.body.classList.toggle("assets-fullscreen", fullscreen); await run("assets.layout", { fullscreen }); }

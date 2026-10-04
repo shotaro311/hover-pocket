@@ -6,13 +6,13 @@ Windows 版の provider は Controls、Calendar、Clipboard、Sticky Notes、Ass
 
 素材はEagle・アカウント・APIキーを必要としないローカルライブラリです。ファイル／フォルダの選択、上端へのドロップ、コピーした画像・ファイルの貼り付けで独立した原本を保存します。フォルダ・タグ・お気に入り、検索条件の保存、アプリ内のゴミ箱と復元、完全バックアップを扱います。素材の通常ウィンドウはトレイの「素材ライブラリを開く」から開き、ポケット内の素材機能を非表示にしていても使えます。
 
-開発版`0.2.9-local.13`は撮影・収録と画像の注釈編集に対応します。`Ctrl+Alt+S`で範囲を選び、撮影直後にペン、テキスト、四角、楕円、矢印で注釈を付けてPNGを保存できます。色、太さ、消しゴム、選択・移動、削除、Undo/Redoに対応し、「元画像も保存」を選べます。範囲選択のEnterは画面全体、Escはキャンセルです。
+公開ベータ`0.2.9`は撮影・収録と画像の注釈編集に対応します。`Ctrl+Alt+S`で範囲を選び、撮影直後にペン、テキスト、四角、楕円、矢印で注釈を付けてPNGを保存できます。色、太さ、消しゴム、選択・移動、削除、Undo/Redoに対応し、「元画像も保存」を選べます。範囲選択のEnterは画面全体、Escはキャンセルです。
 
 トレイの「撮影・収録の設定…」で「撮影後に編集画面を開く」をオフにして「設定を保存」を押すと、撮影画像をそのまま保存できます。素材をダブルクリックして「画像を編集」を押すと、同じ編集画面から原本を残して編集済みPNGを追加できます。フォルダとタグは引き継ぎます。保存後の注釈は画素に統合されます。
 
 素材をドラッグすると下部にゴミ箱が現れ、そこへドロップした項目をアプリ内のゴミ箱へ移します。Ctrl+Zまたはゴミ箱から復元できます。画像・動画などの外部アプリへのドラッグは従来どおり作業コピーを渡します。Space長押しによるプレビューの連続開閉を抑止し、拡大中の描画面の再作成を減らしています。
 
-`local.13`では、プレビューの切り替え前から表示を保ち、文字や画像を固定した大きさで見せながら外枠を動かすようにしました。拡大途中の横ずれと細かい文字のちらつきを抑えています。[修正と検証記録](../docs/report/20261003-windows-preview-smooth-recording-shortcut.md)。収録の上下反転は`local.12`で修正済みです。既存の収録ファイルは保持し、新しい収録から正しい向きで保存します。
+`local.13`では、プレビューの切り替え前から表示を保ち、文字や画像を固定した大きさで見せながら外枠を動かすようにしました。拡大途中の横ずれと細かい文字のちらつきを抑えています。[修正と検証記録](../docs/report/20261003-windows-preview-smooth-recording-shortcut.md)。収録の上下反転は`local.12`で修正済みです。既存の収録ファイルは保持し、新しい収録から正しい向きで保存します。`local.14`では、素材一覧の再描画でサムネイルが一瞬消える問題と、切替の終わりに保持画像を本体の再表示より先に外す順序を修正しました（検証は[作業記録](../progress/2026-10/2026-10-04_hover-pocket-claude-flicker.md)を参照）。`local.15`では、プレビューを開く際にウィンドウを到着寸法へ移す瞬間、古い切り抜き範囲が残って小さい枠の横に黒い面が出る問題を修正しました。[修正と検証記録](../progress/2026-10/2026-10-04_hover-pocket-claude-opening.md)。
 
 `local.9`では範囲選択後のクラッシュを修正しました。`local.10`では原本欠損時の保存判定、絞り込み後の複数選択、撮影フォルダの引き継ぎ、壊れた保存待ちによる後続停止を修正し、機能切り替えの不要な描画とフェード時間を減らしました。[修正・計測・検証記録](../docs/report/20261003-windows-review-fixes-response.md)。
 
@@ -163,6 +163,8 @@ positive confinement canaryは上記helper完成後に準備済みhomeを明示�
 production resolverは、固定先のexact binaryと準備済みcontrol-planeが揃った次回起動だけで生成adapterを構成します。生成物のactivationは引き続きOFFです。no-UAC positive canary、credential delivery、実モデル生成readbackが揃う前に有効化しません。
 
 ## Windows updates and release packaging
+
+`0.2.9`は、実機で確認済みのlocal.15を配布版へ反映したものです。素材管理、撮影・収録、注釈編集、プレビューの表示改善を含みます。[配信記録](../progress/2026-10/2026-10-04_hover-pocket-windows-029-release.md)。
 
 Windows 版の更新確認は Velopack と GitHub Releases (`shotaro311/hover-pocket`) を使います。トレイと Settings の `Check for Updates` は Windows channel `win` の feed (`releases.win.json`) へ接続し、更新が見つかった場合はダウンロード前と適用/再起動前に確認します。起動時の自動チェックは既定オンで、失敗しても起動を止めません。
 更新後の通常起動では、実インストールのrootと既存ARP entryの`InstallLocation`が一致する場合だけ、HKCUの`HoverPocketWin` entryにある`DisplayVersion`を現在versionへ補正します。portable、verify、second-instance probe、path不一致、keyなしでは変更しません。

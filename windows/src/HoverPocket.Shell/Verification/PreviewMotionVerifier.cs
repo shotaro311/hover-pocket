@@ -2,6 +2,8 @@ using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows;
 using System.Globalization;
+using System.Runtime.InteropServices;
+using System.Text.Json;
 using HoverPocket.Shell.Capture;
 using HoverPocket.Shell.Providers.Controls;
 using HoverPocket.Shell.Windows;
@@ -36,8 +38,19 @@ internal static class PreviewMotionVerifier
         await CaptureFiles.WritePngAsync(path, bitmap);
         var id = (await store.ImportAsync(path)).AssetId!;
         await controller.PanelBridgeController.SelectProviderFromShellAsync("assets");
+        var target = controller.ActiveLayoutForVerify!.PanelTarget.PhysicalRect;
+        controller.SimulatePointerMoveForVerify(target.Left + target.Width / 2, target.Top + 60);
+        await controller.ShowPanelForUiVerifyAsync();
         var web = controller.Panel.WebView!;
         await Task.Delay(800);
+        await web.ExecuteScriptAsync($$"""
+            window.__thumbnailClicks = [];
+            document.addEventListener('click', event => {
+              if (!event.target.closest('[data-asset-id="{{id}}"]')) return;
+              const image = document.querySelector('[data-asset-id="{{id}}"] img');
+              window.__thumbnailClicks.push({trusted:event.isTrusted, detail:event.detail, same:event.target.closest('[data-asset-id="{{id}}"]')===image?.parentElement, ready:!!image?.complete && image.naturalWidth>0});
+            });
+            """);
         VerifyConsole.WriteLine($"MOTION ready {DateTimeOffset.UtcNow:O}");
         await Task.Delay(1000);
         var resizeCount = 0;
@@ -58,9 +71,12 @@ internal static class PreviewMotionVerifier
             {
                 var placements = resizeCount;
                 VerifyConsole.WriteLine($"MOTION opening {cycle} {DateTimeOffset.UtcNow:O}");
-                await web.ExecuteScriptAsync($$"""document.querySelector('[data-asset-id="{{id}}"]')?.dispatchEvent(new MouseEvent('dblclick',{bubbles:true}))""");
+                await ClickCardAsync(web, id);
+                await Task.Delay(150);
+                KeyEvent(0x20, 0, 0, 0); KeyEvent(0x20, 0, 0x0002, 0);
                 await Task.Delay(1800);
-                if (!controller.Panel.AssetLayout.Active || controller.Panel.IsAnimating) return 1;
+                if (!controller.Panel.AssetLayout.Active || controller.Panel.IsAnimating)
+                { VerifyConsole.WriteLine("FAIL native preview open: " + await web.ExecuteScriptAsync("({clicks:window.__thumbnailClicks,previewHidden:document.querySelector('.assets-preview').hidden,selected:document.querySelector('.assets-selection').textContent})")); return 1; }
                 var animation = controller.Panel.LastAnimationDiagnostics;
                 VerifyConsole.WriteLine($"MEASURE preview animation: frames={animation.FrameCount}, duration_ms={animation.Elapsed.TotalMilliseconds:0.0}, max_gap_ms={animation.MaxFrameGap.TotalMilliseconds:0.0}");
                 var openingPlacements = resizeCount - placements;
@@ -87,6 +103,11 @@ internal static class PreviewMotionVerifier
                 { VerifyConsole.WriteLine($"FAIL preview reversal at {delay}ms: active={controller.Panel.AssetLayout.Active}, animating={controller.Panel.IsAnimating}, target={controller.Panel.LiquidTargetForVerify}, normal={normalTarget}, hit={web.IsHitTestVisible}, visible={controller.Panel.IsVisible}"); return 1; }
             }
             VerifyConsole.WriteLine("PASS preview reversal: close at 30/120/300ms, normal dimensions and hit testing restored");
+            var clicks = await web.ExecuteScriptAsync("window.__thumbnailClicks");
+            using var clickResults = JsonDocument.Parse(clicks);
+            if (clickResults.RootElement.GetArrayLength() < 3 || clickResults.RootElement.EnumerateArray().Any(click => !click.GetProperty("trusted").GetBoolean() || !click.GetProperty("ready").GetBoolean()))
+            { VerifyConsole.WriteLine("FAIL thumbnail paints empty after native selection: " + clicks); return 1; }
+            VerifyConsole.WriteLine($"PASS native selection/Space: decoded thumbnail retained, clicks={clickResults.RootElement.GetArrayLength()}");
             VerifyConsole.WriteLine("PASS preview motion: three native expand/collapse cycles recorded");
             return 0;
         }
@@ -96,4 +117,25 @@ internal static class PreviewMotionVerifier
             if (recorder is not null) { recorder.Stop(); await recorder.Completion.WaitAsync(TimeSpan.FromSeconds(20)); recorder.Dispose(); }
         }
     }
+
+    private static async Task ClickCardAsync(FrameworkElement surface, string id)
+    {
+        var web = (Microsoft.Web.WebView2.Wpf.WebView2CompositionControl)surface;
+        var raw = await web.ExecuteScriptAsync($$"""(()=>{const card=document.querySelector('[data-asset-id="{{id}}"]');card.scrollIntoView({block:'nearest'});const r=card.getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2};})()""");
+        using var bounds = JsonDocument.Parse(raw);
+        var point = surface.PointToScreen(new Point(bounds.RootElement.GetProperty("x").GetDouble(), bounds.RootElement.GetProperty("y").GetDouble()));
+        GetCursorPos(out var previous);
+        try
+        {
+            SetCursorPos((int)point.X, (int)point.Y);
+            MouseEvent(0x0002, 0, 0, 0, 0); await Task.Delay(40); MouseEvent(0x0004, 0, 0, 0, 0); await Task.Delay(90);
+        }
+        finally { MouseEvent(0x0004, 0, 0, 0, 0); SetCursorPos(previous.X, previous.Y); }
+    }
+
+    [StructLayout(LayoutKind.Sequential)] private struct NativePoint { public int X, Y; }
+    [DllImport("user32.dll")] private static extern bool GetCursorPos(out NativePoint point);
+    [DllImport("user32.dll")] private static extern bool SetCursorPos(int x, int y);
+    [DllImport("user32.dll", EntryPoint = "mouse_event")] private static extern void MouseEvent(uint flags, uint x, uint y, uint data, nuint extra);
+    [DllImport("user32.dll", EntryPoint = "keybd_event")] private static extern void KeyEvent(byte key, byte scan, uint flags, nuint extra);
 }

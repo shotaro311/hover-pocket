@@ -5,6 +5,18 @@ namespace HoverPocket.Shell.Interop;
 
 internal static partial class NativeMethods
 {
+    public static void SetEmptyWindowRegion(IntPtr hwnd)
+    {
+        if (hwnd == IntPtr.Zero) return;
+        var region = CreateRectRgn(0, 0, 0, 0);
+        if (region == IntPtr.Zero) throw new System.ComponentModel.Win32Exception();
+        if (SetWindowRgn(hwnd, region, true) == 0)
+        {
+            DeleteObject(region);
+            throw new System.ComponentModel.Win32Exception();
+        }
+    }
+
     public static void SetLiquidWindowRegion(IntPtr hwnd, Geometry geometry, double scaleX, double scaleY)
     {
         if (hwnd == IntPtr.Zero) return;

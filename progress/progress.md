@@ -1,9 +1,23 @@
 ---
 project_slug: hover-menu-preview
-updated: 2026-10-03
+updated: 2026-10-04
 updated_by: codex
-status: windows-preview-smooth-recording-shortcut-local-13; termination-cause-unconfirmed-diagnostics-added; published-macos-644; macos-asset-library-and-distribution-acceptance-pending
+status: windows-preview-opening-local-15-verified-running; termination-cause-unconfirmed-diagnostics-added; published-macos-644; macos-asset-library-and-distribution-acceptance-pending
 ---
+
+## 2026-10-04 開く瞬間のちらつきをClaudeで追加修正
+
+- local.14で閉じる側の改善をユーザーが確認。新しい動画で開く直前に小さい枠の横へ黒い面が1フレーム出る現象を確認し、同じWindowsのClaudeセッションへ修正を依頼した。
+- 本体の移動中に表示範囲を空にするだけでは初回に残留したため、録画をClaudeへ戻して追加修正。保持画像の表示中は本体の範囲を空に保ち、サイズ変更通知による古い範囲の上書きを止めた。終了・取消時の表示復帰と閉じる側の待機は保持。
+- local.15は新規プロセス2回・計6回の拡大の連続フレームで枠外の黒い面が再現せず。縮小・途中取消、素材UI、Debug/Release、JS17ファイルが通過。100回開閉は未実施。
+- 17:20 JSTに通常起動（PID33248）。設定ハッシュ、素材7件・未完了操作0件・schema・quick_checkの不変をreadback。未コミット差分として保持。[作業記録と検証範囲](2026-10/2026-10-04_hover-pocket-claude-opening.md)。
+
+## 2026-10-04 Windowsプレビューの残りのちらつき（Claude修正・Codex検証）
+
+- local.13で残るちらつきの報告を受け、コードから3経路を特定。グリッド再描画のたびにサムネイルの`<img>`を作り直して一瞬空になる（クリック選択・閉じた後・パネル表示時）、切替の終わりに本体の再表示より先に保持画像を消す、閉じる操作で到着画像の取得と最終DOMが競合する。
+- `assets.js`でデコード済みサムネイルを再利用し、閉じる前にグリッドを確定。`PanelWindow.cs`で本体の描画を2フレーム待ってから保持画像を外す。開発版`0.2.9-local.14`。
+- 先にlocal.13までを`e49c69b`へコミット。Claude側はCLI権限で動作検証できず、Codexが引き継いだ。提供動画の全面が一瞬黒くなるフレームを確認し、実クリック→Spaceの3往復の録画では再発せず。素材UI、途中取消、Debug/ReleaseとJS17ファイルが通過。100回開閉は未実施。マウス注入のダブルクリックは成立を確定できず、実機での追加確認が残る。
+- 12:47 JSTにlocal.14を通常起動し、設定ハッシュと素材6件・未完了操作0件・schema・quick_checkの不変をreadback。追加修正は未コミット差分として残し、push・公開・自動起動変更は未実施。[作業記録とClaudeセッション](2026-10/2026-10-04_hover-pocket-claude-flicker.md)。
 
 ## 2026-10-03 Windowsプレビューのちらつき・録画時の設定表示を修正
 

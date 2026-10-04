@@ -534,15 +534,24 @@ internal sealed class PanelWindow : NoActivateWindow
             if (revision == _resizeRevision)
             {
                 _pendingResizeTarget = null;
+                _resizePrepared = false;
+                _resizeViewport = null;
+                // Opacity first: ApplyLiquidSurface restores the live region only for a visible panel.
+                Opacity = 1;
+                if (!_closed) ApplyLiquidSurface();
+                // Hide() is immediate while Opacity applies on WPF's next frame. Keep the
+                // matching overlay until the live panel has presented to avoid a blank frame.
+                if (!_closed && _resizeOverlay is { IsVisible: true })
+                    try { await WaitForRenderedFramesAsync(2); } catch (TimeoutException) { }
+            }
+            if (revision == _resizeRevision)
+            {
                 _resizeImage.Visibility = Visibility.Collapsed;
                 _resizeImage.Source = null;
                 _resizeCover.Visibility = Visibility.Collapsed;
                 _resizeImagePlacement = null;
-                _resizePrepared = false;
-                _resizeViewport = null;
-                if (!_closed) ApplyLiquidSurface();
-                Opacity = 1;
                 if (_resizeOverlay is { IsVisible: true }) _resizeOverlay.Hide();
+                if (!_closed) ApplyLiquidSurface();
             }
         }
     }
@@ -573,13 +582,18 @@ internal sealed class PanelWindow : NoActivateWindow
         ApplyLiquidSurface();
         _resizeOverlay.ShowNoActivate();
         // Present the old frame before moving the browser's HWND behind it.
+        await WaitForRenderedFramesAsync(2);
+        if (!_closed && revision == _resizeRevision) { Opacity = 0; NativeMethods.SetEmptyWindowRegion(Hwnd); }
+    }
+
+    private static async Task WaitForRenderedFramesAsync(int count)
+    {
         var presented = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var frames = 0;
-        EventHandler rendered = (_, _) => { if (++frames == 2) presented.TrySetResult(); };
+        EventHandler rendered = (_, _) => { if (++frames == count) presented.TrySetResult(); };
         CompositionTarget.Rendering += rendered;
         try { await presented.Task.WaitAsync(TimeSpan.FromMilliseconds(250)); }
         finally { CompositionTarget.Rendering -= rendered; }
-        if (!_closed && revision == _resizeRevision) Opacity = 0;
     }
 
     private sealed class ResizeOverlayWindow : NoActivateWindow
@@ -620,6 +634,8 @@ internal sealed class PanelWindow : NoActivateWindow
         _resizeCover.Visibility = Visibility.Collapsed; _resizeImagePlacement = null; _resizePrepared = false;
         _resizeViewport = null;
         Opacity = 1;
+        // Restore the live region cleared while the overlay was presenting.
+        if (!_closed) ApplyLiquidSurface();
         if (_resizeOverlay is { IsVisible: true }) _resizeOverlay.Hide();
     }
 
@@ -729,6 +745,13 @@ internal sealed class PanelWindow : NoActivateWindow
             (int)Math.Round(dip.Left * scaleX), target.PhysicalRect.Top,
             (int)Math.Round(w * scaleX), (int)Math.Round(h * scaleY)));
         var viewport = _resizeViewport ?? placement;
+        // WPF moves the HWND in several SetWindowPos steps before the new region below is set.
+        // The old region stays in window coordinates, so a presented frame would expose the
+        // hidden (Opacity 0, black) panel beside the overlay. Keep it fully clipped while it moves.
+        if (_resizeImage.Source is not null && Hwnd != IntPtr.Zero && NativeMethods.TryGetWindowRect(Hwnd, out var current)
+            && (current.Left != viewport.PhysicalRect.Left || current.Top != viewport.PhysicalRect.Top
+                || current.Width != viewport.PhysicalRect.Width || current.Height != viewport.PhysicalRect.Height))
+            NativeMethods.SetEmptyWindowRegion(Hwnd);
         ApplyPlacement(viewport, show: false);
         _root.Width = viewport.DipRect.Width; _root.Height = viewport.DipRect.Height;
         _viewportOffset.X = dip.Left - viewport.DipRect.Left;
@@ -764,7 +787,10 @@ internal sealed class PanelWindow : NoActivateWindow
             nativeClip.Transform = new TranslateTransform(_viewportOffset.X, _viewportOffset.Y);
         }
         _root.Clip = nativeClip;
-        NativeMethods.SetLiquidWindowRegion(Hwnd, nativeClip, scaleX, scaleY);
+        // While the overlay presents the transition, the hidden panel (Opacity 0 renders black)
+        // stays fully clipped so no move, resize or first present can show it beside the overlay.
+        if (MainHiddenBehindOverlay) NativeMethods.SetEmptyWindowRegion(Hwnd);
+        else NativeMethods.SetLiquidWindowRegion(Hwnd, nativeClip, scaleX, scaleY);
         if (_resizeOverlay is not null && _resizeImage.Source is not null)
         {
             var monitor = layout.Monitor.Bounds;
@@ -1056,8 +1082,14 @@ internal sealed class PanelWindow : NoActivateWindow
         throw new DirectoryNotFoundException("windows/ui static assets were not found.");
     }
 
+    private bool MainHiddenBehindOverlay => _resizeImage.Source is not null && Opacity == 0;
+
     private void ApplyRoundedRegion()
     {
+        // During a content transition the HWND is at the arrival viewport and its region is
+        // offset (ApplyLiquidSurface owns it). This untranslated shape would expose the panel
+        // left of the overlay when SizeChanged fires between the move and the animation.
+        if (_resizeImage.Source is not null) return;
         if (_liquidShape is not null && _liquidLayout is not null)
             NativeMethods.SetLiquidWindowRegion(Hwnd, _liquidShape.Path,
                 _liquidLayout.Monitor.ScaleX, _liquidLayout.Monitor.ScaleY);
