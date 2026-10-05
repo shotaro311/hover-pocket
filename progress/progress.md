@@ -5,6 +5,12 @@ updated_by: codex
 status: windows-0.2.10-installed; public-windows-0.2.10; reported-freeze-incident-unconfirmed-reproduced-preview-races-fixed; published-macos-644; macos-asset-library-local-662; macos-physical-acceptance-partial
 ---
 
+## 2026-10-05 Mac / Windowsのリファクタリング
+
+- Mac側は表示先画面・負荷計測・WebView/ドラッグ・DB行変換を責務ごとに分離した。前回の素材実装を土台コミット `7931f8e` に保存し、今回の整理を別コミットでレビューできるようにした。
+- 保存40項目、UI58項目、再開2項目、既存機能と100回反復、アニメーションの途中反転30回等が通過。元2,099ファイルと原本・Windows互換出力を独立readbackした。
+- Windows側はS311-winのCodexへ依頼し、保存・検索・分類・復旧と動画配信処理を整理している。公開macOS版644・Windows版0.2.10は変更しない。[Mac作業記録](2026-10/2026-10-05_hover-pocket-mac-refactor.md)。
+
 ## 2026-10-05 Mac素材ライブラリのローカル実装
 
 - Windows 0.2.10の共有UI・保存契約へMacの保存、画像/動画/PDF、注釈、撮影、音声付き収録を接続した。開発ビルド662、作業ブランチ `codex/macos-asset-library-0210`。公開macOS版は644のまま。

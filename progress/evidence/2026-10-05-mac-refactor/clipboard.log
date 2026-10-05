@@ -1,0 +1,5 @@
+clipboard_verify=ok
+clipboard_favorite_text_after_clear=1
+clipboard_favorite_image_after_clear=1
+clipboard_regular_image_removed=true
+clipboard_legacy_decode_default_favorite=true

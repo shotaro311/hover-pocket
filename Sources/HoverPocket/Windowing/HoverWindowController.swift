@@ -110,7 +110,7 @@ final class HoverWindowController {
 
     func positionWindows() {
         syncAccessWindows(orderFront: false)
-        guard let screen = activePreviewScreen ?? targetScreen() else { return }
+        guard let screen = activePreviewScreen ?? screenSelection.target else { return }
 
         applyResolvedVoiceLaneLayout(on: screen)
         let frames = panelFrames(on: screen)
@@ -126,7 +126,7 @@ final class HoverWindowController {
     }
 
     func openPanelFromMenu() {
-        showPreview(on: targetScreen())
+        showPreview(on: screenSelection.target)
         awaitingPointerAfterExplicitOpen = true
     }
 
@@ -134,7 +134,7 @@ final class HoverWindowController {
     /// after `showPreview` because panel opening restores the settings-based
     /// provider selection.
     func openPanel(showing pluginID: PluginID) {
-        showPreview(on: targetScreen())
+        showPreview(on: screenSelection.target)
         menuStore.providerStore.select(pluginID)
         awaitingPointerAfterExplicitOpen = true
     }
@@ -357,7 +357,7 @@ final class HoverWindowController {
                 let bodyScreen = NSPoint(x: previewWindow.frame.midX, y: previewWindow.frame.minY + 100)
                 updatePreviewMouseRouting(at: bodyScreen)
                 try check(!previewWindow.ignoresMouseEvents, "body_mouse_routing")
-                try check(accessWindows[screenKey(screen)]?.isVisible == false, "access_hidden_while_open")
+                try check(accessWindows[PanelScreenSelection.key(screen)]?.isVisible == false, "access_hidden_while_open")
                 // Exercise the production close decision with a stationary pointer, without explicit-open pinning.
                 awaitingPointerAfterExplicitOpen = false
                 let frames = panelFrames(on: screen)
@@ -390,7 +390,7 @@ final class HoverWindowController {
                 await settlePanelSoakRunLoop(milliseconds: 100)
                 try check(previewWindow.isVisible && !previewIsClosing && closeTask == nil
                           && previewAnimationToken == heldToken, "hover_reentry_cancels_close")
-                if let other = NSScreen.screens.first(where: { !isSameDisplay($0, screen) }) {
+                if let other = NSScreen.screens.first(where: { !PanelScreenSelection.isSameDisplay($0, screen) }) {
                     let otherAccess = panelFrames(on: other).access
                     try check(!isMouseInsideHoverRegion(at: NSPoint(x: otherAccess.midX, y: otherAccess.midY)),
                               "other_display_does_not_hold_panel")
@@ -398,7 +398,7 @@ final class HoverWindowController {
                 closeIfMouseLeftHoverRegion(at: outside)
                 await settlePanelSoakRunLoop(milliseconds: 100)
                 try await awaitIdle()
-                try check(!previewWindow.isVisible && accessWindows[screenKey(screen)]?.isVisible == true,
+                try check(!previewWindow.isVisible && accessWindows[PanelScreenSelection.key(screen)]?.isVisible == true,
                           "hover_leave_auto_closes")
                 open(on: screen)
                 try await awaitIdle()
@@ -409,11 +409,11 @@ final class HoverWindowController {
                 try capture("\(style.rawValue)-display-\(index)-close-060ms")
                 try await awaitIdle()
                 try check(!previewWindow.isVisible && globalPointerMonitor == nil && localPointerMonitor == nil, "close_complete")
-                try check(accessWindows[screenKey(screen)]?.isVisible == true, "access_restored")
+                try check(accessWindows[PanelScreenSelection.key(screen)]?.isVisible == true, "access_restored")
                 print("liquid_display_\(index)=ok style=\(style.rawValue) sizes=4 origin=\(panelFrames(on: screen).surfaceOriginWidth) header=\(panelFrames(on: screen).attachment.headerHeight)")
             }
         }
-        open(on: targetScreen())
+        open(on: screenSelection.target)
         try await awaitIdle()
         let unchangedFrame = previewWindow.frame
         for _ in 0..<5 {
@@ -433,7 +433,7 @@ final class HoverWindowController {
         try await awaitIdle()
         print("liquid_attachment=ok live_switches=10 menu_routing=ok access_restored=ok")
         settings.panelAttachmentStyle = .preserveMenu
-        open(on: targetScreen())
+        open(on: screenSelection.target)
         try await awaitIdle()
         let automaticFrame = previewWindow.frame
         for automatic in [true, false, true, false] {
@@ -455,25 +455,25 @@ final class HoverWindowController {
         for milliseconds: UInt64 in [30, 80, 150] {
             for iteration in 0..<5 {
                 settings.panelAttachmentStyle = iteration.isMultiple(of: 2) ? .preserveMenu : .coverMenu
-                open(on: targetScreen())
+                open(on: screenSelection.target)
                 await settlePanelSoakRunLoop(milliseconds: milliseconds)
                 let progress = liquidAnimator.reveal.value, speed = liquidAnimator.reveal.velocity
                 closePreview()
                 try check(liquidAnimator.reveal.value == progress && liquidAnimator.reveal.velocity == speed, "closing_preserves_velocity")
                 await settlePanelSoakRunLoop(milliseconds: 30)
                 let reversedProgress = liquidAnimator.reveal.value, reversedSpeed = liquidAnimator.reveal.velocity
-                open(on: targetScreen())
+                open(on: screenSelection.target)
                 try check(liquidAnimator.reveal.value == reversedProgress && liquidAnimator.reveal.velocity == reversedSpeed, "reopening_preserves_velocity")
                 try await awaitIdle()
                 closePreview()
                 try await awaitIdle()
             }
         }
-        open(on: targetScreen())
+        open(on: screenSelection.target)
         try await awaitIdle()
         hidePreviewForExternalDrag()
         try check(!previewWindow.isVisible && liquidAnimator.isIdle && liquidAnimator.reveal.value == 0, "external_drag_reset")
-        open(on: targetScreen())
+        open(on: screenSelection.target)
         try check(liquidAnimator.reveal.value == 0, "open_after_drag_origin")
         try await awaitIdle()
         positionWindows()
@@ -496,7 +496,7 @@ final class HoverWindowController {
         else {
             throw PanelSoakVerificationError.failed("panel_soak_precondition_failed")
         }
-        guard let screen = targetScreen(), let previewWindow else {
+        guard let screen = screenSelection.target, let previewWindow else {
             throw PanelSoakVerificationError.failed("panel_soak_screen_unavailable")
         }
 
@@ -552,11 +552,11 @@ final class HoverWindowController {
         await settlePanelSoakRunLoop(milliseconds: 500)
 
         let baselineWindowCount = NSApp.windows.count
-        let baselineTask = try processTaskSnapshot()
+        let baselineTask = try PanelProcessMetrics.processTaskSnapshot()
         let baselineThreadCount = baselineTask.threadCount
         let baselineResidentMiB = baselineTask.residentMiB
-        let baselineSocketCount = try processSocketCount()
-        let baselineChildProcessCount = try childProcessCount()
+        let baselineSocketCount = try PanelProcessMetrics.processSocketCount()
+        let baselineChildProcessCount = try PanelProcessMetrics.childProcessCount()
         var maximumThreadCount = baselineThreadCount
         var maximumOpenMilliseconds = 0.0
         var providerSwitches = 0
@@ -600,7 +600,7 @@ final class HoverWindowController {
             if (index + 1).isMultiple(of: 25) {
                 maximumThreadCount = max(
                     maximumThreadCount,
-                    try processTaskSnapshot().threadCount
+                    try PanelProcessMetrics.processTaskSnapshot().threadCount
                 )
             }
         }
@@ -612,11 +612,11 @@ final class HoverWindowController {
         }
 
         await settlePanelSoakRunLoop(milliseconds: 500)
-        let finalTask = try processTaskSnapshot()
+        let finalTask = try PanelProcessMetrics.processTaskSnapshot()
         maximumThreadCount = max(maximumThreadCount, finalTask.threadCount)
         let finalWindowCount = NSApp.windows.count
-        let finalSocketCount = try processSocketCount()
-        let finalChildProcessCount = try childProcessCount()
+        let finalSocketCount = try PanelProcessMetrics.processSocketCount()
+        let finalChildProcessCount = try PanelProcessMetrics.childProcessCount()
 
         let resourceInvariants = [
             (liquidAnimator.isIdle, "liquid_display_link_stopped"),
@@ -764,7 +764,7 @@ final class HoverWindowController {
         let panel = makePanel(
             size: PanelGeometry.previewSize(
                 panelSize: settings.panelSize,
-                additionalHeight: targetScreen().map { voiceLaneHeight(on: $0) } ?? 0
+                additionalHeight: screenSelection.target.map { voiceLaneHeight(on: $0) } ?? 0
             ),
             acceptsKeyboardFocus: true
         )
@@ -788,7 +788,7 @@ final class HoverWindowController {
         liquidSurface = surface
         liquidAnimator.view = surface
         previewWindow = panel
-        if let screen = targetScreen() {
+        if let screen = screenSelection.target {
             let frames = panelFrames(on: screen)
             configureSurfaceFrame(frames.preview, originWidth: frames.surfaceOriginWidth, progress: 0)
         }
@@ -834,7 +834,7 @@ final class HoverWindowController {
     private func handleDirectHover(on screen: NSScreen) {
         guard !isPanelSoakVerification, usesDirectHoverEvents, !isVoiceControlLocation(on: screen) else { return }
         if previewWindow?.isVisible == true, !previewIsClosing,
-           let activePreviewScreen, isSameDisplay(activePreviewScreen, screen) {
+           let activePreviewScreen, PanelScreenSelection.isSameDisplay(activePreviewScreen, screen) {
             cancelClose()
             return
         }
@@ -869,7 +869,7 @@ final class HoverWindowController {
         previewWindow.hasShadow = false
         previewWindow.invalidateShadow()
         previewWindow.ignoresMouseEvents = false
-        if let screen = previewWindow.screen ?? activePreviewScreen ?? targetScreen() {
+        if let screen = previewWindow.screen ?? activePreviewScreen ?? screenSelection.target {
             previewWindow.setFrame(panelFrames(on: screen).preview, display: false)
         }
         liquidAnimator.snap(progress: 0, frame: previewWindow.frame)
@@ -884,8 +884,8 @@ final class HoverWindowController {
         resetTask = nil
         mouseEventsEnableTask?.cancel()
         mouseEventsEnableTask = nil
-        guard let screen = requestedScreen ?? targetScreen(), let previewWindow else { return }
-        let changedScreen = activePreviewScreen.map { !isSameDisplay($0, screen) } ?? false
+        guard let screen = requestedScreen ?? screenSelection.target, let previewWindow else { return }
+        let changedScreen = activePreviewScreen.map { !PanelScreenSelection.isSameDisplay($0, screen) } ?? false
         let wasVisible = previewWindow.isVisible && !changedScreen
         if changedScreen { orderOutPreviewWindow(previewWindow) }
         activePreviewScreen = screen
@@ -893,7 +893,7 @@ final class HoverWindowController {
         applyResolvedVoiceLaneLayout(on: screen)
         VoiceLaneRuntime.shared.attachPanel()
         let frames = panelFrames(on: screen)
-        menuStore.providerStore.prepareForPanelOpen(isSecondaryDisplay: isSecondaryDisplay(screen))
+        menuStore.providerStore.prepareForPanelOpen(isSecondaryDisplay: screenSelection.isSecondaryDisplay(screen))
         setProviderActive(true)
         menuStore.providerStore.refreshSelected(reason: .panelOpened)
         previewAnimationToken += 1
@@ -908,7 +908,7 @@ final class HoverWindowController {
         previewWindow.hasShadow = false
         previewWindow.ignoresMouseEvents = true
         previewWindow.orderFrontRegardless()
-        accessWindows[screenKey(screen)]?.orderOut(nil)
+        accessWindows[PanelScreenSelection.key(screen)]?.orderOut(nil)
         previewWindow.makeKey()
         startPointerMonitors()
         liquidAnimator.onSettled = { [weak self] in self?.finishPreviewOpen(token: token) }
@@ -1107,8 +1107,8 @@ final class HoverWindowController {
     /// hover/click entry available, including on the no-notch 108pt bar.
     private func isVoiceControlLocation(on screen: NSScreen) -> Bool {
         guard VoiceActivityPresentation(snapshot: VoiceLaneRuntime.shared.snapshot).showsConversation,
-              let accessWindow = accessWindows[screenKey(screen)],
-              let style = accessWindowStyles[screenKey(screen)] else {
+              let accessWindow = accessWindows[PanelScreenSelection.key(screen)],
+              let style = accessWindowStyles[PanelScreenSelection.key(screen)] else {
             return false
         }
 
@@ -1220,7 +1220,7 @@ final class HoverWindowController {
             }
         } else if !assets.incomingDrag, dragBoard.changeCount != dragChangeCount,
                   dragBoard.types?.contains(.fileURL) == true, assets.canAcceptDrop?() == true,
-                  accessScreens().contains(where: { panelFrames(on: $0).access.insetBy(dx: -12, dy: -6).contains(NSEvent.mouseLocation) }) {
+                  screenSelection.access.contains(where: { panelFrames(on: $0).access.insetBy(dx: -12, dy: -6).contains(NSEvent.mouseLocation) }) {
             assets.openForDrop?()
         }
         let now = Date()
@@ -1232,8 +1232,8 @@ final class HoverWindowController {
         guard !isPanelSoakVerification, previewWindow?.isVisible != true else { return }
 
         let mouseLocation = NSEvent.mouseLocation
-        for screen in accessScreens() {
-            guard let accessWindow = accessWindows[screenKey(screen)],
+        for screen in screenSelection.access {
+            guard let accessWindow = accessWindows[PanelScreenSelection.key(screen)],
                   accessWindow.isVisible == !suppressesAccessWindow(on: screen),
                   accessWindow.frame.contains(mouseLocation),
                   !isVoiceControlLocation(on: screen)
@@ -1253,11 +1253,11 @@ final class HoverWindowController {
     }
 
     private func accessWindowsAreHealthy() -> Bool {
-        let screens = accessScreens()
+        let screens = screenSelection.access
         guard screens.count == accessWindows.count else { return false }
 
         for screen in screens {
-            let key = screenKey(screen)
+            let key = PanelScreenSelection.key(screen)
             let expected = panelFrames(on: screen)
             guard let accessWindow = accessWindows[key],
                   accessWindowStyles[key] == expected.accessStyle,
@@ -1286,8 +1286,8 @@ final class HoverWindowController {
     }
 
     private func syncAccessWindows(orderFront: Bool) {
-        let screens = accessScreens()
-        let desiredKeys = Set(screens.map(screenKey))
+        let screens = screenSelection.access
+        let desiredKeys = Set(screens.map(PanelScreenSelection.key))
 
         let obsoleteKeys = accessWindows.keys.filter { !desiredKeys.contains($0) }
         for key in obsoleteKeys {
@@ -1297,7 +1297,7 @@ final class HoverWindowController {
         }
 
         for screen in screens {
-            let key = screenKey(screen)
+            let key = PanelScreenSelection.key(screen)
             let frames = panelFrames(on: screen)
 
             if accessWindows[key] == nil || accessWindowStyles[key] != frames.accessStyle {
@@ -1315,82 +1315,12 @@ final class HoverWindowController {
         }
     }
 
-    private func accessScreens() -> [NSScreen] {
-        switch settings.displayPlacementMode {
-        case .allDisplays:
-            return NSScreen.screens.sorted { lhs, rhs in
-                if lhs.frame.minX == rhs.frame.minX {
-                    return lhs.frame.minY < rhs.frame.minY
-                }
-                return lhs.frame.minX < rhs.frame.minX
-            }
-        case .mainDisplay, .secondaryDisplay:
-            return targetScreen().map { [$0] } ?? []
-        }
+    private var screenSelection: PanelScreenSelection {
+        PanelScreenSelection(mode: settings.displayPlacementMode)
     }
 
     private func suppressesAccessWindow(on screen: NSScreen) -> Bool {
-        previewWindow?.isVisible == true && activePreviewScreen.map { isSameDisplay($0, screen) } == true
-    }
-
-    private func screenKey(_ screen: NSScreen) -> String {
-        if let displayID = screen.displayID {
-            return String(displayID)
-        }
-
-        return "\(screen.frame.origin.x),\(screen.frame.origin.y),\(screen.frame.width),\(screen.frame.height)"
-    }
-
-    private func targetScreen() -> NSScreen? {
-        switch settings.displayPlacementMode {
-        case .mainDisplay:
-            return mainDisplay()
-        case .secondaryDisplay:
-            return secondaryDisplay() ?? mainDisplay()
-        case .allDisplays:
-            return screenContainingMouse() ?? mainDisplay()
-        }
-    }
-
-    private func screenContainingMouse() -> NSScreen? {
-        let location = NSEvent.mouseLocation
-        return NSScreen.screens.first { $0.frame.contains(location) }
-    }
-
-    private func mainDisplay() -> NSScreen? {
-        NSScreen.screens.first { $0.frame.origin == .zero } ?? NSScreen.main ?? NSScreen.screens.first
-    }
-
-    private func secondaryDisplay() -> NSScreen? {
-        guard let mainDisplay = mainDisplay() else { return NSScreen.screens.first }
-
-        let secondaryScreens = NSScreen.screens.filter { !isSameDisplay($0, mainDisplay) }
-        guard !secondaryScreens.isEmpty else { return nil }
-
-        if let mouseScreen = screenContainingMouse(),
-           secondaryScreens.contains(where: { isSameDisplay($0, mouseScreen) }) {
-            return mouseScreen
-        }
-
-        return secondaryScreens.sorted { lhs, rhs in
-            if lhs.frame.minX == rhs.frame.minX {
-                return lhs.frame.minY < rhs.frame.minY
-            }
-            return lhs.frame.minX < rhs.frame.minX
-        }.first
-    }
-
-    private func isSameDisplay(_ lhs: NSScreen, _ rhs: NSScreen) -> Bool {
-        if let lhsID = lhs.displayID, let rhsID = rhs.displayID {
-            return lhsID == rhsID
-        }
-
-        return lhs === rhs
-    }
-
-    private func isSecondaryDisplay(_ screen: NSScreen) -> Bool {
-        guard let mainDisplay = mainDisplay() else { return false }
-        return !isSameDisplay(screen, mainDisplay)
+        previewWindow?.isVisible == true && activePreviewScreen.map { PanelScreenSelection.isSameDisplay($0, screen) } == true
     }
 
     private var shouldReduceMotion: Bool {
@@ -1402,85 +1332,6 @@ final class HoverWindowController {
 
     private func settlePanelSoakRunLoop(milliseconds: UInt64 = 2) async {
         try? await Task.sleep(nanoseconds: milliseconds * 1_000_000)
-    }
-
-    private func processTaskSnapshot() throws -> (threadCount: Int, residentMiB: Double) {
-        var info = proc_taskinfo()
-        let expectedSize = MemoryLayout<proc_taskinfo>.size
-        let readSize = withUnsafeMutablePointer(to: &info) { pointer in
-            proc_pidinfo(
-                getpid(),
-                PROC_PIDTASKINFO,
-                0,
-                pointer,
-                Int32(expectedSize)
-            )
-        }
-        guard readSize == expectedSize else {
-            throw PanelSoakVerificationError.failed("panel_soak_task_readback_failed")
-        }
-        return (
-            Int(info.pti_threadnum),
-            Double(info.pti_resident_size) / 1_048_576
-        )
-    }
-
-    private func processSocketCount() throws -> Int {
-        errno = 0
-        let requiredSize = proc_pidinfo(getpid(), PROC_PIDLISTFDS, 0, nil, 0)
-        guard requiredSize >= 0, requiredSize > 0 || errno == 0 else {
-            throw PanelSoakVerificationError.failed("panel_soak_socket_readback_failed")
-        }
-        var descriptors = [proc_fdinfo](
-            repeating: proc_fdinfo(),
-            count: max(1, Int(requiredSize) / MemoryLayout<proc_fdinfo>.size)
-        )
-        errno = 0
-        let readSize = descriptors.withUnsafeMutableBytes { buffer in
-            proc_pidinfo(
-                getpid(),
-                PROC_PIDLISTFDS,
-                0,
-                buffer.baseAddress,
-                Int32(buffer.count)
-            )
-        }
-        guard readSize >= 0, readSize > 0 || errno == 0 else {
-            throw PanelSoakVerificationError.failed("panel_soak_socket_readback_failed")
-        }
-        let count = Int(readSize) / MemoryLayout<proc_fdinfo>.size
-        return descriptors.prefix(count).filter { $0.proc_fdtype == PROX_FDTYPE_SOCKET }.count
-    }
-
-    private func childProcessCount() throws -> Int {
-        errno = 0
-        let requiredSize = proc_listpids(
-            UInt32(PROC_PPID_ONLY),
-            UInt32(getpid()),
-            nil,
-            0
-        )
-        guard requiredSize >= 0, requiredSize > 0 || errno == 0 else {
-            throw PanelSoakVerificationError.failed("panel_soak_child_readback_failed")
-        }
-        var processIdentifiers = [pid_t](
-            repeating: 0,
-            count: max(1, Int(requiredSize) / MemoryLayout<pid_t>.size)
-        )
-        errno = 0
-        let readSize = processIdentifiers.withUnsafeMutableBytes { buffer in
-            proc_listpids(
-                UInt32(PROC_PPID_ONLY),
-                UInt32(getpid()),
-                buffer.baseAddress,
-                Int32(buffer.count)
-            )
-        }
-        guard readSize >= 0, readSize > 0 || errno == 0 else {
-            throw PanelSoakVerificationError.failed("panel_soak_child_readback_failed")
-        }
-        let count = Int(readSize) / MemoryLayout<pid_t>.size
-        return processIdentifiers.prefix(count).filter { $0 > 0 }.count
     }
 
     private func setProviderActive(_ isActive: Bool) {
@@ -1609,7 +1460,7 @@ final class HoverWindowController {
 
     private func resizePreviewForPanelSizeChange() {
         syncAccessWindows(orderFront: false)
-        guard let screen = activePreviewScreen ?? previewWindow?.screen ?? targetScreen() else { return }
+        guard let screen = activePreviewScreen ?? previewWindow?.screen ?? screenSelection.target else { return }
         applyResolvedVoiceLaneLayout(on: screen)
         let frames = panelFrames(on: screen)
         guard let previewWindow else { return }
@@ -1646,7 +1497,7 @@ final class HoverWindowController {
     }
 
     private func updateAttachment(animated: Bool) {
-        guard let screen = activePreviewScreen ?? targetScreen() else { return }
+        guard let screen = activePreviewScreen ?? screenSelection.target else { return }
         let metrics = panelFrames(on: screen).attachment
         if menuStore.attachmentMetrics != metrics { menuStore.attachmentMetrics = metrics }
         liquidAnimator.setAttachment(metrics, style: menuStore.effectivePanelAttachmentStyle, animated: animated)

@@ -73,6 +73,20 @@ enum AssetStorageVerification {
         try await store.start()
         try check(try await store.get(id) == nil && purgeDB.scalar("SELECT count(*) FROM purges") == "0",
                   "completed trash journal recovers after interrupted database cleanup")
+        let rowRoot = evidence.appendingPathComponent("row-codec-library")
+        let rowStore = try AssetLibraryStore(root: rowRoot, contractRoot: contract)
+        let rowImport = try await rowStore.importFile(input)
+        let rowAsset = try await rowStore.get(rowImport.assetId!)!
+        let rowDB = try LibraryDatabase(rowRoot.appendingPathComponent("library.sqlite"))
+        try rowDB.execute("UPDATE assets SET size='invalid' WHERE id=?", [rowAsset.id])
+        do {
+            _ = try await rowStore.query(LibraryQuery())
+            throw LibraryError.message("invalid database row accepted")
+        } catch {
+            try check(error.localizedDescription.contains("DB情報") &&
+                      (try AssetLibraryStore.hash(rowRoot.appendingPathComponent(rowAsset.relativePath))) == rowAsset.sha256,
+                      "malformed database row reports an error and preserves original")
+        }
         return checks
     }
 }

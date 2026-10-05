@@ -200,8 +200,7 @@ actor AssetLibraryStore {
     private func assets(_ sql: String, _ values: [String?] = []) throws -> [LibraryAsset] {
         try db.rows(sql, values).map { row in
             let memberships = try db.rows("SELECT categories.id,type FROM memberships JOIN categories ON category=categories.id WHERE asset=?", [row["id"]])
-            return LibraryAsset(id: row["id"]!, name: row["name"]!, extension: row["extension"]!, kind: row["kind"]!, sha256: row["sha256"]!,
-                sizeBytes: Int64(row["size"]!)!, createdAt: row["created"]!, favorite: row["favorite"] == "1", trashed: row["trashed"] == "1", internetOrigin: row["internet"] == "1",
+            return try LibraryAsset(databaseRow: row,
                 folderIds: memberships.filter { $0["type"] == "folder" }.compactMap { $0["id"] }.sorted(),
                 tagIds: memberships.filter { $0["type"] == "tag" }.compactMap { $0["id"] }.sorted())
         }
@@ -461,9 +460,7 @@ actor AssetLibraryStore {
         guard try candidate.scalar("PRAGMA user_version") == "1", try candidate.scalar("PRAGMA quick_check") == "ok",
               try candidate.rows("PRAGMA foreign_key_check").isEmpty else { throw LibraryError.message("スナップショットの整合性を確認できません。") }
         for row in try candidate.rows("SELECT * FROM assets") {
-            let asset = LibraryAsset(id: row["id"] ?? "", name: row["name"] ?? "", extension: row["extension"] ?? "",
-                kind: row["kind"] ?? "", sha256: row["sha256"] ?? "", sizeBytes: Int64(row["size"] ?? "") ?? -1,
-                createdAt: row["created"] ?? "", favorite: row["favorite"] == "1", trashed: row["trashed"] == "1", internetOrigin: row["internet"] == "1", folderIds: [], tagIds: [])
+            let asset = try LibraryAsset(databaseRow: row)
             _ = try path(asset, verifyHash: true)
         }
         for row in try candidate.rows("SELECT filter FROM searches") {
@@ -489,7 +486,7 @@ actor AssetLibraryStore {
         let candidate = try LibraryDatabase(snapshot)
         guard try candidate.scalar("PRAGMA quick_check") == "ok", try candidate.scalar("PRAGMA user_version") == "1", try candidate.rows("PRAGMA foreign_key_check").isEmpty else { throw LibraryError.message("復旧元のDBを検証できません。") }
         for row in try candidate.rows("SELECT * FROM assets") {
-            let asset = LibraryAsset(id: row["id"] ?? "", name: row["name"] ?? "", extension: row["extension"] ?? "", kind: row["kind"] ?? "", sha256: row["sha256"] ?? "", sizeBytes: Int64(row["size"] ?? "") ?? -1, createdAt: row["created"] ?? "", favorite: false, trashed: false, internetOrigin: true, folderIds: [], tagIds: [])
+            let asset = try LibraryAsset(databaseRow: row)
             try LibraryFormat.validate(asset)
             let file = root.appendingPathComponent(asset.relativePath)
             guard try hash(file) == asset.sha256 else { throw LibraryError.message("復旧元のDBと原本が一致しません。") }
