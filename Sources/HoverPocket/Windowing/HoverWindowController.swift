@@ -140,6 +140,14 @@ final class HoverWindowController {
     }
 
     func connectAppController() {
+        let chat = CodexChatController.shared
+        chat.configure(settings: settings)
+        chat.openPanel = { [weak self] in
+            guard let self else { return }
+            if self.previewWindow?.isVisible != true { self.openPanelFromMenu() }
+            else { self.cancelClose(); self.awaitingPointerAfterExplicitOpen = true }
+        }
+        chat.closePanel = { [weak self] in self?.closePreview() }
         let assets = AssetLibraryRuntime.shared
         assets.onLayout = { [weak self] in self?.resizePreviewForPanelSizeChange() }
         assets.baselineSize = { [weak self] in PanelLayout.panelTotalSize(for: self?.settings.panelSize ?? .medium) }
@@ -156,7 +164,7 @@ final class HoverWindowController {
             .sink { [weak self] _ in
                 guard let self, self.menuStore.providerStore.selectedPluginID == AssetsProvider.pluginID else { return }
                 assets.textInput = false
-                if !assets.holdsPanel { self.closePreview() }
+                if !assets.holdsPanel && !CodexChatController.shared.holdsPanel { self.closePreview() }
             }.store(in: &settingsCancellables)
         menuStore.providerStore.$selectedPluginID.dropFirst().sink { id in
             if id != AssetsProvider.pluginID { assets.endPreview(); assets.onLayout?() }
@@ -483,6 +491,62 @@ final class HoverWindowController {
         print("liquid_interruptions=ok reversals=30 external_drag=ok recovery=ok idle_display_link=stopped")
     }
 
+    private func verifyInlineChatPanel() async throws {
+        guard let screen = screenSelection.target, let window = previewWindow else { return }
+        let chat = CodexChatController.shared
+        let originalSize = settings.panelSize, originalDraft = chat.draft
+        defer {
+            chat.composerFocused = false; chat.panelExpanded = false; chat.draft = originalDraft
+            settings.panelSize = originalSize
+            resizePreviewForPanelSizeChange()
+        }
+        openPanel(showing: TimerProvider.pluginID)
+        await settlePanelSoakRunLoop(milliseconds: 50)
+        let panelID = ObjectIdentifier(window)
+        for size in PanelSizeOption.allCases {
+            settings.panelSize = size
+            chat.panelExpanded = false
+            openPanel(showing: TimerProvider.pluginID)
+            resizePreviewForPanelSizeChange()
+            await settlePanelSoakRunLoop(milliseconds: 30)
+            guard chat.panelHeight == CodexChatPanelLayout.composerHeight else {
+                throw PanelSoakVerificationError.failed("chat_composer_missing_\(size)")
+            }
+            chat.panelExpanded = true
+            resizePreviewForPanelSizeChange()
+            await settlePanelSoakRunLoop(milliseconds: 30)
+            guard window.frame.minY >= screen.visibleFrame.minY - 1,
+                  chat.panelHeight > CodexChatPanelLayout.composerHeight,
+                  ObjectIdentifier(previewWindow!) == panelID,
+                  !NSApp.windows.contains(where: { $0.title == "Codex チャット" }) else {
+                throw PanelSoakVerificationError.failed("chat_history_outside_panel_\(size) minY=\(window.frame.minY) screenMinY=\(screen.visibleFrame.minY) lane=\(chat.panelHeight)")
+            }
+            chat.draft = "未送信の下書き"
+            func composer(in view: NSView) -> ChatInputTextView? {
+                if let editor = view as? ChatInputTextView { return editor }
+                return view.subviews.lazy.compactMap { composer(in: $0) }.first
+            }
+            guard let content = window.contentView, let editor = composer(in: content) else {
+                throw PanelSoakVerificationError.failed("chat_native_composer_missing")
+            }
+            window.makeFirstResponder(nil)
+            AssetLibraryRuntime.shared.textInput = true
+            window.makeFirstResponder(editor)
+            guard chat.composerFocused, !AssetLibraryRuntime.shared.textInput else {
+                throw PanelSoakVerificationError.failed("chat_focus_did_not_release_web_input_hold")
+            }
+            awaitingPointerAfterExplicitOpen = false
+            scheduleClose(at: NSPoint(x: screen.frame.maxX + 100, y: screen.frame.minY - 100))
+            await settlePanelSoakRunLoop(milliseconds: UInt64(PanelAnimationTiming.previewCloseDelay * 1000) + 80)
+            guard window.isVisible else { throw PanelSoakVerificationError.failed("chat_closed_while_editing") }
+            closePreview()
+            guard !window.isVisible, chat.draft == "未送信の下書き", !chat.composerFocused else {
+                throw PanelSoakVerificationError.failed("chat_manual_close_lost_draft")
+            }
+            print("PASS chat panel: \(size) inline resize, editing hold, manual hide, draft retained, no extra window")
+        }
+    }
+
     func runNonPhysicalSoakVerification(
         iterations: Int,
         providerIDs: [PluginID]
@@ -500,6 +564,7 @@ final class HoverWindowController {
             throw PanelSoakVerificationError.failed("panel_soak_screen_unavailable")
         }
 
+        try await verifyInlineChatPanel()
         let microphoneAuthorization = AVCaptureDevice.authorizationStatus(for: .audio)
         showPill()
         let baselinePreviewIdentifier = ObjectIdentifier(previewWindow)
@@ -507,7 +572,7 @@ final class HoverWindowController {
         let expectedFrame = PanelGeometry.frames(
             on: screen,
             panelSize: settings.panelSize,
-            additionalPreviewHeight: 0,
+            additionalPreviewHeight: CodexChatPanelLayout.composerHeight,
             showsNotchSideHandleArea: showsVisibleNotchSideHandle,
             showsVoiceConversation: VoiceActivityPresentation(snapshot: VoiceLaneRuntime.shared.snapshot).showsConversation
         ).preview
@@ -525,7 +590,7 @@ final class HoverWindowController {
                   liquidAnimator.isIdle,
                   menuStore.providerStore.selectedPluginID == providerID,
                   VoiceLaneRuntime.shared.snapshot.mode == .disabled,
-                  voiceLaneHeight(on: screen) == 0
+                  voiceLaneHeight(on: screen) == CodexChatPanelLayout.composerHeight
             else {
                 throw PanelSoakVerificationError.failed("panel_soak_animated_open_readback_failed")
             }
@@ -575,7 +640,7 @@ final class HoverWindowController {
             guard previewWindow.isVisible,
                   menuStore.providerStore.selectedPluginID == providerID,
                   VoiceLaneRuntime.shared.snapshot.mode == .disabled,
-                  voiceLaneHeight(on: screen) == 0
+                  voiceLaneHeight(on: screen) == CodexChatPanelLayout.composerHeight
             else {
                 throw PanelSoakVerificationError.failed("panel_soak_open_readback_failed iteration=\(index) visible=\(previewWindow.isVisible) selected=\(menuStore.providerStore.selectedPluginID == providerID) voice_off=\(VoiceLaneRuntime.shared.snapshot.mode == .disabled) voice_height=\(voiceLaneHeight(on: screen)) app_active=\(NSApp.isActive) key=\(previewWindow.isKeyWindow)")
             }
@@ -700,10 +765,7 @@ final class HoverWindowController {
     }
 
     private func voiceLaneHeight(on _: NSScreen) -> CGFloat {
-        CGFloat(VoiceLaneGeometry.height(
-            panelSizeRawValue: settings.panelSize.rawValue,
-            mode: VoiceLaneRuntime.shared.snapshot.mode
-        ))
+        CodexChatController.shared.panelHeight
     }
 
     private func applyResolvedVoiceLaneLayout(on screen: NSScreen) {
@@ -711,6 +773,12 @@ final class HoverWindowController {
             requested: settings.voiceLaneLayoutPreference,
             resolved: resolvedVoiceLaneLayout(on: screen)
         )
+        let baseline = PanelGeometry.frames(on: screen, panelSize: settings.panelSize,
+            showsNotchSideHandleArea: showsVisibleNotchSideHandle,
+            showsVoiceConversation: VoiceActivityPresentation(snapshot: VoiceLaneRuntime.shared.snapshot).showsConversation)
+        CodexChatController.shared.resolvePanelHeight(panelSize: settings.panelSize.rawValue,
+            voiceMode: VoiceLaneRuntime.shared.snapshot.mode,
+            availableHeight: max(0, baseline.preview.minY - screen.visibleFrame.minY))
     }
 
     private var showsVisibleNotchSideHandle: Bool {
@@ -997,6 +1065,7 @@ final class HoverWindowController {
             self.closeTask = nil
             guard !self.isMouseInsideHoverRegion(at: location), self.previewWindow?.attachedSheet == nil,
                   !AssetLibraryRuntime.shared.holdsPanel,
+                  !CodexChatController.shared.holdsPanel,
                   !self.awaitingPointerAfterExplicitOpen,
                   TimerStore.shared.activeAlert == nil,
                   self.stickyReminders.activeNote == nil else { return }
@@ -1017,6 +1086,8 @@ final class HoverWindowController {
     private func closePreview() {
         guard !AssetLibraryRuntime.shared.holdsPanel else { return }
         AssetLibraryRuntime.shared.endPreview()
+        CodexChatController.shared.composerFocused = false
+        previewWindow?.makeFirstResponder(nil)
         awaitingPointerAfterExplicitOpen = false
         guard let previewWindow, previewWindow.isVisible else {
             menuStore.providerStore.prepareForPanelClose()
@@ -1368,6 +1439,14 @@ final class HoverWindowController {
             .removeDuplicates { previous, current in previous.0 == current.0 && previous.1 == current.1 }
             .sink { [weak self] _ in
                 DispatchQueue.main.async { [weak self] in self?.resizePreviewForPanelSizeChange() }
+            }
+            .store(in: &settingsCancellables)
+
+        CodexChatController.shared.$panelExpanded
+            .removeDuplicates()
+            .dropFirst()
+            .sink { [weak self] _ in
+                DispatchQueue.main.async { self?.resizePreviewForPanelSizeChange() }
             }
             .store(in: &settingsCancellables)
 

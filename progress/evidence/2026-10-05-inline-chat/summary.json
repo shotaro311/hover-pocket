@@ -1,0 +1,33 @@
+{
+  "macOS": {
+    "build": 667,
+    "bundleID": "local.codex.hover-pocket.asset-dev",
+    "binarySHA256": "4facfec9e9f3984c274f599082f0d11017831dcf001856906a5e290eb7c17cd3",
+    "chatChecks": 22,
+    "panelSizes": [
+      "small",
+      "medium",
+      "large",
+      "extraLarge"
+    ],
+    "openCloseCycles": 100,
+    "assetStorageChecks": 54,
+    "assetUIChecks": 70,
+    "assetReopenChecks": 2,
+    "livePanel": {
+      "directInput": true,
+      "reply": "7",
+      "resumeAfterRelaunch": "12",
+      "stopButton": "停止しました。",
+      "shiftEnter": "two-line Japanese draft",
+      "escape": "hide and reopen preserves draft",
+      "newChat": "empty composer",
+      "standaloneChatWindow": false
+    },
+    "physicalVoiceTest": false,
+    "notes": [
+      "Regression suite ran before the final native focus release and Escape refinements; chat and real panel soak were rerun on the final binary.",
+      "Live UI tests used generated arithmetic only; no library tools or new authentication were used."
+    ]
+  }
+}

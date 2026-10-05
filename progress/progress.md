@@ -2,8 +2,13 @@
 project_slug: hover-menu-preview
 updated: 2026-10-05
 updated_by: codex
-status: windows-0.2.10-installed; public-windows-0.2.10; reported-freeze-incident-unconfirmed-reproduced-preview-races-fixed; published-macos-644; macos-library-chat-local-666; macos-physical-acceptance-partial
+status: windows-0.2.10-installed; public-windows-0.2.10; reported-freeze-incident-unconfirmed-reproduced-preview-races-fixed; published-macos-644; macos-inline-chat-local-667; macos-physical-acceptance-partial
 ---
+
+## 2026-10-05 チャットをパネル内へ統合
+
+- Mac開発版667に下部の常設入力欄、同じパネル内の返信/履歴、Enter送信・Shift+Enter改行・停止・新規会話を実装。別チャット画面を廃止した。
+- 4サイズ・100回開閉と入力/IMEを検査し、実パネルの返信・会話再開・停止・Esc収納後の下書き保持を確認。Windowsも担当Codexが実装と実パネル接続を検証中。[作業記録](2026-10/2026-10-05_hover-pocket-inline-chat.md)。
 
 ## 2026-10-05 ライブラリ操作・撮影・チャットの拡張
 

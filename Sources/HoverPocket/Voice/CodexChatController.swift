@@ -12,6 +12,21 @@ struct CodexChatMessage: Codable, Identifiable, Equatable {
 final class CodexChatController: ObservableObject {
     static let shared = CodexChatController()
     @Published var draft = ""
+    @Published var panelExpanded = false
+    @Published private(set) var panelHeight: CGFloat = CodexChatPanelLayout.composerHeight
+    @Published var composerFocused = false
+    @Published private(set) var focusRequest = 0
+    var openPanel: (() -> Void)?
+    var closePanel: (() -> Void)?
+    var holdsPanel: Bool { composerFocused || busy }
+
+    func configure(settings: AppSettings) { self.settings = settings }
+
+    func resolvePanelHeight(panelSize: String, voiceMode: VoiceLaneMode, availableHeight: CGFloat) {
+        let height = CodexChatPanelLayout.height(panelSize: panelSize,
+            expanded: panelExpanded || voiceMode == .expanded, availableHeight: availableHeight)
+        if panelHeight != height { panelHeight = height }
+    }
     @Published private(set) var messages: [CodexChatMessage] = []
     @Published private(set) var busy = false
     @Published private(set) var status = "文章で質問したり、ライブラリの整理を依頼できます。"
@@ -23,7 +38,6 @@ final class CodexChatController: ObservableObject {
     private var revision: UInt64 = 0
     private var task: Task<Void, Never>?
     private var watchdog: Task<Void, Never>?
-    private var window: NSWindow?
     private var settings: AppSettings?
     private var assistantIndex: Int?
     private let storage: URL
@@ -36,18 +50,16 @@ final class CodexChatController: ObservableObject {
         }
     }
     func show(settings: AppSettings) {
-        self.settings = settings
-        if window == nil {
-            let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 640, height: 620), styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
-            w.title = "Codex チャット"; w.isReleasedWhenClosed = false; w.minSize = NSSize(width: 420, height: 400)
-            w.contentView = NSHostingView(rootView: CodexChatView(model: self)); w.center(); window = w
-        }
-        window?.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true)
+        configure(settings: settings)
+        if !messages.isEmpty { panelExpanded = true }
+        openPanel?()
+        focusRequest &+= 1
     }
     func send() {
         let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !busy, !text.isEmpty else { return }
         guard text.utf8.count <= 32000 else { status = "入力が長すぎます。文章を分けて送信してください。"; return }
+        panelExpanded = true
         draft = ""; messages.append(CodexChatMessage(role: "user", text: text)); busy = true; status = "接続しています…"
         revision &+= 1; let current = revision; assistantIndex = nil
         task = Task { @MainActor in
@@ -165,6 +177,7 @@ final class CodexChatController: ObservableObject {
         func event(_ method: String, _ values: [String: CodexJSONValue]) { model.receive(CodexAppServerNotification(method: method, params: .object(values))) }
         func check(_ condition: Bool, _ message: String) throws { if !condition { throw LibraryError.message(message) }; print("PASS chat: " + message) }
         model.draft = "未送信の依頼"
+        try check(model.holdsPanel, "active response holds the hover panel")
         try check(model.messages.isEmpty, "draft does not submit or execute")
         event("item/agentMessage/delta", ["threadId": .string("foreign"), "delta": .string("wrong")])
         try check(model.messages.isEmpty, "foreign thread is ignored")
@@ -176,6 +189,13 @@ final class CodexChatController: ObservableObject {
         try check(model.messages.last?.text == "保存しました", "streaming deltas append once")
         event("turn/completed", ["threadId": .string("fixture-chat"), "turn": .object(["id": .string("turn-1"), "status": .string("completed")])])
         try check(!model.busy, "completion enables the composer")
+        model.composerFocused = true
+        try check(model.holdsPanel, "editing holds the hover panel")
+        model.composerFocused = false
+        try check(!model.holdsPanel, "focus release allows automatic hiding")
+        model.panelExpanded = true
+        model.panelExpanded = false
+        try check(model.draft == "未送信の依頼" && model.messages.last?.text == "保存しました", "collapsing preserves draft and conversation")
         let reopened = CodexChatController(storage: file)
         try check(reopened.messages == model.messages && reopened.rootID == "fixture-chat", "history restores with its thread")
         model.busy = true; model.turnID = "turn-2"; model.stop()
@@ -192,33 +212,5 @@ final class CodexChatController: ObservableObject {
             try JSONEncoder().encode(History(threadID: rootID, tools: threadTools, messages: Array(messages.suffix(100)))).write(to: storage, options: .atomic)
             try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: storage.path)
         } catch { status = "会話履歴を保存できませんでした。現在の画面には残っています。" }
-    }
-}
-
-private struct CodexChatView: View {
-    @ObservedObject var model: CodexChatController
-    var body: some View {
-        VStack(spacing: 10) {
-            HStack { Text("Codex チャット").font(.headline); Spacer(); Button("新しい会話", action: model.newConversation).disabled(model.busy) }
-            ScrollViewReader { proxy in
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 16) {
-                        ForEach(model.messages) { message in
-                            VStack(alignment: .leading, spacing: 4) { Text(message.role == "user" ? "あなた" : "Codex").font(.caption).foregroundStyle(.secondary); Text(message.text).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading) }.id(message.id)
-                        }
-                    }.padding(12)
-                }.background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 10))
-                    .onChange(of: model.messages.last?.text) { _, _ in if let id = model.messages.last?.id { proxy.scrollTo(id, anchor: .bottom) } }
-            }
-            Text(model.status).font(.caption).foregroundStyle(.secondary).frame(maxWidth: .infinity, alignment: .leading)
-            TextEditor(text: $model.draft).font(.body).frame(minHeight: 70, maxHeight: 110).padding(5).overlay(RoundedRectangle(cornerRadius: 8).stroke(.secondary.opacity(0.4))).accessibilityLabel("メッセージ")
-            HStack {
-                Button {} label: { Image(systemName: "mic.slash") }.disabled(true).help(CodexChatController.dictationNotice).accessibilityLabel("音声入力は現在利用できません")
-                Text("音声入力は現在の接続では利用できません").font(.caption2).foregroundStyle(.secondary).help(CodexChatController.dictationNotice)
-                Spacer()
-                if model.busy { Button("停止", action: model.stop) }
-                else { Button("送信", action: model.send).keyboardShortcut(.return, modifiers: .command).disabled(model.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) }
-            }
-        }.padding(16)
     }
 }

@@ -6,6 +6,7 @@ struct HoverPanelShell: View {
     @ObservedObject var settings: AppSettings
     @ObservedObject var stickyReminders = StickyReminderController.shared
     @ObservedObject private var voiceRuntime = VoiceLaneRuntime.shared
+    @ObservedObject private var chat = CodexChatController.shared
     @ObservedObject private var assets = AssetLibraryRuntime.shared
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let onOpenSettings: () -> Void
@@ -14,10 +15,7 @@ struct HoverPanelShell: View {
 
     var body: some View {
         let normal = PanelLayout.panelTotalSize(for: settings.panelSize)
-        let voiceHeight = assets.fullscreen ? 0 : VoiceLaneGeometry.height(
-            panelSizeRawValue: settings.panelSize.rawValue,
-            mode: voiceRuntime.snapshot.mode
-        )
+        let voiceHeight = assets.fullscreen ? 0 : chat.panelHeight
         let baseline = assets.panelSize.map { CGSize(width: $0.width,
             height: max(200, $0.height - CGFloat(voiceHeight) - store.attachmentMetrics.contentTop)) } ?? normal
 

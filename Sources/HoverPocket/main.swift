@@ -10,7 +10,9 @@ if CommandLine.arguments.contains("--verify-chat") {
     Task { @MainActor in
         do {
             let root = FileManager.default.temporaryDirectory.appendingPathComponent("HoverPocket-ChatVerify-" + UUID().uuidString)
-            try CodexChatController.verify(at: root); print("chat_verification=ok evidence=\(root.path)"); exit(0)
+            try CodexChatController.verify(at: root)
+            try CodexChatPanelVerification.run()
+            print("chat_verification=ok evidence=\(root.path)"); exit(0)
         } catch { print("chat_verification=failed \(error)"); exit(1) }
     }
     app.run(); exit(1)
