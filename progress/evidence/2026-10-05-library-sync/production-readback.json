@@ -1,0 +1,25 @@
+{
+  "enabled": true,
+  "assets": 19,
+  "activeAssets": 14,
+  "trashAssets": 5,
+  "categories": 0,
+  "manifestDigest": "c1627f9a06bf2a66b52f0c780d786bac897a552750c362be2d29be3c08794b92",
+  "originalsVerified": 19,
+  "previousOriginalsPreserved": true,
+  "outgoing": 0,
+  "pending": 0,
+  "conflicts": 0,
+  "quickCheck": "ok",
+  "existingSharesUnchanged": true,
+  "devicesUnchanged": true,
+  "syncthing": {
+    "state": "idle",
+    "localFiles": 39,
+    "globalFiles": 39,
+    "needFiles": 0,
+    "errors": 0
+  },
+  "existingAssetMetadataUnchanged": true,
+  "windowsManifestDigestMatches": true
+}

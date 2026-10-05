@@ -51,3 +51,15 @@
 - Macの既存CIへ同期47項目、Windows CIへ同期102項目と保存検査を追加。統合コード `7a148b5d59574c39b31d0cb866d4328995c0d534` のCIは全成功。 [Mac](https://github.com/shotaro311/hover-pocket/actions/runs/37308736387) / [Windows](https://github.com/shotaro311/hover-pocket/actions/runs/37308736393) / [3 OS契約比較](https://github.com/shotaro311/hover-pocket/actions/runs/37308736392)。
 - 最終起動後もMacの素材件数3、原本SHA一致、DB quick_check=ok、同期enabled=falseを読み戻した。Windowsの開発版切り替えは担当スレッドで承認待ち表示となり、起動切り替え完了は未確認。同期対応ビルドの隔離実UI検証は成功済み。
 - ユーザーへ、本番の専用共有追加と両端末の実ライブラリ同期有効化の承認を依頼した。回答前には実行しない。今回の追記は検証結果だけで、上記CI対象から実装を変更していない。
+
+## 22:06 JST 本番同期への接続
+
+- このMacチャットで専用共有の追加と両端末の実ライブラリ同期有効化を確認し、ユーザーの「いいよ」を受けて実行。Windows側も別途表示された確認へユーザーが同意した。
+- Mac: 変更前のDBと原本3件を `~/Library/Application Support/HoverPocket/SyncSetupBackups/20261005-220659` に保全し、全原本SHA一致を確認。Windows: DB・原本16件・設定を同端末の `HoverPocket/SyncSetupBackups/20261005-220930` に保全済み。
+- 専用共有ID `hoverpocket-library-sync-v1`。Macは `/Users/shotaro/hoverpocket-sync-transport`、Windowsは `E:\HoverPocketSyncTransport`。既存の2台だけを指定し、両端末でEagleを含む既存共有と端末設定が前後一致、Syncthing再起動不要を確認。
+- Macアプリの新規初期化操作は一度自動承認レビューに止められた。対象フォルダが空でmarkerなし、アプリ未設定、バックアップ済み、ユーザーが新規共有追加を承認したことを確認し、同じ操作の再試行が認可されて完了した。
+- Macの設定からグループを初期化して有効化。素材3件の原本・変更を送信し、送信待ち/保留/競合0を確認。Windows開発版c66c0a8も起動し、Macのmarkerと3件の転送データ到着を確認。
+- Windowsはユーザーの設定画面操作で既存グループへ参加した。両端末とも同期enabled=true、素材19件（通常14、ゴミ箱5）、分類0件へ収束。送信待ち・保留・競合0、原本19件すべてのSHA一致を各OSで検証した。元のMac3件・Windows16件の原本とメタデータは保持。
+- 同期対象の名前・容量・お気に入り・ゴミ箱・Internet由来属性・所属・分類を正規化したJSONのSHA-256が両端末で `c1627f9a06bf2a66b52f0c780d786bac897a552750c362be2d29be3c08794b92` に一致。個別素材の名前・原本・完全な比較データは非公開ローカルバックアップ内に保持し、Gitへ公開しない。[件数と検証結果](../evidence/2026-10-05-library-sync/production-readback.json)。
+- 両端末Syncthingはglobal/local 39ファイル、need 0、errors 0。既存Eagle共有・端末設定は前後一致。Windows設定の変更は表示中の機能を記録する `lastSelectedProviderId` だけで、ユーザーの画面操作を保持した。
+- Mac開発版668とWindows開発版c66c0a8で実ライブラリ同期を有効化済み。Windowsの起動切り替えと本番接続の保留は解消した。正規配布アプリ・自動起動先・main・公開版の変更は行っていない。
