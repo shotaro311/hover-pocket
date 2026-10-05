@@ -33,6 +33,17 @@ final class AssetCaptureController: NSObject, ObservableObject {
     var preferences = AssetCapturePreferences()
     private var overlays: [NSPanel] = []
     private var recorder: AssetScreenRecorder?
+    private(set) var recordingID: String?
+    private(set) var lastRecordingAsset: LibraryAsset?
+    private(set) var lastRecordingError: String?
+    private var recordingName: String?
+    private let libraryStore: () async throws -> AssetLibraryStore
+    private let pendingRoot: URL?
+
+    init(store: @escaping () async throws -> AssetLibraryStore = { try await AssetLibraryRuntime.shared.store() }, pendingRoot: URL? = nil) {
+        self.libraryStore = store; self.pendingRoot = pendingRoot
+        super.init()
+    }
     private var toast: AssetScreenshotToast?
     private var hotkeys: [EventHotKeyRef] = []
     private var handler: EventHandlerRef?
@@ -82,7 +93,7 @@ final class AssetCaptureController: NSObject, ObservableObject {
         return try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
     }
     private func pendingDirectory() throws -> URL {
-        let root = preferencesURL.deletingLastPathComponent().appendingPathComponent("CapturePending")
+        let root = pendingRoot ?? preferencesURL.deletingLastPathComponent().appendingPathComponent("CapturePending")
         let directory = root.appendingPathComponent(UUID().uuidString.lowercased())
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         return directory
@@ -223,27 +234,92 @@ final class AssetCaptureController: NSObject, ObservableObject {
                 filter = SCContentFilter(desktopIndependentWindow: window); size = window.frame.size
             }
             if preferences.microphone, !(await AVCaptureDevice.requestAccess(for: .audio)) { throw LibraryError.message("マイクが許可されていません。撮影・収録の設定でマイクをオフにするか、システム設定で許可してください。") }
-            let directory = try pendingDirectory(); recordDirectory = directory
-            let recorder = try AssetScreenRecorder(directory: directory, systemAudio: preferences.systemAudio, microphone: preferences.microphone)
-            recorder.onFailure = { [weak self] text in
-                Task { @MainActor in await self?.stopRecording(reason: text) }
-            }
-            try await recorder.start(filter: filter, size: size)
-            self.recorder = recorder; recordingFolder = folder; recording = true; busy = false; status = "画面を収録中です。\(preferences.recordingShortcut)で停止して保存します。"
+            try await beginRecording(filter: filter, size: size, folder: folder, name: nil,
+                systemAudio: preferences.systemAudio, microphone: preferences.microphone)
+            busy = false
         } catch { busy = false; status = error.localizedDescription; showFailure(status) }
     }
-    func stopRecording(reason: String? = nil) async {
-        guard let recorder, !busy else { return }; busy = true
+    @discardableResult
+    func stopRecording(reason: String? = nil, reportFailure: Bool = true) async -> LibraryAsset? {
+        guard let recorder, !busy else { return nil }; busy = true
+        defer { self.recorder = nil; recording = false; busy = false }
+        lastRecordingAsset = nil; lastRecordingError = nil
         do {
             let url = try await recorder.stop()
             try AssetPendingCapture(folder: recordingFolder, files: [url.lastPathComponent]).write(to: url.deletingLastPathComponent())
-            let store = try await AssetLibraryRuntime.shared.store()
+            let store = try await libraryStore()
             let result = try await store.importFile(url, folder: recordingFolder)
-            guard result.status == "saved" || result.status == "duplicate" else { throw LibraryError.message("収録ファイルを登録できません。保存待ちフォルダへ保持しています。") }
+            guard let id = result.assetId, result.status == "saved" || result.status == "duplicate" else { throw LibraryError.message("収録ファイルを登録できません。保存待ちフォルダへ保持しています。") }
+            if let recordingName { try await store.update(ids: [id], operation: "rename", value: recordingName) }
+            guard let saved = try await store.get(id) else { throw LibraryVoiceError.failed("recording_save_failed") }
+            _ = try await store.path(saved, verifyHash: true)
+            lastRecordingAsset = saved
             status = (reason.map { $0 + " " } ?? "") + "画面収録を保存しました。"; AssetLibraryRuntime.shared.notifyChange()
             if let recordDirectory { try? FileManager.default.trashItem(at: recordDirectory, resultingItemURL: nil) }
-        } catch { status = error.localizedDescription + " 収録ファイルは保存待ちフォルダに保持しています。"; showFailure(status) }
-        self.recorder = nil; recording = false; busy = false
+        } catch {
+            lastRecordingError = "recording_save_failed"
+            status = error.localizedDescription + " 収録ファイルは保存待ちフォルダに保持しています。"
+            if reportFailure { showFailure(status) }
+        }
+        return lastRecordingAsset
+    }
+    func screenshotForVoice(filter: SCContentFilter, folder: String?, name: String?) async throws -> LibraryAsset {
+        guard !busy, !recording else { throw LibraryVoiceError.failed("capture_busy") }
+        try Task.checkCancellation()
+        busy = true; defer { busy = false }
+        toast?.close(); toast = nil
+        let config = SCStreamConfiguration()
+        config.width = max(1, Int(filter.contentRect.width * CGFloat(filter.pointPixelScale)))
+        config.height = max(1, Int(filter.contentRect.height * CGFloat(filter.pointPixelScale)))
+        config.showsCursor = false; config.ignoreShadowsSingleWindow = true
+        let image = try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: config)
+        try Task.checkCancellation()
+        let directory = try pendingDirectory()
+        let file = directory.appendingPathComponent("スクリーンショット " + LibraryFormat.now().replacingOccurrences(of: ":", with: "-") + ".png")
+        try AssetMedia.png(image).write(to: file, options: .atomic)
+        try AssetPendingCapture(folder: folder, files: [file.lastPathComponent]).write(to: directory)
+        let store = try await libraryStore(), result = try await store.importFile(file, folder: folder)
+        guard let id = result.assetId, ["saved", "duplicate"].contains(result.status) else { throw LibraryVoiceError.failed("screenshot_save_failed") }
+        if let name { try await store.update(ids: [id], operation: "rename", value: name) }
+        guard let saved = try await store.get(id) else { throw LibraryVoiceError.failed("screenshot_save_failed") }
+        _ = try await store.path(saved, verifyHash: true)
+        try? FileManager.default.trashItem(at: directory, resultingItemURL: nil)
+        AssetLibraryRuntime.shared.notifyChange(); status = "スクリーンショットを保存しました。"
+        return saved
+    }
+    func startRecordingForVoice(filter: SCContentFilter, folder: String?, name: String?, systemAudio: Bool, microphone: Bool) async throws -> String {
+        guard !busy, !recording else { throw LibraryVoiceError.failed("capture_busy") }
+        try Task.checkCancellation()
+        busy = true; defer { busy = false }
+        toast?.close(); toast = nil
+        if microphone, !(await AVCaptureDevice.requestAccess(for: .audio)) { throw LibraryVoiceError.failed("microphone_permission_required") }
+        try Task.checkCancellation()
+        try await beginRecording(filter: filter, size: filter.contentRect.size, folder: folder, name: name,
+            systemAudio: systemAudio, microphone: microphone)
+        return recordingID!
+    }
+    private func beginRecording(filter: SCContentFilter, size: CGSize, folder: String?, name: String?, systemAudio: Bool, microphone: Bool) async throws {
+        let directory = try pendingDirectory()
+        let recorder = try AssetScreenRecorder(directory: directory, systemAudio: systemAudio, microphone: microphone)
+        recorder.onFailure = { [weak self] text in
+            Task { @MainActor in await self?.stopRecording(reason: text, reportFailure: false) }
+        }
+        do {
+            try await recorder.start(filter: filter, size: size)
+            try Task.checkCancellation()
+        } catch {
+            _ = try? await recorder.stop()
+            throw error
+        }
+        self.recorder = recorder; recordDirectory = directory; recordingFolder = folder; recordingName = name
+        recordingID = UUID().uuidString.lowercased(); lastRecordingAsset = nil; lastRecordingError = nil
+        recording = true; status = "画面を収録中です。\(preferences.recordingShortcut)または音声で停止して保存します。"
+    }
+    func stopRecordingForVoice(id: String) async throws -> LibraryAsset {
+        guard recording, id == recordingID, !busy else { throw LibraryVoiceError.failed("recording_changed") }
+        try Task.checkCancellation()
+        guard let saved = await stopRecording(reportFailure: false) else { throw LibraryVoiceError.failed("recording_save_failed") }
+        return saved
     }
     func showSettings() {
         if settingsWindow == nil {

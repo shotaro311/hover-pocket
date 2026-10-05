@@ -429,6 +429,7 @@ export function renderAssetsProvider({ container, request, state }) {
     await run("assets.layout", { fullscreen });
     await run("panel.beginTextInput");
     if (editButton && !disposed && current === previewGeneration) editButton.disabled = false;
+    return !result.error && !disposed && current === previewGeneration;
     } finally {
       // Same-size images may not start a resize. Release the preparation if no
       // native animation took ownership by advancing its revision.
@@ -527,7 +528,7 @@ export function renderAssetsProvider({ container, request, state }) {
   void run("assets.visibility", {visible:true});
   void run("assets.importState").then(progress=>{if(progress&&(progress.busy||progress.completed||progress.failed||progress.duplicates))showImportProgress(progress);});
   void refresh();
-  return { refresh, dispose() { closeContextMenu(); finishMarquee(); ++selectionRevision; document.body.classList.remove("assets-fullscreen"); disposed = true; ++generation; ++previewGeneration; clearTimeout(queryTimer); clearTimeout(eventTimer); observer.disconnect(); document.removeEventListener("keydown", keydown); document.removeEventListener("visibilitychange",visibilityChanged); unsubscribers.forEach(unsubscribe => unsubscribe()); stopMedia(); void request("assets.visibility", {visible:false}).catch(() => {}); void request("assets.endPreview").catch(() => {}); thumbnails.clear(); } };
+  return { refresh, async openAsset(asset) { if (!asset?.id || disposed || editingImage) return false; const opened = await openPreview(asset); return opened === true && !disposed && preview?.id === asset.id && root.classList.contains("has-preview"); }, dispose() { closeContextMenu(); finishMarquee(); ++selectionRevision; document.body.classList.remove("assets-fullscreen"); disposed = true; ++generation; ++previewGeneration; clearTimeout(queryTimer); clearTimeout(eventTimer); observer.disconnect(); document.removeEventListener("keydown", keydown); document.removeEventListener("visibilitychange",visibilityChanged); unsubscribers.forEach(unsubscribe => unsubscribe()); stopMedia(); void request("assets.visibility", {visible:false}).catch(() => {}); void request("assets.endPreview").catch(() => {}); thumbnails.clear(); } };
 }
 
 function bytes(value) { return value < 1024 ? `${value} B` : value < 1024 * 1024 ? `${(value / 1024).toFixed(1)} KB` : `${(value / (1024 * 1024)).toFixed(1)} MB`; }

@@ -21,6 +21,7 @@ final class AssetLibraryRuntime: ObservableObject {
     var incomingDrag = false
     var dropReceived = false
     private var organizer: NSWindow?
+    weak var organizerPane: AssetPaneModel?
     private var storeTask: Task<AssetLibraryStore, Error>?
     var verificationStore: AssetLibraryStore?
     static let changed = Notification.Name("HoverPocket.assets.changed")
@@ -31,7 +32,7 @@ final class AssetLibraryRuntime: ObservableObject {
     }
 
     func store() async throws -> AssetLibraryStore {
-        if CommandLine.arguments.contains("--verify-asset-ui"), let verificationStore { return verificationStore }
+        if (CommandLine.arguments.contains("--verify-asset-ui") || CommandLine.arguments.contains("--verify-library-voice")), let verificationStore { return verificationStore }
         if let storeTask { return try await storeTask.value }
         let contract = Bundle.main.resourceURL!.appendingPathComponent("AssetLibrary")
         let root = Self.libraryRoot
@@ -74,6 +75,23 @@ final class AssetLibraryRuntime: ObservableObject {
                 height: min(maximum.height, max(baseline.height, desired.height * scale)))
         }
         onLayout?()
+    }
+    func openForVoice(assetID: String?) async throws {
+        showOrganizer()
+        guard let assetID else { return }
+        let store = try await store()
+        guard let asset = try await store.get(assetID), !asset.trashed else { throw LibraryVoiceError.failed("asset_not_found") }
+        let deadline = Date().addingTimeInterval(10)
+        while organizerPane?.web == nil || organizerPane?.web?.isLoading == true {
+            try Task.checkCancellation()
+            guard Date() < deadline else { throw LibraryVoiceError.failed("preview_unavailable") }
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        let value = try JSONSerialization.jsonObject(with: JSONEncoder().encode(asset))
+        guard let web = organizerPane?.web,
+              try await web.callAsyncJavaScript("return await window.assetPane.openAsset(asset);", arguments: ["asset": value], in: nil, contentWorld: .page) as? Bool == true else {
+            throw LibraryVoiceError.failed("preview_failed")
+        }
     }
     func showOrganizer() {
         if organizer == nil {

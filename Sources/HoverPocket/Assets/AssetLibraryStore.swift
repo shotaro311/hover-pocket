@@ -293,6 +293,9 @@ actor AssetLibraryStore {
             for asset in before {
                 switch operation {
                 case "trash", "restore": try db.execute("UPDATE assets SET trashed=? WHERE id=?", [operation == "trash" ? "1" : "0", asset.id])
+                case "favoriteSet":
+                    guard let value, ["true", "false"].contains(value) else { throw LibraryError.message("お気に入りの値が不正です。") }
+                    try db.execute("UPDATE assets SET favorite=? WHERE id=?", [value == "true" ? "1" : "0", asset.id])
                 case "favorite": try db.execute("UPDATE assets SET favorite=? WHERE id=?", [asset.favorite ? "0" : "1", asset.id])
                 case "rename":
                     guard var name = value?.trimmingCharacters(in: .whitespacesAndNewlines), !name.isEmpty,

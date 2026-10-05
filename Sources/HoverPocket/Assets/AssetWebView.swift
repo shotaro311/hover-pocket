@@ -13,6 +13,7 @@ struct AssetWebView: NSViewRepresentable {
         let web = AssetNativeWebView(frame: .zero, configuration: configuration)
         web.registerForDraggedTypes([.fileURL])
         pane.web = web; pane.organizer = organizer; web.pane = pane
+        if organizer { AssetLibraryRuntime.shared.organizerPane = pane }
         web.navigationDelegate = pane; web.setValue(false, forKey: "drawsBackground")
         web.appearance = NSAppearance(named: .darkAqua)
         let base = Bundle.main.resourceURL!.appendingPathComponent("AssetUI")

@@ -322,6 +322,7 @@ final class OpenAIRealtimeMacOSCapabilityRuntime: OpenAIRealtimeCapabilityExecut
     private static let maximumReturnedEvents = 24
 
     let context: VoiceCapabilityContext
+    let library: LibraryVoiceService
     private let calendarAccessGranted: () -> Bool
     private let actionConfirmationEnabled: @MainActor () -> Bool
     private let destructiveConfirmationEnabled: @MainActor () -> Bool
@@ -337,6 +338,7 @@ final class OpenAIRealtimeMacOSCapabilityRuntime: OpenAIRealtimeCapabilityExecut
 
     init(
         context: VoiceCapabilityContext,
+        library: LibraryVoiceService = .shared,
         calendarAccessGranted: @escaping () -> Bool,
         actionConfirmationEnabled: @escaping @MainActor () -> Bool = { true },
         destructiveConfirmationEnabled: @escaping @MainActor () -> Bool = { true },
@@ -345,6 +347,7 @@ final class OpenAIRealtimeMacOSCapabilityRuntime: OpenAIRealtimeCapabilityExecut
         approvalHandler: ((VoiceNativeApprovalRequest) async -> Bool)? = nil
     ) throws {
         self.context = context
+        self.library = library
         self.calendarAccessGranted = calendarAccessGranted
         self.actionConfirmationEnabled = actionConfirmationEnabled
         self.destructiveConfirmationEnabled = destructiveConfirmationEnabled
@@ -405,6 +408,7 @@ final class OpenAIRealtimeMacOSCapabilityRuntime: OpenAIRealtimeCapabilityExecut
         tools.append(Self.stickyUpsertDefinition)
         tools.append(Self.controlsBrightnessSetDefinition)
         tools.append(Self.controlsVolumeSetDefinition)
+        tools += LibraryVoiceOperation.allCases.filter { context.registry.availableHandlerKeys.contains($0.key) }.map(\.tool)
         tools += PersonalToolOperation.allCases.filter {
             context.registry.availableHandlerKeys.contains($0.key) && (!$0.isCalendar || calendarAccessGranted())
         }.map(\.tool)
@@ -483,7 +487,7 @@ final class OpenAIRealtimeMacOSCapabilityRuntime: OpenAIRealtimeCapabilityExecut
         do {
             try requireIdentifier(sessionID, maximum: 160)
             try requireIdentifier(callID, maximum: 160)
-            guard (Self.allowedToolNames.contains(toolName) || PersonalToolOperation(rawValue: toolName) != nil || toolName == "pending_action_cancel" || toolName == "voice_action_confirm"),
+            guard (Self.allowedToolNames.contains(toolName) || PersonalToolOperation(rawValue: toolName) != nil || LibraryVoiceOperation(rawValue: toolName) != nil || toolName == "pending_action_cancel" || toolName == "voice_action_confirm"),
                   argumentsJSON.utf8.count <= Self.maximumArgumentsBytes else {
                 return failure("invalid_arguments")
             }
@@ -547,6 +551,9 @@ final class OpenAIRealtimeMacOSCapabilityRuntime: OpenAIRealtimeCapabilityExecut
             if toolName == "pending_action_cancel" {
                 try requireExactKeys(arguments, allowed: [])
                 return try json(["status": "succeeded", "cancelledPendingAction": approvalCoordinator.cancelPending(sessionID), "completedActionsUndone": false])
+            }
+            if let operation = LibraryVoiceOperation(rawValue: toolName) {
+                return try await executeLibrary(operation, correlation: correlation, sessionID: sessionID, arguments: arguments)
             }
             if let operation = PersonalToolOperation(rawValue: toolName) {
                 return try await executePersonal(operation, correlation: correlation, sessionID: sessionID, arguments: arguments)
@@ -1473,6 +1480,8 @@ final class OpenAIRealtimeMacOSCapabilityRuntime: OpenAIRealtimeCapabilityExecut
     }
 
     private func safeCode(_ error: Error) -> String {
+        if case LibraryVoiceError.failed(let code) = error { return code }
+        if case CapabilityHandlerError.invalidArgument = error { return "invalid_arguments" }
         if error is CancellationError {
             return "session_cancelled"
         }

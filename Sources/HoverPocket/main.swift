@@ -5,6 +5,15 @@ import Foundation
 _ = signal(SIGPIPE, SIG_IGN)
 _ = HoverPocketRuntimeEnvironment.shared
 
+if CommandLine.arguments.contains("--verify-library-voice") {
+    let app = NSApplication.shared
+    Task { @MainActor in
+        do { try await LibraryVoiceVerification.run(); exit(0) }
+        catch { print("library_voice_verification=failed \(error)"); exit(1) }
+    }
+    app.run(); exit(1)
+}
+
 if CommandLine.arguments.contains("--verify-asset-library") || CommandLine.arguments.contains("--verify-asset-ui") || CommandLine.arguments.contains("--verify-asset-reopen") {
     let app = NSApplication.shared
     Task { @MainActor in
