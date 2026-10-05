@@ -7,7 +7,7 @@ export function renderAssetsProvider({ container, request, state }) {
   let disposed = false, page = null, generation = 0, previewGeneration = 0, queryTimer, selectionReady = false;
   let query = { version: 2, text: "", view: "recent", offset: 0, limit: 100 }, selection = new Set(), anchor = null;
   let selectionRevision = 0, marquee = null, marqueeFrame = 0;
-  let selectedAsset = null, preview = null, fullscreen = false, organizer = !!state?.organizer, zoom = 1, pdfPage = 1, composing = false, dragging = false, editingImage = false, dragIds = [], droppedInTrash = false;
+  let selectedAsset = null, preview = null, fullscreen = false, organizer = !!state?.organizer, zoom = 1, pdfPage = 1, composing = false, dragging = false, editingImage = false, dragIds = [], droppedInTrash = false, droppedDestination = null;
   const thumbnails = new Map(), pendingThumbs = new Set();
   const root = document.createElement("section"); root.className = "assets-root";
   const icon = (name, size = 18) => `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${{
@@ -231,7 +231,7 @@ export function renderAssetsProvider({ container, request, state }) {
   async function dragAsset(asset) {
     if (dragging || !selectionReady) return;
     const ids = selection.has(asset.id) ? [...selection] : [asset.id];
-    dragIds = ids; droppedInTrash = false;
+    dragIds = ids; droppedInTrash = false; droppedDestination = null;
     const wasSidebarOpen = root.classList.contains("show-sidebar"), sourceFolderId = query.view === "trash" ? null : currentFolderId();
     root.classList.add("show-sidebar");
     dragging = true; trashDrop.hidden = query.view === "trash"; root.classList.add("is-dragging");
@@ -240,7 +240,7 @@ export function renderAssetsProvider({ container, request, state }) {
       if (disposed) return;
       const rect = trashDrop.getBoundingClientRect();
       const result = await run("assets.copy", { id: asset.id, ids, mode: "drag", dropTargets: collectDropTargets(), trashBounds: trashDrop.hidden ? null : {x:rect.x,y:rect.y,width:rect.width,height:rect.height} });
-      const destination = result?.dropTarget || (result?.droppedInTrash || droppedInTrash ? {kind:"trash"} : null);
+      const destination = result?.dropTarget || droppedDestination || (result?.droppedInTrash || droppedInTrash ? {kind:"trash"} : null);
       if (result?.ok && destination) {
         const moved = await run("assets.update", {ids,operation:"organize",sourceFolderId,destination});
         if (moved?.ok) report(english ? `${ids.length} items organized. ${modifierLabel}+Z to undo.` : `${ids.length}件を移動しました。${modifierLabel}+Zで元に戻せます。`);
@@ -249,7 +249,7 @@ export function renderAssetsProvider({ container, request, state }) {
       clearInterval(dragScrollTimer); dragScrollTimer = null; dragPoint = null;
       if (!wasSidebarOpen) root.classList.remove("show-sidebar");
       highlightDropTarget(null);
-      dragging = false; dragIds = []; droppedInTrash = false; trashDrop.hidden = true; trashDrop.classList.remove("is-targeted"); root.classList.remove("is-dragging");
+      dragging = false; dragIds = []; droppedInTrash = false; droppedDestination = null; trashDrop.hidden = true; trashDrop.classList.remove("is-targeted"); root.classList.remove("is-dragging");
       if (!disposed) await refresh();
     }
   }
@@ -266,11 +266,14 @@ export function renderAssetsProvider({ container, request, state }) {
     for (const el of root.querySelectorAll("[data-drop-kind]")) el.classList.toggle("is-drop-target", !!target && el.dataset.dropKind===target.kind && (el.dataset.folderId || null)===(target.folderId || null));
     trashDrop.classList.toggle("is-targeted", target?.kind === "trash");
   }
+  function destinationAt(point) {
+    const hit = collectDropTargets().find(({bounds:r}) => point.x>=r.x && point.x<=r.x+r.width && point.y>=r.y && point.y<=r.y+r.height);
+    return hit ? {kind:hit.kind, ...(hit.folderId ? {folderId:hit.folderId} : {})} : overTrash({clientX:point.x,clientY:point.y}) ? {kind:"trash"} : null;
+  }
   function moveDrag(point) {
     if (!dragging) return;
     dragPoint = point;
-    const targets = collectDropTargets(), hit = targets.find(({bounds:r}) => point.x>=r.x && point.x<=r.x+r.width && point.y>=r.y && point.y<=r.y+r.height);
-    highlightDropTarget(hit || (overTrash({clientX:point.x,clientY:point.y}) ? {kind:"trash"} : null));
+    highlightDropTarget(destinationAt(point));
     if (!dragScrollTimer) dragScrollTimer = setInterval(() => {
       if (!dragPoint || !dragging) return;
       const sidebar=find(".assets-sidebar"), r=sidebar.getBoundingClientRect();
@@ -288,14 +291,14 @@ export function renderAssetsProvider({ container, request, state }) {
   };
   const updateDragTarget = event => {
     if (!dragging) return;
-    event.preventDefault(); moveDrag({x:event.clientX,y:event.clientY}); const over = overTrash(event); trashDrop.classList.toggle("is-targeted", over);
-    if (event.dataTransfer) event.dataTransfer.dropEffect = over ? "move" : "none";
+    event.preventDefault(); const point = {x:event.clientX,y:event.clientY}; moveDrag(point);
+    if (event.dataTransfer) event.dataTransfer.dropEffect = destinationAt(point) ? "move" : "none";
   };
   root.addEventListener("dragenter", updateDragTarget); root.addEventListener("dragover", updateDragTarget);
   root.addEventListener("dragleave", event => { if (!root.contains(event.relatedTarget)) trashDrop.classList.remove("is-targeted"); });
   root.addEventListener("drop", event => {
     if (!dragging) return;
-    event.preventDefault(); droppedInTrash = overTrash(event);
+    event.preventDefault(); droppedDestination = destinationAt({x:event.clientX,y:event.clientY}); droppedInTrash = droppedDestination?.kind === "trash";
   });
   async function select(asset, event = {}) {
     if (!selectionReady) return;
