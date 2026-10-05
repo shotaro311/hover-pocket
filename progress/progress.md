@@ -8,7 +8,7 @@ status: windows-0.2.10-installed; public-windows-0.2.10; reported-freeze-inciden
 ## 2026-10-05 Eagle方式のMac・Windows素材同期
 
 - 各端末のDBを保持し、Syncthingの専用フォルダで原本と変更記録を交換する同期を実装。Mac開発版668の「設定 → データと履歴」に新規接続・参加・停止・再開・競合解決を追加し、初期状態はオフ。
-- Macの同期47検査、既存機能の回帰検査、実SyncthingでMac→Windows→Macの素材・分類・名前・お気に入り・ゴミ箱/復元と原本SHA一致を確認。Windows担当の同期102項目・保存/復旧120項目と設定UI検査も成功。Mac `d8f97c8` とWindows `c66c0a8` を統合PR #44へ集約し、最終CIを確認する。
+- Macの同期47検査、既存機能の回帰検査、実SyncthingでMac→Windows→Macの素材・分類・名前・お気に入り・ゴミ箱/復元と原本SHA一致を確認。Windows担当の同期102項目・保存/復旧120項目と設定UI検査も成功。Mac `d8f97c8` とWindows `c66c0a8` を統合PR #44へ集約。統合コード `7a148b5` のMac/Windows CIと3 OS契約比較は全成功。
 - 本番用共有フォルダの追加は自動承認レビューにより未実行。実ライブラリの同期有効化も保留。利用中Macの素材3件・主要DB内容・原本ハッシュは不変。既存Eagle共有を保持。[実装・検証記録](2026-10/2026-10-05_hover-pocket-library-sync.md) / [使い方](../docs/usage/asset-library-sync.md)。
 
 ## 2026-10-05 チャットをパネル内へ統合

@@ -48,4 +48,6 @@
 
 - Mac実装 `d8f97c8`、Windows実装 `c66c0a8` を統合コミット `28a3120` に集約。Windows差分、102項目の同期ログ、120項目の既存保存/復旧、実WebView2の設定操作、往復マニフェストをMac側でも読み戻した。[Windows担当の記録](2026-10-05_hover-pocket-windows-sync.md)。
 - Mac最終開発版668の起動パスを確認（PID40767）。実行ファイルSHA-256は `4a228e340d5e83f771df423ecfbd66a7dd55330a6c406c8c8699b90ab67b4abd`。設定の同期欄はオフ。
-- Macの既存CIへ同期47項目、Windows CIへ同期102項目と保存検査を追加。統合ブランチの最終CI結果はPRのchecksで確認する。
+- Macの既存CIへ同期47項目、Windows CIへ同期102項目と保存検査を追加。統合コード `7a148b5d59574c39b31d0cb866d4328995c0d534` のCIは全成功。 [Mac](https://github.com/shotaro311/hover-pocket/actions/runs/37308736387) / [Windows](https://github.com/shotaro311/hover-pocket/actions/runs/37308736393) / [3 OS契約比較](https://github.com/shotaro311/hover-pocket/actions/runs/37308736392)。
+- 最終起動後もMacの素材件数3、原本SHA一致、DB quick_check=ok、同期enabled=falseを読み戻した。Windowsの開発版切り替えは担当スレッドで承認待ち表示となり、起動切り替え完了は未確認。同期対応ビルドの隔離実UI検証は成功済み。
+- ユーザーへ、本番の専用共有追加と両端末の実ライブラリ同期有効化の承認を依頼した。回答前には実行しない。今回の追記は検証結果だけで、上記CI対象から実装を変更していない。
