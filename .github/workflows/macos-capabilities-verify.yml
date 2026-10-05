@@ -6,6 +6,7 @@ on:
     paths:
       - "Sources/HoverPocket/Assets/**"
       - "Sources/HoverPocket/App/AssetLibrarySyncVerification.swift"
+      - "Sources/HoverPocket/App/LibraryPairingVerification.swift"
       - "shared/asset-library/**"
       - "Sources/HoverPocket/Capabilities/**"
       - "Sources/HoverPocket/PocketApps/**"
@@ -61,6 +62,7 @@ on:
     paths:
       - "Sources/HoverPocket/Assets/**"
       - "Sources/HoverPocket/App/AssetLibrarySyncVerification.swift"
+      - "Sources/HoverPocket/App/LibraryPairingVerification.swift"
       - "shared/asset-library/**"
       - "Sources/HoverPocket/Capabilities/**"
       - "Sources/HoverPocket/PocketApps/**"
@@ -155,6 +157,9 @@ jobs:
 
       - name: Verify isolated library synchronization
         run: .build/debug/HoverPocket --verify-library-sync --asset-source-root "$GITHUB_WORKSPACE" --sync-evidence "$RUNNER_TEMP/HoverPocketSyncVerify-ci"
+
+      - name: Verify isolated library connection setup
+        run: .build/debug/HoverPocket --verify-library-pairing
 
       - name: Verify capability handlers
         run: .build/debug/HoverPocket --verify-capabilities

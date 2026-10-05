@@ -16,12 +16,19 @@ Windows側のユーザー依頼を確認し、Macは設定UI・ネイティブ�
 
 - Swiftビルド669成功。音声契約42ケース、パネル配置128ケース/設定保持、音声確認23項目、同期47項目が通過。設定カテゴリの外部連携隔離も追加検査。
 - 実UIで6カテゴリ、音声詳細の展開、既存の確認設定、カレンダー/天気、同期オン表示を確認。日本語と英語の表示設定を確認し、日本語へ戻した。
-- 変更前に実DBを別経路で読み戻し：素材19件（通常14/ゴミ箱5）、原本全SHA、保留/競合0、Eagle共有と端末設定保持を確認。変更後の最終readbackは次段に追記する。
+- 変更前に実DBを別経路で読み戻し：素材19件（通常14/ゴミ箱5）、原本全SHA、保留/競合0、Eagle共有と端末設定保持を確認。変更後も同じ19件と全原本SHA、保留/競合0、Eagle共有/device保持を再確認。
 - 公開配信、main統合、実端末の追加/解除は未実施。
 
 ## コード連携（実装中）
 
-共有helperはWindows担当。Mac側の暗号実装は追加しない。ローカルSyncthing APIの公式仕様を確認し、専用共有の端末追加/解除とreadbackを準備する。
+共有helperはWindows担当。Mac側の暗号実装は追加しない。
+
+- UIを `455c6fe` にcommit/pushし、remoteとlocalのSHA一致を確認。開発版669を再起動し、日英切替でウィンドウ名も即時反映されることを確認して日本語へ復帰。
+- MacのローカルSyncthing API clientを実装。loopback限定/リダイレクト拒否、既存共有のpath一致、Eagleとglobal deviceの保持、専用共有だけの端末追加/解除、失敗時の追加所属の取消とreadbackを用意。新規deviceのintroducer/autoAcceptFoldersはfalse。
+- `--verify-library-pairing` の模擬API検査23項目が成功。誤接続先、無効GUI、既存情報保持、二重追加、既存所属の保護、失敗/readback不一致、新規共有の安全設定を含む。`swift build -Xswiftc -warnings-as-errors` 成功。CIと既存Mac検証スクリプトに追加。
+- clientは共通helper受領後の接続用の準備で、実アプリから端末追加/解除はまだ呼び出していない。実Syncthingの変更は0。Windows側で共通コードのGitHub送信に対する自動承認レビューの確認待ち。別経路で転送せず、ユーザー回答後の共通helper受領・Mac梱包・コードUI・暗号化の両OS往復検証が残る。
+- Macの通常PATHはcargo/rustc 1.87だが、`~/.cargo/bin` にstable 1.94.1、toolchain 1.95.0も存在。共通helperのlockfileに合わせて既存toolchainを使用可能。
+ローカルSyncthing APIの公式仕様を確認し、専用共有の端末追加/解除とreadbackを準備する。
 
 - https://docs.syncthing.net/rest/config.html
 - https://docs.syncthing.net/rest/system-status-get.html
