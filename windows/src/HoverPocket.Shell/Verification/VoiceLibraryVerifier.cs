@@ -32,7 +32,15 @@ internal static class VoiceLibraryVerifier
         {
             await controller.HideForCaptureAsync();
             await store.Ready;
-            fixture.Show(); fixture.Activate(); await Task.Delay(250);
+            fixture.Show();
+            for (var attempt = 0; attempt < 20 && !fixture.IsActive; attempt++)
+            {
+                Interop.NativeMethods.ActivateWindowForTextInput(new System.Windows.Interop.WindowInteropHelper(fixture).Handle);
+                fixture.Activate();
+                await Task.Delay(100);
+            }
+            Require(fixture.IsActive, "fixture foreground activation");
+            await Task.Delay(100);
             Require(capture.VoiceTargets.Resolve("current_window", null, null).Title == fixture.Title, "last active window");
             var monitorTarget = capture.VoiceTargets.Resolve("screen", null, null);
             Require(monitorTarget.Monitor, "screen target resolution without capturing display");
