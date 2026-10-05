@@ -3,6 +3,7 @@ import { assetTranslator, translateAssetTree } from "./locale.js";
 
 export function renderAssetsProvider({ container, request, state }) {
   const english = state?.settings?.language === "en", t = assetTranslator(english ? "en" : "ja");
+  const modifierLabel = state?.platform === "mac" ? "⌘" : "Ctrl", platformLabel = state?.platform === "mac" ? "macOS" : "Windows";
   let disposed = false, page = null, generation = 0, previewGeneration = 0, queryTimer, selectionReady = false;
   let query = { version: 2, text: "", view: "recent", offset: 0, limit: 100 }, selection = new Set(), anchor = null;
   let selectionRevision = 0, marquee = null, marqueeFrame = 0;
@@ -54,7 +55,7 @@ export function renderAssetsProvider({ container, request, state }) {
     event.preventDefault(); buttons[event.key === "Home" ? 0 : event.key === "End" ? buttons.length - 1 : (index + (event.key === "ArrowDown" ? 1 : -1) + buttons.length) % buttons.length].focus();
   });
   const selectionBox = document.createElement("div"); selectionBox.className = "assets-marquee"; selectionBox.hidden = true; scroll.append(selectionBox);
-  scroll.title = english ? "Drag empty space to select. Shift-click selects a range; Ctrl-click adds or removes items." : "空白をドラッグして範囲選択。Shift＋クリックで連続選択、Ctrl＋クリックで追加・解除。";
+  scroll.title = english ? `Drag empty space to select. Shift-click selects a range; ${modifierLabel}-click adds or removes items.` : `空白をドラッグして範囲選択。Shift＋クリックで連続選択、${modifierLabel}＋クリックで追加・解除。`;
   const report = message => { if (!disposed) find(".assets-status").textContent = t(message); };
   const run = async (method, params) => { try { return await request(method, params); } catch (error) { report(error.message); return null; } };
   const button = (text, action, title = text) => { const el = document.createElement("button"); el.type = "button"; el.textContent = t(text); el.title = t(title); el.onclick = action; return el; };
@@ -119,7 +120,7 @@ export function renderAssetsProvider({ container, request, state }) {
     for (const [view, name] of [["recent", "最近の素材"], ["favorites", "★ お気に入り"], ["uncategorized", "未分類"], ["trash", "ゴミ箱"]]) {
       const el = button(name, () => { query = { ...query, view, folderId: null, tagId: null, folderIds:[], tagIds:[] }; resetQuery(); }); el.classList.toggle("is-selected", query.view === view && !query.folderId && !query.tagId && !query.folderIds?.length && !query.tagIds?.length); sidebar.append(el);
     }
-    if (query.view === "trash") sidebar.append(button("ゴミ箱を空にする…", async () => { const result = await run("assets.emptyTrash"); if (result?.removed !== undefined) report(`${result.removed}件をWindowsのゴミ箱へ移しました。移せなかった原本は保持されています。`); await refresh(); }));
+    if (query.view === "trash") sidebar.append(button("ゴミ箱を空にする…", async () => { const result = await run("assets.emptyTrash"); if (result?.removed !== undefined) report(`${result.removed}件を${platformLabel}のゴミ箱へ移しました。移せなかった原本は保持されています。`); await refresh(); }));
     const heading = name => { const el = document.createElement("h3"); el.textContent = t(name); sidebar.append(el); };
     heading("フォルダ");
     for (const c of page.folders) { const el = button(c.name, event => filterCategory("folder", c.id, event)); el.classList.toggle("is-selected", query.folderId === c.id || query.folderIds?.includes(c.id)); el.style.paddingLeft = c.parentId ? "24px" : "10px"; el.oncontextmenu = event => { event.preventDefault(); editCategory(c); }; sidebar.append(el); }
@@ -158,7 +159,7 @@ export function renderAssetsProvider({ container, request, state }) {
     const localDate = value => { if (!value) return ""; const date = new Date(value); return `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,"0")}-${String(date.getDate()).padStart(2,"0")}`; };
     from.value = localDate(query.createdAfter); if (query.createdBefore) { const date = new Date(query.createdBefore); date.setDate(date.getDate()-1); to.value = localDate(date.toISOString()); }
     for (const [title,control] of [["取り込み日：開始",from],["取り込み日：終了（この日を含む）",to]]) { const label=document.createElement("label"); label.textContent=t(title); label.append(control); dialog.append(label); }
-    const summary = document.createElement("p"); summary.textContent = [...(query.folderIds||[]), ...(query.tagIds||[])].map(id=>[...page.folders,...page.tags].find(c=>c.id===id)?.name).filter(Boolean).join(" / ") || "分類・タグは一覧のCtrlクリックで複数指定できます。"; dialog.append(summary);
+    const summary = document.createElement("p"); summary.textContent = [...(query.folderIds||[]), ...(query.tagIds||[])].map(id=>[...page.folders,...page.tags].find(c=>c.id===id)?.name).filter(Boolean).join(" / ") || t("分類・タグは一覧のCtrlクリックで複数指定できます。").replace("Ctrl",modifierLabel); dialog.append(summary);
     const utc = (value, next=false) => { if (!value) return null; const parts=value.split("-").map(Number); const date=new Date(parts[0],parts[1]-1,parts[2]); if (next) date.setDate(date.getDate()+1); return date.toISOString(); };
     dialog.append(button("適用", () => { query = {...query,createdAfter:utc(from.value),createdBefore:utc(to.value,true)}; dialog.close(); resetQuery(); }), button("条件を解除", () => { query={text:"",view:"recent",offset:0,limit:100}; input.value=""; dialog.close(); resetQuery(); }), button("閉じる",()=>dialog.close()));
     root.append(dialog); dialog.addEventListener("close",()=>dialog.remove()); dialog.showModal();
@@ -231,7 +232,7 @@ export function renderAssetsProvider({ container, request, state }) {
       const result = await run("assets.copy", { id: asset.id, ids, mode: "drag", trashBounds: trashDrop.hidden ? null : {x:rect.x,y:rect.y,width:rect.width,height:rect.height} });
       let trashed = 0;
       if (result?.ok && (result.droppedInTrash || droppedInTrash)) { const moved = await run("assets.update", {ids,operation:"trash"}); if (moved?.ok) trashed=ids.length; }
-      if (trashed) report(english ? `${trashed} moved to trash. Ctrl+Z to undo.` : `${trashed}件をゴミ箱へ移しました。Ctrl+Zで元に戻せます。`);
+      if (trashed) report(english ? `${trashed} moved to trash. ${modifierLabel}+Z to undo.` : `${trashed}件をゴミ箱へ移しました。${modifierLabel}+Zで元に戻せます。`);
     } finally {
       dragging = false; dragIds = []; droppedInTrash = false; trashDrop.hidden = true; trashDrop.classList.remove("is-targeted"); root.classList.remove("is-dragging");
       if (!disposed) await refresh();
@@ -338,7 +339,7 @@ export function renderAssetsProvider({ container, request, state }) {
     if (!selectionReady || !ids.length) return;
     selectionReady = false; closeContextMenu(); renderSelection();
     const result = await run("assets.update", { ids, operation, value });
-    if (result?.ok && operation === "trash") report(english ? `${ids.length} moved to trash. Ctrl+Z to undo.` : `${ids.length}件をゴミ箱へ移しました。Ctrl+Zで元に戻せます。`);
+    if (result?.ok && operation === "trash") report(english ? `${ids.length} moved to trash. ${modifierLabel}+Z to undo.` : `${ids.length}件をゴミ箱へ移しました。${modifierLabel}+Zで元に戻せます。`);
     await refresh();
   }
   async function renameAsset(asset) {
@@ -399,7 +400,7 @@ export function renderAssetsProvider({ container, request, state }) {
     if (result.error && result.kind !== "video") { media.textContent = result.error; }
     else if (result.kind === "video") {
       let video = media.querySelector("video");
-      if (!video) { video = document.createElement("video"); video.controls = true; video.preload = "metadata"; video.autoplay = false; video.playsInline = true; video.src = result.videoUrl; if (result.dataUrl) video.poster = result.dataUrl; video.onerror = () => report("この動画は再生できません。原本は保存されています。Windowsのメディア機能と形式を確認してください。"); media.replaceChildren(video); }
+      if (!video) { video = document.createElement("video"); video.controls = true; video.preload = "metadata"; video.autoplay = false; video.playsInline = true; video.src = result.videoUrl; if (result.dataUrl) video.poster = result.dataUrl; video.onerror = () => report(`この動画は再生できません。原本は保存されています。${platformLabel}のメディア機能と形式を確認してください。`); media.replaceChildren(video); }
     } else if (result.dataUrl) { const image = document.createElement("img"); image.src = result.dataUrl; image.alt = asset.name; image.draggable = false; media.replaceChildren(image); }
     else media.textContent = t("この形式はプレビューに対応していません。コピー・保存先から原本を取り出せます。");
     const content = media.querySelector("img,video");

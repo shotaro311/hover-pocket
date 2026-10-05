@@ -1,0 +1,3 @@
+PASS new process reads persisted assets
+PASS new process original hashes
+asset_verification=ok checks=2

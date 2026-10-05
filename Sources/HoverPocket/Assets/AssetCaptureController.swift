@@ -1,0 +1,325 @@
+import AppKit
+import AVFoundation
+import ScreenCaptureKit
+import SwiftUI
+import Carbon
+
+struct AssetCapturePreferences: Codable {
+    var systemAudio = true
+    var microphone = true
+    var screenshotToastSeconds = 5
+    var screenshotKey: UInt32 = UInt32(kVK_ANSI_S)
+    var recordingKey: UInt32 = UInt32(kVK_ANSI_R)
+    var modifiers: UInt32 = UInt32(cmdKey | optionKey)
+    init() {}
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        systemAudio = try c.decodeIfPresent(Bool.self, forKey: .systemAudio) ?? true
+        microphone = try c.decodeIfPresent(Bool.self, forKey: .microphone) ?? true
+        screenshotToastSeconds = try c.decodeIfPresent(Int.self, forKey: .screenshotToastSeconds) ?? 5
+        screenshotKey = try c.decodeIfPresent(UInt32.self, forKey: .screenshotKey) ?? UInt32(kVK_ANSI_S)
+        recordingKey = try c.decodeIfPresent(UInt32.self, forKey: .recordingKey) ?? UInt32(kVK_ANSI_R)
+        modifiers = try c.decodeIfPresent(UInt32.self, forKey: .modifiers) ?? UInt32(cmdKey | optionKey)
+    }
+    var recordingShortcut: String { recordingKey == UInt32(kVK_ANSI_2) ? "⌘⌥2" : "⌘⌥R" }
+}
+
+@MainActor
+final class AssetCaptureController: NSObject, ObservableObject {
+    static let shared = AssetCaptureController()
+    @Published var recording = false
+    @Published var busy = false
+    @Published var status = ""
+    var preferences = AssetCapturePreferences()
+    private var overlays: [NSPanel] = []
+    private var recorder: AssetScreenRecorder?
+    private var toast: AssetScreenshotToast?
+    private var hotkeys: [EventHotKeyRef] = []
+    private var handler: EventHandlerRef?
+    private var recordingFolder: String?
+    private var settingsWindow: NSWindow?
+    private var recordDirectory: URL?
+    private var preferencesURL: URL {
+        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("HoverPocket/capture-settings.json")
+    }
+    func start() {
+        if let data = try? Data(contentsOf: preferencesURL), let value = try? JSONDecoder().decode(AssetCapturePreferences.self, from: data) { preferences = value }
+        preferences.screenshotToastSeconds = min(30, max(0, preferences.screenshotToastSeconds))
+        var spec = EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed))
+        InstallEventHandler(GetApplicationEventTarget(), { _, event, _ in
+            var id = EventHotKeyID()
+            GetEventParameter(event, EventParamName(kEventParamDirectObject), EventParamType(typeEventHotKeyID), nil,
+                MemoryLayout<EventHotKeyID>.size, nil, &id)
+            let recording = id.id == 2
+            Task { @MainActor in
+                if recording { await AssetCaptureController.shared.toggleRecording(folder: nil) }
+                else { await AssetCaptureController.shared.screenshot(folder: nil) }
+            }
+            return noErr
+        }, 1, &spec, nil, &handler)
+        registerHotkeys()
+    }
+    private func registerHotkeys() {
+        hotkeys.forEach { UnregisterEventHotKey($0) }; hotkeys.removeAll()
+        for (number, key) in [(UInt32(1), preferences.screenshotKey), (UInt32(2), preferences.recordingKey)] {
+            var ref: EventHotKeyRef?
+            let result = RegisterEventHotKey(key, preferences.modifiers, EventHotKeyID(signature: 0x48504153, id: number), GetApplicationEventTarget(), 0, &ref)
+            if result == noErr, let ref { hotkeys.append(ref) }
+            else { status = "撮影ショートカットが他のアプリと競合しています。素材画面のボタンを利用できます。" }
+        }
+    }
+    func savePreferences(_ value: AssetCapturePreferences) throws {
+        guard (0...30).contains(value.screenshotToastSeconds), value.screenshotKey != value.recordingKey else { throw LibraryError.message("通知時間またはショートカットの組合せを確認してください。") }
+        try FileManager.default.createDirectory(at: preferencesURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try JSONEncoder().encode(value).write(to: preferencesURL, options: .atomic)
+        preferences = value; registerHotkeys()
+    }
+    private func content() async throws -> SCShareableContent {
+        guard CGPreflightScreenCaptureAccess() || CGRequestScreenCaptureAccess() else {
+            throw LibraryError.message("画面収録の許可が必要です。システム設定の「プライバシーとセキュリティ」でHoverPocketを許可して、再度撮影してください。")
+        }
+        return try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
+    }
+    private func pendingDirectory() throws -> URL {
+        let root = preferencesURL.deletingLastPathComponent().appendingPathComponent("CapturePending")
+        let directory = root.appendingPathComponent(UUID().uuidString.lowercased())
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        return directory
+    }
+    func screenshot(folder: String?) async {
+        guard !busy, !recording else { return }
+        busy = true; toast?.close(); toast = nil
+        AssetLibraryRuntime.shared.textInput = false
+        AssetLibraryRuntime.shared.closePanel?()
+        do {
+            try await Task.sleep(for: .milliseconds(180))
+            let content = try await content()
+            let excluded = content.windows.filter { $0.owningApplication?.processID == ProcessInfo.processInfo.processIdentifier }
+            var frames: [(NSScreen, CGImage, [CGRect])] = []
+            for screen in NSScreen.screens {
+                guard let number = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber,
+                      let display = content.displays.first(where: { $0.displayID == number.uint32Value }) else { continue }
+                let config = SCStreamConfiguration(); config.width = Int(screen.frame.width * screen.backingScaleFactor)
+                config.height = Int(screen.frame.height * screen.backingScaleFactor); config.showsCursor = false
+                let image = try await SCScreenshotManager.captureImage(contentFilter: SCContentFilter(display: display, excludingWindows: excluded), configuration: config)
+                let order = (CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] ?? []).compactMap { $0[kCGWindowNumber as String] as? UInt32 }
+                let windows = content.windows.filter { $0.isOnScreen && $0.windowLayer == 0 && $0.owningApplication?.processID != ProcessInfo.processInfo.processIdentifier && $0.frame.width > 30 && $0.frame.height > 30 }
+                    .sorted { (order.firstIndex(of: $0.windowID) ?? Int.max) < (order.firstIndex(of: $1.windowID) ?? Int.max) }
+                let bounds = CGDisplayBounds(display.displayID)
+                let rects = windows.map { $0.frame.intersection(bounds).offsetBy(dx: -bounds.minX, dy: -bounds.minY) }.filter { !$0.isNull && $0.width > 0 }
+                frames.append((screen, image, rects))
+            }
+            guard !frames.isEmpty else { throw LibraryError.message("撮影できる画面がありません。") }
+            for (screen, image, rects) in frames {
+                let panel = AssetCapturePanel(contentRect: screen.frame, styleMask: [.borderless], backing: .buffered, defer: false)
+                panel.level = .screenSaver; panel.isOpaque = true; panel.backgroundColor = .black
+                panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]; panel.isReleasedWhenClosed = false
+                let view = AssetCaptureOverlay(image: image, windowRects: rects)
+                view.onCancel = { [weak self] in self?.closeOverlays() }
+                view.onSelection = { [weak self, weak panel] rect in
+                    guard let self, let panel else { return }
+                    for other in overlays where other !== panel { other.orderOut(nil) }
+                    let scaleX = CGFloat(image.width) / screen.frame.width, scaleY = CGFloat(image.height) / screen.frame.height
+                    let crop = CGRect(x: rect.minX * scaleX, y: rect.minY * scaleY, width: rect.width * scaleX, height: rect.height * scaleY).integral
+                    guard let selected = image.cropping(to: crop) else { status = "選択範囲を切り取れません。"; return }
+                    let session = AssetEditorSession(image: selected, capture: true)
+                    AssetLibraryRuntime.shared.editorSessions.append(session)
+                    var saved: LibraryAsset?
+                    session.onSave = { [weak self] data, keepOriginal in
+                        guard let self else { throw LibraryError.message("撮影が終了しています。") }
+                        let directory = try pendingDirectory()
+                        let name = "スクリーンショット " + LibraryFormat.now().replacingOccurrences(of: ":", with: "-")
+                        let file = directory.appendingPathComponent(name + ".png")
+                        try data.write(to: file, options: .atomic)
+                        if keepOriginal { try AssetMedia.png(selected).write(to: directory.appendingPathComponent(name + " 元画像.png"), options: .atomic) }
+                        try AssetPendingCapture(folder: folder, files: [file.lastPathComponent] + (keepOriginal ? [name + " 元画像.png"] : [])).write(to: directory)
+                        let store = try await AssetLibraryRuntime.shared.store()
+                        let result = try await store.importFile(file, folder: folder)
+                        guard let id = result.assetId, result.status == "saved" || result.status == "duplicate" else { throw LibraryError.message("撮影画像を登録できません。装飾を保持しています。") }
+                        if keepOriginal { _ = try await store.importFile(directory.appendingPathComponent(name + " 元画像.png"), folder: folder) }
+                        saved = try await store.get(id)
+                        try? FileManager.default.trashItem(at: directory, resultingItemURL: nil)
+                        AssetLibraryRuntime.shared.notifyChange(); status = "スクリーンショットを保存しました。"
+                        return saved
+                    }
+                    let sessionID = session.id
+                    session.onFinish = { [weak self] in
+                        guard let self else { return }
+                        AssetLibraryRuntime.shared.editorSessions.removeAll { $0.id == sessionID }
+                        closeOverlays()
+                        if let saved { Task { @MainActor in await self.showToast(saved, screen: screen) } }
+                    }
+                    view.showEditor(session, selection: rect)
+                }
+                panel.contentView = view; overlays.append(panel); panel.makeKeyAndOrderFront(nil)
+                panel.makeFirstResponder(view)
+            }
+        } catch { status = error.localizedDescription; closeOverlays(); showFailure(status) }
+    }
+    private func closeOverlays() { overlays.forEach { $0.orderOut(nil) }; overlays.removeAll(); busy = false }
+    private func showToast(_ asset: LibraryAsset, screen: NSScreen) async {
+        guard preferences.screenshotToastSeconds > 0 else { return }
+        do {
+            let store = try await AssetLibraryRuntime.shared.store(), copy = try await store.copyOut(asset.id)
+            let image = try AssetMedia.image(copy, maximum: 600)
+            toast = AssetScreenshotToast(image: image, file: copy, seconds: preferences.screenshotToastSeconds, screen: screen)
+            toast?.show()
+        } catch { status = "画像は保存済みですが、通知を準備できませんでした。" }
+    }
+    func toggleRecording(folder: String?) async {
+        if recording { await stopRecording(); return }
+        guard !busy else { return }; busy = true
+        toast?.close(); toast = nil; AssetLibraryRuntime.shared.textInput = false; AssetLibraryRuntime.shared.closePanel?()
+        do {
+            let content = try await content()
+            let panel = NSAlert(); panel.messageText = "画面収録の対象を選択"
+            panel.informativeText = "停止は \(preferences.recordingShortcut) またはメニューバーの「収録を停止して保存」です。"
+            panel.addButton(withTitle: "収録開始"); panel.addButton(withTitle: "キャンセル")
+            let chooser = NSPopUpButton(frame: NSRect(x: 0, y: 0, width: 380, height: 28))
+            let windows = content.windows.filter { $0.isOnScreen && $0.windowLayer == 0 && $0.owningApplication?.processID != ProcessInfo.processInfo.processIdentifier && $0.frame.width > 30 }
+            for (index, _) in content.displays.enumerated() { chooser.addItem(withTitle: "画面 \(index + 1)") }
+            for window in windows { chooser.addItem(withTitle: (window.owningApplication?.applicationName ?? "アプリ") + " — " + (window.title ?? "ウィンドウ")) }
+            panel.accessoryView = chooser
+            guard panel.runModal() == .alertFirstButtonReturn else { busy = false; return }
+            let filter: SCContentFilter, size: CGSize
+            if chooser.indexOfSelectedItem < content.displays.count {
+                let display = content.displays[chooser.indexOfSelectedItem]
+                let exclude = content.windows.filter { $0.owningApplication?.processID == ProcessInfo.processInfo.processIdentifier }
+                filter = SCContentFilter(display: display, excludingWindows: exclude); size = CGSize(width: display.width, height: display.height)
+            } else {
+                let window = windows[chooser.indexOfSelectedItem - content.displays.count]
+                filter = SCContentFilter(desktopIndependentWindow: window); size = window.frame.size
+            }
+            if preferences.microphone, !(await AVCaptureDevice.requestAccess(for: .audio)) { throw LibraryError.message("マイクが許可されていません。撮影・収録の設定でマイクをオフにするか、システム設定で許可してください。") }
+            let directory = try pendingDirectory(); recordDirectory = directory
+            let recorder = try AssetScreenRecorder(directory: directory, systemAudio: preferences.systemAudio, microphone: preferences.microphone)
+            recorder.onFailure = { [weak self] text in
+                Task { @MainActor in await self?.stopRecording(reason: text) }
+            }
+            try await recorder.start(filter: filter, size: size)
+            self.recorder = recorder; recordingFolder = folder; recording = true; busy = false; status = "画面を収録中です。\(preferences.recordingShortcut)で停止して保存します。"
+        } catch { busy = false; status = error.localizedDescription; showFailure(status) }
+    }
+    func stopRecording(reason: String? = nil) async {
+        guard let recorder, !busy else { return }; busy = true
+        do {
+            let url = try await recorder.stop()
+            try AssetPendingCapture(folder: recordingFolder, files: [url.lastPathComponent]).write(to: url.deletingLastPathComponent())
+            let store = try await AssetLibraryRuntime.shared.store()
+            let result = try await store.importFile(url, folder: recordingFolder)
+            guard result.status == "saved" || result.status == "duplicate" else { throw LibraryError.message("収録ファイルを登録できません。保存待ちフォルダへ保持しています。") }
+            status = (reason.map { $0 + " " } ?? "") + "画面収録を保存しました。"; AssetLibraryRuntime.shared.notifyChange()
+            if let recordDirectory { try? FileManager.default.trashItem(at: recordDirectory, resultingItemURL: nil) }
+        } catch { status = error.localizedDescription + " 収録ファイルは保存待ちフォルダに保持しています。"; showFailure(status) }
+        self.recorder = nil; recording = false; busy = false
+    }
+    func showSettings() {
+        if settingsWindow == nil {
+            let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 430, height: 290), styleMask: [.titled, .closable], backing: .buffered, defer: false)
+            window.title = "撮影・収録の設定"; window.isReleasedWhenClosed = false
+            window.contentView = NSHostingView(rootView: AssetCaptureSettings(controller: self))
+            window.center(); settingsWindow = window
+        }
+        settingsWindow?.makeKeyAndOrderFront(nil)
+    }
+    func openPending() {
+        let root = preferencesURL.deletingLastPathComponent().appendingPathComponent("CapturePending")
+        try? FileManager.default.createDirectory(at: root, withIntermediateDirectories: true); NSWorkspace.shared.open(root)
+    }
+    func retryPending() async {
+        guard !busy, !recording else { return }; busy = true; defer { busy = false }
+        do {
+            let root = preferencesURL.deletingLastPathComponent().appendingPathComponent("CapturePending")
+            let store = try await AssetLibraryRuntime.shared.store()
+            let count = try await AssetPendingCapture.retry(root: root, store: store)
+            status = "保存待ちの撮影 \(count)件を登録しました。"; AssetLibraryRuntime.shared.notifyChange()
+        } catch { status = error.localizedDescription + " 保存待ちファイルは保持されています。" }
+    }
+    private func showFailure(_ message: String) {
+        let alert = NSAlert(); alert.messageText = "撮影・収録を完了できませんでした"; alert.informativeText = message; alert.runModal()
+    }
+}
+
+private struct AssetCaptureSettings: View {
+    @ObservedObject var controller: AssetCaptureController
+    @State private var value = AssetCapturePreferences()
+    @State private var error = ""
+    var body: some View {
+        Form {
+            Toggle("システム音を収録", isOn: $value.systemAudio)
+            Toggle("マイクを収録", isOn: $value.microphone)
+            Stepper("スクショ通知: \(value.screenshotToastSeconds)秒（0で無効）", value: $value.screenshotToastSeconds, in: 0...30)
+            Picker("撮影ショートカット", selection: $value.screenshotKey) {
+                Text("⌘⌥S").tag(UInt32(kVK_ANSI_S)); Text("⌘⌥1").tag(UInt32(kVK_ANSI_1))
+            }
+            Picker("収録ショートカット", selection: $value.recordingKey) {
+                Text("⌘⌥R").tag(UInt32(kVK_ANSI_R)); Text("⌘⌥2").tag(UInt32(kVK_ANSI_2))
+            }
+            HStack { Button("設定を保存") { do { try controller.savePreferences(value); error = "保存しました。" } catch { self.error = error.localizedDescription } }; Button("保存待ちフォルダ") { controller.openPending() } }
+            Button("保存待ちの撮影を再登録") { Task { await controller.retryPending() } }.disabled(controller.busy || controller.recording)
+            Text(error.isEmpty ? controller.status : error).font(.caption)
+        }.padding(20).onAppear { value = controller.preferences }
+    }
+}
+
+private final class AssetCapturePanel: NSPanel { override var canBecomeKey: Bool { true } }
+
+@MainActor
+private final class AssetCaptureOverlay: NSView {
+    let image: CGImage
+    let windowRects: [CGRect]
+    var onCancel: (() -> Void)?
+    var onSelection: ((CGRect) -> Void)?
+    private var selection = CGRect.zero
+    private var start: CGPoint?
+    private var editor: NSView?
+    override var isFlipped: Bool { true }
+    override var acceptsFirstResponder: Bool { true }
+    init(image: CGImage, windowRects: [CGRect]) { self.image = image; self.windowRects = windowRects; super.init(frame: .zero) }
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+    override func updateTrackingAreas() {
+        trackingAreas.forEach(removeTrackingArea)
+        addTrackingArea(NSTrackingArea(rect: .zero, options: [.activeAlways, .inVisibleRect, .mouseMoved], owner: self)); super.updateTrackingAreas()
+    }
+    override func draw(_ dirtyRect: NSRect) {
+        NSImage(cgImage: image, size: bounds.size).draw(in: bounds, from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
+        NSColor.black.withAlphaComponent(0.30).setFill()
+        let path = NSBezierPath(rect: bounds); path.appendRect(selection); path.windingRule = .evenOdd; path.fill()
+        NSColor.systemBlue.setStroke(); let border = NSBezierPath(rect: selection.insetBy(dx: 1, dy: 1)); border.lineWidth = 2; border.stroke()
+        if editor == nil {
+            ("クリックでウィンドウ／画面を選択・ドラッグで範囲指定・Escで取消" as NSString).draw(at: CGPoint(x: 24, y: 32), withAttributes: [.font: NSFont.systemFont(ofSize: 15), .foregroundColor: NSColor.white, .backgroundColor: NSColor.black.withAlphaComponent(0.6)])
+        }
+    }
+    override func mouseMoved(with event: NSEvent) {
+        guard editor == nil else { return }
+        let point = convert(event.locationInWindow, from: nil)
+        selection = windowRects.first { $0.contains(point) } ?? bounds; needsDisplay = true
+    }
+    override func mouseDown(with event: NSEvent) { if editor == nil { start = convert(event.locationInWindow, from: nil) } }
+    override func mouseDragged(with event: NSEvent) {
+        guard editor == nil, let start else { return }
+        let point = convert(event.locationInWindow, from: nil)
+        selection = CGRect(x: min(start.x, point.x), y: min(start.y, point.y), width: abs(start.x-point.x), height: abs(start.y-point.y)).intersection(bounds); needsDisplay = true
+    }
+    override func mouseUp(with event: NSEvent) {
+        guard editor == nil else { return }; start = nil
+        if selection.width < 3 || selection.height < 3 { mouseMoved(with: event) }
+        onSelection?(selection.isEmpty ? bounds : selection)
+    }
+    override func keyDown(with event: NSEvent) {
+        guard !event.isARepeat, editor == nil else { return }
+        if event.keyCode == 53 { onCancel?() }
+        else if event.keyCode == 36 { onSelection?(selection.isEmpty ? bounds : selection) }
+    }
+    func showEditor(_ session: AssetEditorSession, selection: CGRect) {
+        let canvas = NSHostingView(rootView: AssetDrawingCanvas(session: session))
+        canvas.frame = selection; addSubview(canvas); editor = canvas
+        let toolbar = NSHostingView(rootView: AssetAnnotationEditor(session: session, showsCanvas: false))
+        let width = min(bounds.width - 16, max(760, selection.width)), height: CGFloat = 100
+        let y = selection.minY >= height ? selection.minY - height : min(bounds.height - height, selection.maxY + height <= bounds.height ? selection.maxY : selection.minY)
+        toolbar.frame = CGRect(x: min(max(8, selection.midX - width/2), bounds.width - width - 8), y: max(0, y), width: width, height: height)
+        addSubview(toolbar); needsDisplay = true
+        DispatchQueue.main.async { [weak session] in if let canvas = session?.canvas { canvas.window?.makeFirstResponder(canvas) } }
+    }
+}

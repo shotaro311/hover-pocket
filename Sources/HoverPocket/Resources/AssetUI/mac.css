@@ -1,0 +1,12 @@
+:root { color-scheme: dark; --text:#ececf1; font-family:-apple-system,BlinkMacSystemFont,sans-serif; }
+* { box-sizing:border-box; }
+html,body,#assets { width:100%;height:100%;margin:0;overflow:hidden;background:transparent; }
+body { -webkit-user-select:none; }
+input,textarea { -webkit-user-select:text; }
+.assets-root { font-size:12px; }
+.assets-root button { font:inherit; }
+.assets-toolbar { padding-top:6px; }
+.assets-dialog { max-width:90%;max-height:90%;overflow:auto;background:#24252c;color:#ededf4;border:1px solid #ffffff30;border-radius:12px; }
+.assets-dialog::backdrop,.assets-context-menu::backdrop { background:#0004; }
+.assets-preview-toolbar { flex-wrap:wrap; }
+.assets-preview-bottom { flex-wrap:wrap; }

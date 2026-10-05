@@ -23,7 +23,8 @@ let package = Package(
             ],
             path: "Sources/HoverPocket",
             resources: [
-                .copy("Resources/PocketApps")
+                .copy("Resources/PocketApps"),
+                .copy("Resources/AssetUI")
             ]
         )
     ]

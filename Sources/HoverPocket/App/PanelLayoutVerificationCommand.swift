@@ -168,6 +168,33 @@ enum PanelLayoutVerificationCommand {
             defaults.removePersistentDomain(forName: suiteName)
         }
 
+        let initial = AppSettings(defaults: defaults)
+        guard initial.panelAttachmentStyle == .preserveMenu,
+              !initial.automaticallyCoverMenuOnNoNotchDisplays else { return false }
+        for style in PanelAttachmentStyle.allCases {
+            AppSettings(defaults: defaults).panelAttachmentStyle = style
+            guard let independent = UserDefaults(suiteName: suiteName),
+                  independent.string(forKey: "panelAttachmentStyle") == style.rawValue,
+                  AppSettings(defaults: independent).panelAttachmentStyle == style else { return false }
+        }
+        defaults.set("future-unknown-style", forKey: "panelAttachmentStyle")
+        guard AppSettings(defaults: defaults).panelAttachmentStyle == .preserveMenu else { return false }
+
+        for automatic in [false, true] {
+            for style in PanelAttachmentStyle.allCases {
+                let settings = AppSettings(defaults: defaults)
+                settings.panelAttachmentStyle = style
+                settings.automaticallyCoverMenuOnNoNotchDisplays = automatic
+                guard let independent = UserDefaults(suiteName: suiteName),
+                      independent.bool(forKey: "automaticallyCoverMenuOnNoNotchDisplays") == automatic else { return false }
+                let reloaded = AppSettings(defaults: independent)
+                guard reloaded.automaticallyCoverMenuOnNoNotchDisplays == automatic,
+                      reloaded.panelAttachmentStyle == style,
+                      reloaded.resolvedPanelAttachmentStyle(hasNotch: true) == style,
+                      reloaded.resolvedPanelAttachmentStyle(hasNotch: false) == (automatic ? .coverMenu : style) else { return false }
+            }
+        }
+
         for panelSize in PanelSizeOption.allCases {
             for textSize in PanelTextSizeOption.allCases {
                 let settings = AppSettings(defaults: defaults)

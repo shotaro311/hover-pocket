@@ -1,9 +1,16 @@
 ---
 project_slug: hover-menu-preview
-updated: 2026-10-04
+updated: 2026-10-05
 updated_by: codex
-status: windows-0.2.10-installed; public-windows-0.2.10; reported-freeze-incident-unconfirmed-reproduced-preview-races-fixed; published-macos-644; macos-asset-library-pending
+status: windows-0.2.10-installed; public-windows-0.2.10; reported-freeze-incident-unconfirmed-reproduced-preview-races-fixed; published-macos-644; macos-asset-library-local-662; macos-physical-acceptance-partial
 ---
+
+## 2026-10-05 Mac素材ライブラリのローカル実装
+
+- Windows 0.2.10の共有UI・保存契約へMacの保存、画像/動画/PDF、注釈、撮影、音声付き収録を接続した。開発ビルド662、作業ブランチ `codex/macos-asset-library-0210`。公開macOS版は644のまま。
+- 保存39項目、UI58項目（共通JS45項目を含む）、別プロセス再開2項目、短い音声3モードの実収録、上端パネル20回、既存パネル100回の検査が通過。独立したSQLite/ファイルSHA・署名のreadbackも通過。
+- 元checkoutの2,099ファイルは変更・欠落0。作業を別worktreeへ保持し、既存の液体アニメーション差分を引き継いだ。変更は未コミット、公開・同期・本番アプリの置換は未実施。
+- 外部への実ドロップ、撮影画面の全手操作、複数画面、長時間収録、両OS実機往復は未受入。次はドラッグ・撮影の手操作確認。[詳細と根拠](2026-10/2026-10-05_hover-pocket-mac-assets.md) / [使い方](../docs/usage/macos-asset-library.md)。
 
 ## 2026-10-04 Windows 0.2.10 本番配信完了
 
