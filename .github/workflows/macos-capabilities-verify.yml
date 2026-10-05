@@ -4,6 +4,9 @@ on:
   push:
     branches: ["main"]
     paths:
+      - "Sources/HoverPocket/Assets/**"
+      - "Sources/HoverPocket/App/AssetLibrarySyncVerification.swift"
+      - "shared/asset-library/**"
       - "Sources/HoverPocket/Capabilities/**"
       - "Sources/HoverPocket/PocketApps/**"
       - "Sources/HoverPocket/App/CapabilityVerificationCommand.swift"
@@ -56,6 +59,9 @@ on:
       - ".github/workflows/macos-capabilities-verify.yml"
   pull_request:
     paths:
+      - "Sources/HoverPocket/Assets/**"
+      - "Sources/HoverPocket/App/AssetLibrarySyncVerification.swift"
+      - "shared/asset-library/**"
       - "Sources/HoverPocket/Capabilities/**"
       - "Sources/HoverPocket/PocketApps/**"
       - "Sources/HoverPocket/App/CapabilityVerificationCommand.swift"
@@ -146,6 +152,9 @@ jobs:
           .build/debug/HoverPocket --verify-voice-e2e-isolation
           .build/debug/HoverPocket --verify-panel-layout
           .build/debug/HoverPocket --verify-panel-soak
+
+      - name: Verify isolated library synchronization
+        run: .build/debug/HoverPocket --verify-library-sync --asset-source-root "$GITHUB_WORKSPACE" --sync-evidence "$RUNNER_TEMP/HoverPocketSyncVerify-ci"
 
       - name: Verify capability handlers
         run: .build/debug/HoverPocket --verify-capabilities

@@ -253,6 +253,8 @@ mkdir -p "$BUNDLE_DIR/Contents/Resources/AssetUI/providers/assets" "$BUNDLE_DIR/
 ditto "$ROOT_DIR/Sources/HoverPocket/Resources/AssetUI" "$BUNDLE_DIR/Contents/Resources/AssetUI"
 cp "$ROOT_DIR/windows/ui/providers/assets/"*.js "$ROOT_DIR/windows/ui/providers/assets/"*.css "$BUNDLE_DIR/Contents/Resources/AssetUI/providers/assets/"
 python3 "$ROOT_DIR/script/bundle_asset_ui.py" "$BUNDLE_DIR/Contents/Resources/AssetUI/app.js"
+mkdir -p "$BUNDLE_DIR/Contents/Resources/AssetLibrary/sync-v1"
+cp "$ROOT_DIR/shared/asset-library/sync-v1/002-sync.sql" "$BUNDLE_DIR/Contents/Resources/AssetLibrary/sync-v1/"
 cp "$ROOT_DIR/shared/asset-library/001-initial.sql" "$ROOT_DIR/shared/asset-library/case-fold.json" "$ROOT_DIR/shared/asset-library/manifest.schema.json" "$BUNDLE_DIR/Contents/Resources/AssetLibrary/"
 
 SPARKLE_FRAMEWORK_PATH="$ROOT_DIR/.build/$HOVERPOCKET_SWIFT_CONFIGURATION/Sparkle.framework"

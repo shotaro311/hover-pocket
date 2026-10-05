@@ -18,6 +18,8 @@ source_app_release: v0.1.0-98
 
 2026-10-03素材ライブラリ: Eagleを介さず、アカウント不要で任意形式の原本の保存・検索・分類・取り出しを行う。ユーザー指定により初期版に画像・動画・PDFのプレビュー、上端パネル自身の自動拡大、パネル内の再生/ページ移動、全画面切替を含める。実装範囲・保存と復元・UI・性能の正本は[素材ライブラリ初期版の要件](asset-library-v1.md)、理由と構成は[設計資料](../plan/20261002_ASSET_LIBRARY_DESIGN.md)を参照。Claude Opus 5.5/highのレビューと指摘対応は[レビュー記録](../report/20261002-asset-library-requirements-review.md)へ記録。Windows開発版0.2.9-local.7へ実装し、[検証結果と未完了の受入](../../progress/2026-10/2026-10-03_hover-pocket-asset-library.md)を記録した。macOS実装、基準機の性能受入、公開配布は未完了。既存のAI用「管理された機能ライブラリ」とは別の機能とする。
 
+2026-10-05同期: ユーザー指定によりEagle Syncと同じ独立DB＋Syncthing専用転送の方式でMac/Windowsの素材同期を追加する。原本・変更履歴・競合・ゴミ箱復元の契約は[同期v1](../../shared/asset-library/sync-v1/README.md)、操作は[素材同期](../usage/asset-library-sync.md)を参照する。
+
 ## 0. 結論
 
 Windows 版の本質は、「画面上端へポインターを運ぶだけで、普段は邪魔にならない小さな起点から、毎日使う道具を暗いユーティリティパネルとして一瞬で取り出せる常駐アプリ」です。

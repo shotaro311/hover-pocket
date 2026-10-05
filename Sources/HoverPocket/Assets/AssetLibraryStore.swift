@@ -5,8 +5,10 @@ import Darwin
 actor AssetLibraryStore {
     let root: URL
     let format: LibraryFormat
-    private let db: LibraryDatabase
-    private let fm = FileManager.default
+    let db: LibraryDatabase
+    let syncSchema: String
+    var syncBlobChecks: [String: (size: Int64, modified: Date, checked: Date)] = [:]
+    let fm = FileManager.default
     private let lockFD: Int32
     private var undo: [LibraryAsset] = []
     private var organizeUndoToken: String?
@@ -15,6 +17,7 @@ actor AssetLibraryStore {
 
     init(root: URL, contractRoot: URL) throws {
         self.root = root
+        syncSchema = try String(contentsOf: contractRoot.appendingPathComponent("sync-v1/002-sync.sql"), encoding: .utf8)
         format = try LibraryFormat(contractRoot: contractRoot)
         try Self.noLinks(root)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
@@ -38,6 +41,7 @@ actor AssetLibraryStore {
             guard try db.scalar("PRAGMA quick_check") == "ok" else { throw LibraryError.message("DBの整合性を確認できません。原本とDBを保持しています。") }
             try db.script("PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL;")
             try db.script(String(contentsOf: contractRoot.appendingPathComponent("001-initial.sql"), encoding: .utf8))
+            try db.script(syncSchema)
         } catch { Darwin.close(lockFD); throw error }
     }
     deinit { flock(lockFD, LOCK_UN); Darwin.close(lockFD) }
@@ -117,13 +121,13 @@ actor AssetLibraryStore {
               abs(modified.timeIntervalSince(expected)) < 0.002 else { throw LibraryError.message("原本が欠損しているか変更されています。") }
         return url
     }
-    private func reserve(_ bytes: Int64) throws {
+    func reserve(_ bytes: Int64) throws {
         let attributes = try fm.attributesOfFileSystem(forPath: root.path)
         guard let free = attributes[.systemFreeSize] as? NSNumber, bytes >= 0, free.int64Value - 512 * 1024 * 1024 > bytes else {
             throw LibraryError.message("空き容量が不足しています。512 MiBの予備領域を残して停止しました。")
         }
     }
-    private func protect(_ url: URL, _ asset: LibraryAsset) throws {
+    func protect(_ url: URL, _ asset: LibraryAsset) throws {
         try fm.setAttributes([.posixPermissions: 0o444, .modificationDate: LibraryFormat.utc(asset.createdAt)!], ofItemAtPath: url.path)
     }
     func importFile(_ source: URL, folder: String? = nil, internet: Bool = false) throws -> LibraryImport {
@@ -183,7 +187,7 @@ actor AssetLibraryStore {
         guard try db.scalar("SELECT id FROM categories WHERE id=? AND type='folder'", [id]) != nil else { throw LibraryError.message("保存先のフォルダがありません。選び直してください。") }
         return id
     }
-    private func insert(_ a: LibraryAsset) throws {
+    func insert(_ a: LibraryAsset) throws {
         try LibraryFormat.validate(a)
         try db.execute("INSERT INTO assets VALUES(?,?,?,?,?,?,?,?,?,?,?)", [a.id, a.name, format.normalize(a.name), a.extension,
             a.kind, a.sha256, String(a.sizeBytes), a.createdAt, a.favorite ? "1" : "0", a.trashed ? "1" : "0", a.internetOrigin ? "1" : "0"])
@@ -199,7 +203,7 @@ actor AssetLibraryStore {
             try db.execute("DELETE FROM imports WHERE id=?", [a.id])
         }
     }
-    private func assets(_ sql: String, _ values: [String?] = []) throws -> [LibraryAsset] {
+    func assets(_ sql: String, _ values: [String?] = []) throws -> [LibraryAsset] {
         try db.rows(sql, values).map { row in
             let memberships = try db.rows("SELECT categories.id,type FROM memberships JOIN categories ON category=categories.id WHERE asset=?", [row["id"]])
             return try LibraryAsset(databaseRow: row,
@@ -208,7 +212,7 @@ actor AssetLibraryStore {
         }
     }
     func get(_ id: String) throws -> LibraryAsset? { try assets("SELECT * FROM assets WHERE id=?", [id]).first }
-    private func categories(_ type: String) throws -> [LibraryCategory] {
+    func categories(_ type: String) throws -> [LibraryCategory] {
         try db.rows("SELECT * FROM categories WHERE type=? ORDER BY normalized,id", [type]).map {
             LibraryCategory(id: $0["id"]!, name: $0["name"]!, parentId: $0["parent"])
         }
@@ -492,6 +496,7 @@ actor AssetLibraryStore {
         return count
     }
     func emptyTrash() throws -> Int {
+        if try syncMeta("enabled") == "1" { _ = try syncOnce() }
         var count = 0
         for asset in try assets("SELECT * FROM assets WHERE trashed=1") {
             let original = try path(asset, verifyHash: true)
@@ -506,6 +511,7 @@ actor AssetLibraryStore {
         try fm.contentsOfDirectory(atPath: root.appendingPathComponent("snapshots").path).filter { $0.hasSuffix(".sqlite") }.sorted().reversed()
     }
     func restoreSnapshot(_ name: String) throws {
+        guard try syncMeta("enabled") != "1" else { throw LibraryError.message("同期を停止してからDBを復元してください。") }
         guard try snapshots().contains(name), !name.contains("/"), !name.contains("..") else { throw LibraryError.message("スナップショットがありません。") }
         let source = root.appendingPathComponent("snapshots/" + name)
         try Self.noLinks(source)
@@ -521,7 +527,17 @@ actor AssetLibraryStore {
         }
         let before = root.appendingPathComponent("snapshots/before-restore-" + UUID().uuidString + ".sqlite")
         try db.backup(to: before)
-        do { try db.restore(from: source) }
+        let syncRows = try ["sync_meta", "sync_events", "sync_heads"].map { try db.rows("SELECT * FROM " + $0) }
+        do {
+            try db.restore(from: source)
+            try db.script(syncSchema)
+            try db.transaction {
+                for table in ["sync_meta", "sync_events", "sync_heads"] { try db.execute("DELETE FROM " + table) }
+                for row in syncRows[0] { try db.execute("INSERT INTO sync_meta VALUES(?,?)", [row["key"], row["key"] == "enabled" ? "0" : row["value"]]) }
+                for row in syncRows[1] { try db.execute("INSERT INTO sync_events VALUES(?,?,?,?,?)", [row["revision"], row["entity_key"], row["body"], row["disposition"], row["exported"]]) }
+                for row in syncRows[2] { try db.execute("INSERT INTO sync_heads VALUES(?,?,?)", [row["entity_key"], row["revision"], row["snapshot"]]) }
+            }
+        }
         catch { try? db.restore(from: before); throw error }
         undo = []
     }
@@ -546,6 +562,16 @@ actor AssetLibraryStore {
         }
         let staged = root.appendingPathComponent("recovery-" + UUID().uuidString + ".sqlite")
         try candidate.backup(to: staged)
+        let latch = root.appendingPathComponent("sync-configured"); try noLinks(latch)
+        let hadSyncTable = try candidate.scalar("SELECT name FROM sqlite_master WHERE name='sync_meta'") != nil
+        let hadSyncGroup = try hadSyncTable && candidate.scalar("SELECT value FROM sync_meta WHERE key='group'") != nil
+        if fm.fileExists(atPath: latch.path) || hadSyncGroup {
+            let stagedDB = try LibraryDatabase(staged)
+            try stagedDB.script("CREATE TABLE IF NOT EXISTS sync_meta(key TEXT PRIMARY KEY,value TEXT NOT NULL);")
+            try stagedDB.execute("INSERT OR REPLACE INTO sync_meta VALUES('enabled','0')")
+            try stagedDB.execute("INSERT OR REPLACE INTO sync_meta VALUES('recoveryBlocked','1')")
+            try stagedDB.script("PRAGMA wal_checkpoint(TRUNCATE);")
+        }
         let preserved = root.appendingPathComponent("before-recovery-" + UUID().uuidString)
         try fm.createDirectory(at: preserved, withIntermediateDirectories: false)
         var moved: [URL] = []
@@ -581,7 +607,7 @@ actor AssetLibraryStore {
         }
         for url in urls { try inspect(url) }; return (count, bytes)
     }
-    private static func contains(_ directory: URL, _ file: URL) -> Bool {
+    static func contains(_ directory: URL, _ file: URL) -> Bool {
         let parent = directory.resolvingSymlinksInPath().path, path = file.resolvingSymlinksInPath().path
         return path == parent || path.hasPrefix(parent + "/")
     }

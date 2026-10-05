@@ -36,6 +36,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var voiceTerminationTask: Task<Void, Never>?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        if !CommandLine.arguments.contains(where: { $0.hasPrefix("--verify") }) && HoverPocketRuntimeEnvironment.shared.externalIntegrationsEnabled {
+            AssetLibrarySyncController.shared.start()
+        }
         NSApp.setActivationPolicy(.accessory)
         configureAINativeRuntimeIfEnabled()
         observeAINativeRuntimeSetting()

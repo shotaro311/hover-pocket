@@ -157,6 +157,8 @@ struct SettingsView: View {
             Divider()
             weatherSection
         case .data:
+            AssetLibrarySyncSettings()
+            Divider()
             capabilityHistorySection
         case .general:
             languageSection

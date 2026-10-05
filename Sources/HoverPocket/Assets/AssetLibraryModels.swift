@@ -17,7 +17,7 @@ struct LibraryAsset: Codable, Identifiable, Sendable, Equatable {
     var relativePath: String { "originals/" + id + (`extension`.isEmpty ? "" : "." + `extension`) }
 }
 
-struct LibraryCategory: Codable, Sendable {
+struct LibraryCategory: Codable, Sendable, Equatable {
     let id: String
     let name: String
     let parentId: String?

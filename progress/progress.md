@@ -2,8 +2,14 @@
 project_slug: hover-menu-preview
 updated: 2026-10-05
 updated_by: codex
-status: windows-0.2.10-installed; public-windows-0.2.10; reported-freeze-incident-unconfirmed-reproduced-preview-races-fixed; published-macos-644; macos-inline-chat-local-667; macos-physical-acceptance-partial
+status: windows-0.2.10-installed; public-windows-0.2.10; reported-freeze-incident-unconfirmed-reproduced-preview-races-fixed; published-macos-644; macos-library-sync-local-668; macos-physical-acceptance-partial
 ---
+
+## 2026-10-05 Eagle方式のMac・Windows素材同期
+
+- 各端末のDBを保持し、Syncthingの専用フォルダで原本と変更記録を交換する同期を実装。Mac開発版668の「設定 → データと履歴」に新規接続・参加・停止・再開・競合解決を追加し、初期状態はオフ。
+- Macの同期47検査、既存機能の回帰検査、実SyncthingでMac→Windows→Macの素材・分類・名前・お気に入り・ゴミ箱/復元と原本SHA一致を確認。Windows担当の最終コミットとCIは統合時に追記する。
+- 本番用共有フォルダの追加は自動承認レビューにより未実行。実ライブラリの同期有効化も保留。利用中Macの素材3件・主要DB内容・原本ハッシュは不変。既存Eagle共有を保持。[実装・検証記録](2026-10/2026-10-05_hover-pocket-library-sync.md) / [使い方](../docs/usage/asset-library-sync.md)。
 
 ## 2026-10-05 チャットをパネル内へ統合
 
