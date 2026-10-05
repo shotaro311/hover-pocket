@@ -48,6 +48,19 @@ internal static class VoiceNativeVerifier
         Require(!(await Call("unknown", "shell", new { command = "ignored" })).Success, "unknown tool rejected");
         var timer = await Call("timer", "timer_countdown_start", new { durationSeconds = 60, title = "verify" });
         Require(timer.Success && timer.Text.Contains("verified"), "Codex uses shared timer approval and readback");
+        var textAudit = new CapabilityBrokerAuditLog(Path.Combine(root, "text-broker"));
+        var textBroker = new CapabilityBroker(registry, new CapabilityBrokerLedger(Path.Combine(root, "text-broker")), textAudit);
+        var textNative = new CodexNativeCapabilityRuntime(new CodexRealtimeCapabilityAdapter(new OpenAIRealtimeCapabilityRuntime(
+            new BrokerOpenAIRealtimeCapabilityAuthority(registry, textBroker), (_, _) => Task.FromResult(true), (_, _) => Task.FromResult(true),
+            () => true, () => "Asia/Tokyo", origin: CapabilityOrigin.Text)), registry, textBroker, (_, _) => Task.FromResult(true), origin: CapabilityOrigin.Text);
+        foreach (var name in new[] { "calculator_evaluate", "timer_countdown_start" })
+        {
+            var args = name == "calculator_evaluate" ? JsonSerializer.SerializeToElement(new { expression = "6*7" })
+                : JsonSerializer.SerializeToElement(new { durationSeconds = 90, title = "typed chat" });
+            Require((await textNative.ExecuteAsync(JsonSerializer.SerializeToElement(new { threadId = "chat-text", turnId = "turn-1", callId = name, tool = name, arguments = args }), "chat-text", CancellationToken.None)).Success, "typed capability");
+        }
+        var audit = System.Text.Encoding.UTF8.GetString(textAudit.CombinedData());
+        Require(audit.Contains("\"origin\":\"text\"") && !audit.Contains("\"origin\":\"voice\""), "typed tools retain text origin in the shared broker");
         using var request = JsonDocument.Parse("""{"tools":[{"type":"function","name":"unexpected","parameters":{}}]}""");
         Require(!CodexVoiceToolRouteProbe.MatchesTools(request.RootElement, native.Definitions), "extra tool gate");
     }

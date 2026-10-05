@@ -1,0 +1,2 @@
+PASS chat-live: installed model route exposes exactly 19 tools
+PASS chat-live: turn/start -> native approval -> isolated folder saved/readback -> assistant text -> history resume; stream_updates=20; auth_copy=false; microphone=false; production_library_unchanged=true
