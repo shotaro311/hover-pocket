@@ -202,6 +202,23 @@ export async function verifyAssetSelection() {
     card("a").dispatchEvent(new DragEvent("dragstart",{bubbles:true,cancelable:true})); await until(()=>releaseDrag);
     releaseDrag(); releaseDrag=null; await wait(70);
     check(last("assets.update").sourceFolderId==="folder-a" && last("assets.update").destination.folderId==="folder-b","folder drag supplies only its source membership");
+    dragResult={ok:true};
+    const movesBefore=calls.filter(call=>call.method==="assets.update").length;
+    card("a").dispatchEvent(new DragEvent("dragstart",{bubbles:true,cancelable:true})); await until(()=>releaseDrag);
+    let target=button(".assets-sidebar","Fixture B"), targetRect=target.getBoundingClientRect();
+    // WebKit synthetic DragEvent keeps DataTransfer read-only; observe the handler's requested effect.
+    const transfer={dropEffect:"none"};
+    const hover=new DragEvent("dragover",{bubbles:true,cancelable:true,clientX:targetRect.x+targetRect.width/2,clientY:targetRect.y+targetRect.height/2});
+    Object.defineProperty(hover,"dataTransfer",{value:transfer}); target.dispatchEvent(hover);
+    check(transfer.dropEffect==="move" && target.classList.contains("is-drop-target"),"DOM folder hover accepts a move and highlights its destination");
+    releaseDrag(); releaseDrag=null; await wait(70);
+    check(calls.filter(call=>call.method==="assets.update").length===movesBefore,"hover without an actual drop never moves assets");
+    card("a").dispatchEvent(new DragEvent("dragstart",{bubbles:true,cancelable:true})); await until(()=>releaseDrag);
+    target=button(".assets-sidebar","Fixture B"); targetRect=target.getBoundingClientRect();
+    target.dispatchEvent(new DragEvent("drop",{bubbles:true,cancelable:true,clientX:targetRect.x+targetRect.width/2,clientY:targetRect.y+targetRect.height/2}));
+    releaseDrag(); releaseDrag=null; await wait(70);
+    check(last("assets.update").sourceFolderId==="folder-a" && last("assets.update").destination.folderId==="folder-b","DOM folder drop commits the destination when native drag reports no target");
+    dragResult={ok:true,dropTarget:{kind:"folder",folderId:"folder-b"}};
     await clickView("ゴミ箱");
     card("a").dispatchEvent(new DragEvent("dragstart",{bubbles:true,cancelable:true})); await until(()=>releaseDrag);
     releaseDrag(); releaseDrag=null; await wait(70);
@@ -216,6 +233,6 @@ export async function verifyAssetSelection() {
     host.querySelector("[data-action=endPreview]").click(); await wait(60);
     check(!audio.hasAttribute("src") && host.querySelector(".assets-preview").hidden,"closing audio preview releases its media source");
     return {ok:true,checks};
-  } catch(error) { return {ok:false,checks,error:error.stack}; }
+  } catch(error) { return {ok:false,checks,error:String(error.message || error) + "\n" + error.stack}; }
   finally { delayMatch=false; releaseMatch?.(); releaseDrag?.(); provider.dispose(); host.remove(); }
 }
