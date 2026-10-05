@@ -595,6 +595,12 @@ def main() -> None:
         / "Voice"
         / "CodexVoiceCoordinator.cs"
     ).read_text(encoding="utf-8")
+    windows_voice_profile = (
+        ROOT / "windows" / "src" / "HoverPocket.Shell" / "Voice" / "CodexVoiceProfile.cs"
+    ).read_text(encoding="utf-8")
+    windows_tool_probe = (
+        ROOT / "windows" / "src" / "HoverPocket.Shell" / "Voice" / "CodexVoiceToolRouteProbe.cs"
+    ).read_text(encoding="utf-8")
     windows_runtime = (
         ROOT
         / "windows"
@@ -1139,8 +1145,11 @@ def main() -> None:
         if f'"{notification}"' not in windows_coordinator:
             fail(f"Windows Voice coordinator missing {notification}")
     if runtime_fixture["appServer"]["sandbox"] != "read-only" \
-            or 'sandbox = "read-only"' not in windows_coordinator \
-            or 'approvalPolicy = "never"' not in windows_coordinator:
+            or 'CodexVoiceProfile.ThreadParameters(' not in windows_coordinator \
+            or 'sandbox = "read-only"' not in windows_voice_profile \
+            or 'approvalPolicy = "never"' not in windows_voice_profile \
+            or 'runtimeWorkspaceRoots = Array.Empty<object>()' not in windows_voice_profile \
+            or 'selectedCapabilityRoots = Array.Empty<object>()' not in windows_voice_profile:
         fail("Windows Voice root thread is not constrained to no-action mode")
     if "generate-json-schema" not in windows_runtime \
             or "--experimental" not in windows_runtime \
@@ -1195,8 +1204,8 @@ def main() -> None:
         "requestMethod": "item/tool/call",
         "responseFields": ["contentItems", "success"],
         "environments": [],
-        "positiveToolPolicy": "dynamicToolsOnly",
-        "codex0145SupportsPositiveToolPolicy": False,
+        "positiveToolPolicy": "credentialFreeExactToolProbe",
+        "schemaOnlyIsSufficient": False,
         "productionActivationApproved": False,
         "sandbox": "read-only",
         "approvalPolicy": "never",
@@ -1225,18 +1234,21 @@ def main() -> None:
             or "AgentSessionId: call.ThreadId" not in windows_dynamic_tools:
         fail("Voice tool calls are not root-bound and idempotently coalesced")
     if 'request.Method == "item/tool/call"' not in windows_coordinator \
-            or "dynamicTools = _dynamicToolRuntime.Definitions" not in windows_coordinator \
-            or "dynamicToolsOnly = true" not in windows_coordinator \
-            or "environments = Array.Empty<object>()" not in windows_coordinator \
+            or "_dynamicToolRuntime?.Definitions" not in windows_coordinator \
+            or "dynamicTools = tools" not in windows_voice_profile \
+            or "environments = Array.Empty<object>()" not in windows_voice_profile \
             or "ReferenceEquals(CurrentActiveRealtime(client), active)" not in windows_coordinator \
-            or "result.ProtocolResult,\n                cancellation.Token" not in windows_coordinator \
+            or "result.ProtocolResult, cancellation.Token" not in windows_coordinator \
             or "ReplyResultAsync" not in windows_coordinator \
             or "CancelActiveToolRequests" not in windows_coordinator:
         fail("Voice coordinator does not route/cancel the bounded dynamic tool protocol")
     if 'HasProperty(threadStart.RootElement, "dynamicTools")' not in windows_runtime \
-            or 'HasBooleanProperty(threadStart.RootElement, "properties", "dynamicToolsOnly")' not in windows_runtime \
             or 'HasProperty(threadStart.RootElement, "environments")' not in windows_runtime \
-            or "BrokerOnlyToolPolicyProductionApproved = false" not in windows_runtime \
+            or "await CodexVoiceToolRouteProbe.VerifyAsync(identity, tools," not in windows_runtime \
+            or "if (!MatchesTools(request, tools))" not in windows_tool_probe \
+            or "actual.GetArrayLength() != expected.GetArrayLength()" not in windows_tool_probe \
+            or "JsonElement.DeepEquals(parameters, definition.GetProperty(\"inputSchema\"))" not in windows_tool_probe \
+            or "IPAddress.Loopback" not in windows_tool_probe \
             or 'ContainsString(serverRequest.RootElement, "item/tool/call")' not in windows_runtime \
             or 'RequiredContains(toolResponse.RootElement, "contentItems", "success")' not in windows_runtime:
         fail("installed Codex schema gate does not require the dynamic tool protocol")
