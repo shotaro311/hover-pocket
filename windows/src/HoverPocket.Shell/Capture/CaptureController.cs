@@ -34,12 +34,13 @@ internal sealed class CaptureController : IDisposable
     private ScreenshotToastWindow? _toast;
     internal ScreenshotToastWindow? ToastForVerify => _toast;
     private ScreenRecorder? _recorder;
+    private DeviceCaptureController? _deviceCapture;
     private Task? _finishRecording;
     private string? _recordingStage;
     private bool _busy, _disposed;
     private string _status = "撮影と収録の準備ができています。";
-    public bool Recording => _recorder is not null;
-    public bool Busy => _busy;
+    public bool Recording => _recorder is not null || _deviceCapture?.Recording == true;
+    public bool Busy => _busy || _deviceCapture?.Busy == true;
     public string Status => _status;
     internal CapturePreferences? WindowPreferencesForVerify => _window?.Preferences;
     internal bool SettingsVisibleForVerify => _window?.IsVisible == true;
@@ -91,6 +92,12 @@ internal sealed class CaptureController : IDisposable
     }
     public Task FromLibraryAsync(string kind, string? folder)
     {
+        if (kind is "cameraPhoto" or "cameraVideo" or "audio")
+        {
+            if (_busy || _recorder is not null) throw new InvalidOperationException("画面収録を終了してからカメラ・録音を開いてください。");
+            if (_deviceCapture is null) { _deviceCapture = new(_store); _deviceCapture.StateChanged += () => Report(_deviceCapture.Status); }
+            _deviceCapture.Open(kind, folder); return Task.CompletedTask;
+        }
         if (kind == "screenshot") return ScreenshotAsync(folderId: folder, useCurrentFolder: true);
         if (kind == "recording") return ToggleRecordingAsync(folderId: folder, useCurrentFolder: true);
         if (kind != "settings") throw new ArgumentException("Unknown capture action.", nameof(kind));
@@ -98,7 +105,7 @@ internal sealed class CaptureController : IDisposable
     }
     public async Task ScreenshotAsync(Func<Task<BitmapSource?>>? selectForVerify = null, string? folderId = null, bool useCurrentFolder = false)
     {
-        if (_busy || Recording || _disposed) return;
+        if (Busy || Recording || _disposed) return;
         var options = _window?.Preferences ?? _preferences;
         if (useCurrentFolder) options = options with { FolderId = folderId };
         CloseToast();
@@ -159,8 +166,8 @@ internal sealed class CaptureController : IDisposable
     public async Task ToggleRecordingAsync(Func<nint, Task<GraphicsCaptureItem?>>? pickForVerify = null, string? folderId = null, bool useCurrentFolder = false)
     {
         if (_disposed) return;
-        if (_recorder is not null) { await StopRecordingAsync(); return; }
-        if (_busy) return; CloseToast(); _busy = true; Report("収録対象の画面またはウィンドウを選択してください。");
+        if (Recording) { await StopRecordingAsync(); return; }
+        if (Busy) return; CloseToast(); _busy = true; Report("収録対象の画面またはウィンドウを選択してください。");
         string? stage = null;
         try
         {
@@ -210,10 +217,10 @@ internal sealed class CaptureController : IDisposable
         finally { recorder.Dispose(); if (ReferenceEquals(_recorder, recorder)) _recorder = null; _clock.Stop(); _recordingStage = null; _busy = false; Report(_status); }
     }
     public async Task StopRecordingAsync()
-    { if (_recorder is null) return; _busy = true; _recorder.Stop(); Report("収録を終了し、ライブラリへ保存しています…"); if (_finishRecording is not null) await _finishRecording; }
+    { if (_deviceCapture is not null) await _deviceCapture.StopAsync(); if (_recorder is null) return; _busy = true; _recorder.Stop(); Report("収録を終了し、ライブラリへ保存しています…"); if (_finishRecording is not null) await _finishRecording; }
     public async Task RetryAsync()
     {
-        if (_busy || Recording) return;
+        if (Busy || Recording) return;
         _busy = true;
         try
         {
@@ -234,7 +241,7 @@ internal sealed class CaptureController : IDisposable
         try { if (_recordingStage is not null && new DriveInfo(Path.GetPathRoot(_recordingStage)!).AvailableFreeSpace < 512L * 1024 * 1024) recorder.Stop("空き容量が少なくなったため収録を終了しました。"); }
         catch (IOException) { recorder.Stop("保存先への接続が失われました。"); }
     }
-    public void Dispose() { if (_disposed) return; _disposed = true; CloseToast(); _clock.Stop(); _hotkeys.Dispose(); _recorder?.Stop(); _window?.CloseForShutdown(); }
+    public void Dispose() { if (_disposed) return; _disposed = true; CloseToast(); _clock.Stop(); _hotkeys.Dispose(); _recorder?.Stop(); _deviceCapture?.Dispose(); _window?.CloseForShutdown(); }
     internal static void ExcludeFromCapture(nint handle) { if (OperatingSystem.IsWindowsVersionAtLeast(10, 0, 19041)) SetWindowDisplayAffinity(handle, 0x11); }
     [System.Runtime.InteropServices.DllImport("user32.dll")] private static extern bool SetWindowDisplayAffinity(nint hwnd, uint affinity);
 }

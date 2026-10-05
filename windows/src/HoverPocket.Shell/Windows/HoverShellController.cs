@@ -62,6 +62,8 @@ internal sealed class HoverShellController : IDisposable
     private bool _panelExpectedVisible;
     private bool _previewFocusDismissed;
     private AssetOrganizerWindow? _assetOrganizer;
+    private AssetDropOverlayWindow? _assetDropOverlay;
+    internal AssetDropOverlayWindow? DropOverlayForVerify => _assetDropOverlay;
     private bool _assetDragActive;
     private int _assetDragRevision;
     private async void OnAssetDragChanged(bool active)
@@ -320,6 +322,7 @@ internal sealed class HoverShellController : IDisposable
 
         _panel.Win32MessageReceived -= OnWindowWin32MessageReceived;
         _assetOrganizer?.Close();
+        _assetDropOverlay?.Close();
         _panelBridgeController.SettingsChanged -= OnPanelSettingsChanged;
         _panelBridgeController.SettingsOpenRequested -= OnSettingsOpenRequested;
         _panelBridgeController.TimerAlertFired -= OnTimerAlertFired;
@@ -350,7 +353,7 @@ internal sealed class HoverShellController : IDisposable
         DisplaySurfaceLayout? layout,
         bool bypassFullscreenSuppression = false)
     {
-        if (_captureSuppressed) return;
+        if (_captureSuppressed || _assetDropOverlay?.IsVisible == true) return;
         if (bypassFullscreenSuppression) _previewFocusDismissed = false;
         if (!bypassFullscreenSuppression
             && _pointerOverrideForVerify is null
@@ -474,7 +477,7 @@ internal sealed class HoverShellController : IDisposable
 
     private void PollPointer()
     {
-        if (_captureSuppressed) return;
+        if (_captureSuppressed || _assetDropOverlay?.IsVisible == true) return;
         if (_panel.AssetLayout.PinOnly || _assetDragActive) { _closeDelayTimer.Stop(); return; }
         var pointer = GetPointerPosition();
         if (_previewFocusDismissed)
@@ -706,12 +709,28 @@ internal sealed class HoverShellController : IDisposable
         accessSurface.CanImportAssets = () => _panelBridgeController.AssetsVisible;
         accessSurface.UpdateAppearance(_panelBridgeController.CurrentSettings);
         accessSurface.HoverEntered += OnAccessSurfaceHoverEntered;
-        accessSurface.AssetDragChanged += OnAssetDragChanged;
+        accessSurface.AssetDragChanged += active =>
+        {
+            if (!active || !_panelBridgeController.AssetsVisible) return;
+            _assetDropOverlay ??= new AssetDropOverlayWindow(_panelBridgeController.AssetLibrary, _panel.ReceiveAssetPayloadAsync);
+            _assetDropOverlay.ShowAt(accessSurface);
+            _closeDelayTimer.Stop(); _ = HidePanelAsync();
+        };
         accessSurface.AssetDropped += async data =>
         {
             if (!_panelBridgeController.AssetsVisible) return;
-            await _panelBridgeController.BeginAssetDropAsync(); await ShowPanelAsync(ResolveLayoutForPointer());
-            await _panelBridgeController.FinishAssetDropAsync(true); await _panel.ReceiveAssetDropAsync(data);
+            try
+            {
+                var payload = Providers.Assets.AssetDropPayload.Capture(data, _panelBridgeController.AssetLibrary.Root);
+                _assetDropOverlay ??= new AssetDropOverlayWindow(_panelBridgeController.AssetLibrary, _panel.ReceiveAssetPayloadAsync);
+                _assetDropOverlay.ShowAt(accessSurface);
+                await _assetDropOverlay.ImportAsync(payload, null);
+            }
+            catch (Exception ex)
+            {
+                _assetDropOverlay ??= new AssetDropOverlayWindow(_panelBridgeController.AssetLibrary, _panel.ReceiveAssetPayloadAsync);
+                _assetDropOverlay.ShowAt(accessSurface); _assetDropOverlay.ShowFailure(ex is ArgumentException or IOException ? ex.Message : "取り込めませんでした。元のデータは保持しています。");
+            }
         };
         accessSurface.Win32MessageReceived += OnWindowWin32MessageReceived;
         accessSurface.EnsureHandle();
@@ -994,7 +1013,7 @@ internal sealed class HoverShellController : IDisposable
 
     private void OnAccessSurfaceHoverEntered(object? sender, EventArgs e)
     {
-        if (_previewFocusDismissed) return;
+        if (_previewFocusDismissed || _assetDropOverlay?.IsVisible == true) return;
         if (!_panel.IsVisible && IsTopEdgeSuppressed())
         {
             return;

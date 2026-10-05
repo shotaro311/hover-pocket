@@ -8,6 +8,11 @@ internal sealed record AssetMediaLease(Asset Asset, string? Token);
 // The pane supplies the current lease; this attachment owns HTTP responses and their streams.
 internal sealed class AssetMediaServer : IDisposable
 {
+    internal static string? AudioMime(Asset asset) => asset.Kind == "other" ? asset.Extension.ToLowerInvariant() switch
+    {
+        "m4a" => "audio/mp4", "aac" => "audio/aac", "mp3" => "audio/mpeg",
+        "wav" => "audio/wav", "ogg" => "audio/ogg", "flac" => "audio/flac", _ => null
+    } : null;
     private readonly AssetStore _store;
     private readonly CoreWebView2 _web;
     private readonly Func<AssetMediaLease?> _selection;
@@ -28,7 +33,7 @@ internal sealed class AssetMediaServer : IDisposable
         try
         {
             var selection = _selection(); var asset = selection?.Asset; var uri = new Uri(args.Request.Uri);
-            if (asset is null || asset.Kind != "video" || uri.AbsolutePath != $"/{selection?.Token}/{asset.Id}")
+            if (asset is null || (asset.Kind != "video" && AudioMime(asset) is null) || uri.AbsolutePath != $"/{selection?.Token}/{asset.Id}")
             { args.Response = _web.Environment.CreateWebResourceResponse(null, 403, "Forbidden", "Access-Control-Allow-Origin: https://app.hoverpocket.local\r\n"); return; }
             var file = new FileStream(_store.ReadOriginalPath(asset), FileMode.Open, FileAccess.Read, FileShare.Read, 65536, true);
             var start = 0L; var end = file.Length - 1; var ranged = false;
@@ -42,7 +47,7 @@ internal sealed class AssetMediaServer : IDisposable
                 end = Math.Min(end, file.Length - 1); ranged = true;
             }
             file.Position = start;
-            var mime = asset.Extension switch { "webm" => "video/webm", "mov" => "video/quicktime", _ => "video/mp4" };
+            var mime = AudioMime(asset) ?? (asset.Extension switch { "webm" => "video/webm", "mov" => "video/quicktime", _ => "video/mp4" });
             var headers = $"Access-Control-Allow-Origin: https://app.hoverpocket.local\r\nContent-Type: {mime}\r\nAccept-Ranges: bytes\r\nContent-Length: {end - start + 1}\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\n";
             if (ranged) headers += $"Content-Range: bytes {start}-{end}/{file.Length}\r\n";
             var stream = new BoundedReadStream(file, end - start + 1, value => { lock (_resourceStreams) _resourceStreams.Remove(value); });

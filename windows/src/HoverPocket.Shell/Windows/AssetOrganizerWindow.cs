@@ -56,10 +56,10 @@ internal sealed class AssetOrganizerWindow : Window
         };
         Closing += (_, args) => { if (!args.Cancel) { _closed = true; _pane?.Dispose(); _web.Dispose(); } };
         AllowDrop = true;
-        System.Windows.DragEventHandler assetDragOver = (_, args) => { if (_pane?.HandleInternalDrag(args) == true) return; if (args.Data.GetDataPresent(System.Windows.DataFormats.FileDrop)) { args.Effects = System.Windows.DragDropEffects.Copy; args.Handled = true; } };
+        System.Windows.DragEventHandler assetDragOver = (_, args) => { if (_pane?.HandleInternalDrag(args) == true) return; args.Effects = AssetDropPayload.Supports(args.Data) ? System.Windows.DragDropEffects.Copy : System.Windows.DragDropEffects.None; args.Handled = true; };
         PreviewDragEnter += assetDragOver; PreviewDragOver += assetDragOver;
         PreviewDragLeave += (_, _) => _pane?.ClearDragHover();
-        PreviewDrop += async (_, args) => { if (_pane?.HandleInternalDrag(args, drop: true) == true) return; if (_pane is not null && args.Data.GetDataPresent(System.Windows.DataFormats.FileDrop)) { args.Handled = true; await _pane.ImportPathsAsync((string[])args.Data.GetData(System.Windows.DataFormats.FileDrop)); } };
+        PreviewDrop += async (_, args) => { if (_pane?.HandleInternalDrag(args, drop: true) == true) return; if (_pane is not null) { args.Handled = true; await _pane.ImportDropAsync(args.Data); } };
     }
     private void ApplyLayout(AssetPreviewLayout layout)
     {

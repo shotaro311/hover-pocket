@@ -79,6 +79,14 @@ WebView2 は通常、GPU 描画を有効にして開閉とリサイズのカク�
 
 ## Verify
 
+開発版の素材ライブラリでは、選択した素材をサイドバーのフォルダ・お気に入り・未分類・ゴミ箱へドラッグできます。フォルダから別フォルダへ移した場合は元の所属だけを外し、それ以外の分類を残します。Ctrl+Zで直前の整理を戻せます。原本を複製せず、外部アプリへドラッグしたときだけ作業コピーを渡します。
+
+外部ファイルを上端の入口へドラッグすると保存先パネルを表示します。ローカルファイル、画像データ、Windowsの仮想ファイル、画像・動画・音声の直接URLに対応し、元ファイルを保持します。URLと仮想ファイルは1ファイル128MiBまでです。Webページや配信サービスの再生ページは直接メディアとして取得しません。
+
+ライブラリの「カメラ撮影・録音」からカメラ写真・カメラ動画・音声録音を選び、デバイスと保存先を指定して明示的に開始します。収録中は画面を閉じても継続し、上端に経過時間と停止ボタンを表示します。確定済みの保存待ちは「保存待ちを再試行」で取り込めます。音声はM4Aで保存し、素材の分類は既存の `other` を使います。
+
+拡張機能の隔離検査は `HOVERPOCKET_LIBRARY_EXTENSIONS_VERIFY_ONLY=1` と `--verify ui` で実行します。生成したAACのパスを `HOVERPOCKET_ASSET_AUDIO_FIXTURE` に指定すると再生・シーク・保存待ち復旧も検証します。検査用のネイティブドラッグはポインターを動かします。実カメラ撮影は自動実行しません。
+
 ```powershell
 dotnet run --project .\windows\src\HoverPocket.Shell\HoverPocket.Shell.csproj -- --verify shell
 dotnet run --project .\windows\src\HoverPocket.Shell\HoverPocket.Shell.csproj -- --verify display

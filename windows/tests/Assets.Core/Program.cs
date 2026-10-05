@@ -9,6 +9,7 @@ var source = Path.Combine(root, "ＡＢＣ_猫 image.PNG");
 await File.WriteAllBytesAsync(source, Enumerable.Range(0, 100000).Select(i => (byte)(i % 251)).ToArray());
 var sourceHash = Hash(source); var tests = 0;
 void Check(bool condition, string name) { if (!condition) throw new Exception("FAILED: " + name); tests++; }
+tests += await OrganizationChecks.RunAsync(root);
 Check(AssetFormat.Normalize("Straße Σςσ ＡＢＣ") == AssetFormat.Normalize("STRASSE σσσ abc"), "full case fold expansions and sigma");
 Check(AssetFormat.Normalize("İ") == "i\u0307" && AssetFormat.Normalize("ı") != AssetFormat.Normalize("I"), "locale independent dotted and dotless I");
 async Task Reject(Func<Task> action, string name) { try { await action(); } catch (Exception ex) when (ex is InvalidDataException or InvalidOperationException or ArgumentException or IOException) { tests++; return; } throw new Exception("FAILED: " + name); }
