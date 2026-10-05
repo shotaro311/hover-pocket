@@ -16,10 +16,10 @@
 
 ## 検証
 
-- 素材保存120、同期102、共有API/パス/状態機械33、Rust入力検証5が成功。
+- 素材保存120、同期102、共有API/パス/正常/失敗時の状態機械33、Rust入力検証5が成功。追加で承認前の取消を別実行し、26項目（共有API20と取消関連6）を確認。
 - 実TLS仲介へ架空の識別情報だけを使い、成功・誤コード・拒否・古い承認・異なるグループの5ケースを検証。
 - ネイティブ2端末の模擬API試験で、承認前の書き込み0、明示承認、双方の完了、相手設定失敗時の取り消しが成功。
-- さらに隔離Syncthing 2プロセスで、承認前共有0、実REST設定/readback、生成したテキストの原本とmetadataの転送、専用共有の解除/global device保持を確認。実設定には接続しない検証。証拠は `%TEMP%/HoverPocketPairingActual-alic3pv7` に保持。
+- さらに隔離Syncthing 2プロセスで、承認前共有0、実REST設定/readback、生成したテキストの原本とmetadataの転送、専用共有の解除/global device保持を確認。実設定には接続しない検証。証拠は `%TEMP%/HoverPocketPairingActual-alic3pv7` と `%TEMP%/HoverPocketPairingActual-vp4xbs_r` に保持。
 - 実WebView2で6カテゴリ・検索・検索解除・狭い幅・日英・同期の停止/再開/競合解決、コード表示・元端末の承認・参加側待機・取消、相手名をHTMLとして解釈しないことを確認。パネルから同期変更/連携開始/承認は拒否。
 - SettingsVerifierで設定保存、既定値、起動登録dry-run、更新、音声の接続済み/未接続/ログイン中の表示と確認境界が成功。
 - Releaseビルドは警告0・エラー0。検証ログは `artifacts/pairing-settings-final-ui.log` と `artifacts/pairing-settings-regression.log`。開発候補は `artifacts/pairing-settings-build/`。
@@ -35,4 +35,5 @@
 - Windows共通helperはローカル `f2e410b` に保存。GitHubの既存リポジトリ `shotaro311/hover-pocket` へのpushを自動承認レビューが拒否したため、ユーザーへ送信先を明示して確認中。許可待ちを別経路のコード転送で回避していない。
 - 許可後にpushし、Mac担当がhelperの組込みとMac実機ビルド、両OSのコード接続を完了する。全体進捗入口の統合はMac担当が所有。
 - 両端末でSyncthingが起動していることが現在の前提。iPhoneの転送は未実装。既存の実接続を解除/再参加させる検証は行っていない。
+- Windows実装をローカル `2f2eba7` に保存。検証で起動したSyncthingの親子プロセスは専用APIから終了し、元の常駐プロセスだけに戻ったことを確認。
 - 今回のWindows候補への常駐アプリ切替、main統合、本番アプデ配信は未実施。

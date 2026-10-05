@@ -4,6 +4,7 @@ import subprocess, socket, tempfile, xml.etree.ElementTree as ET, urllib.request
 repository=Path(__file__).resolve().parents[3]
 root=Path(tempfile.mkdtemp(prefix='HoverPocketPairingActual-'))
 processes=[]
+apis=[]
 def port():
  with socket.socket() as sock:
   sock.bind(('127.0.0.1',0));return sock.getsockname()[1]
@@ -22,6 +23,7 @@ try:
    element.text=value
   gui=xml.find('gui');address='127.0.0.1:'+str(port());gui.find('address').text=address;gui.set('tls','false')
   config.write(home/'config.xml',encoding='utf-8',xml_declaration=True)
+  apis.append((address,gui.find('apikey').text))
   p=subprocess.Popen(['syncthing','serve','--home',str(home),'--no-browser','--no-restart','--no-upgrade','--no-console'],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,creationflags=subprocess.CREATE_NO_WINDOW);processes.append(p)
   ready=False
   for _ in range(100):
@@ -35,6 +37,15 @@ try:
  subprocess.run(['dotnet','run','--project',str(repository/'windows/tests/Pairing'),'-c','Release','--','--real',str(root/'a'),str(root/'b'),str(helper)],check=True,cwd=repository)
  print('Isolated evidence:',root)
 finally:
+ # Syncthing has a supervising parent on Windows. Shut down its own API first,
+ # so the child exits too; terminating only Popen's parent leaves an orphan.
+ for address,key in apis:
+  try:
+   request=urllib.request.Request('http://'+address+'/rest/system/shutdown',data=b'',headers={'X-API-Key':key},method='POST')
+   with urllib.request.urlopen(request,timeout=3):pass
+  except Exception:pass
  for p in processes:
-  if p.poll() is None:p.terminate()
- for p in processes:p.wait(timeout=15)
+  try:p.wait(timeout=10)
+  except subprocess.TimeoutExpired:
+   subprocess.run(['taskkill','/PID',str(p.pid),'/T','/F'],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,creationflags=subprocess.CREATE_NO_WINDOW)
+   p.wait(timeout=10)

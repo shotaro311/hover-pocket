@@ -45,7 +45,8 @@ Console.WriteLine($"PASS pairing configuration: {assertions} assertions; isolate
 
 if (args.Length > 0) {
     var helper=Path.GetFullPath(args[0]);
-    foreach(var fail in new[]{false,true}) {
+    foreach(var mode in args.Contains("--cancel-only") ? new[]{"cancel"} : new[]{"success","failure","cancel"}) {
+        var fail=mode=="failure";
         var aApi=new FakeApi { MyId=string.Join('-',Enumerable.Repeat("AAAAAAA",8)) };
         var bApi=new FakeApi { MyId=string.Join('-',Enumerable.Repeat("BBBBBBB",8)), FailAddFolder=fail };
         using var aStore=new AssetStore(Path.Combine(target,Guid.NewGuid().ToString("N"),"library"));
@@ -58,6 +59,12 @@ if (args.Length > 0) {
         Check(!(await aStore.GetSyncStatusAsync()).Configured && !(await bStore.GetSyncStatusAsync()).Configured,"no library configuration before approval");
         try { await a.Approve("stale",default); throw new Exception("stale approval accepted"); } catch(IOException) { assertions++; }
         Check(aApi.Writes==0,"stale approval writes nothing");
+        if(mode=="cancel") {
+            await a.Cancel(default);await b.Cancel(default);
+            Check(a.State.Phase=="idle"&&b.State.Phase=="idle","active cancellation returns idle");
+            Check(aApi.Writes==0&&bApi.Writes==0,"active cancellation writes no shares");
+            Console.WriteLine("PASS native pairing lifecycle: cancellation before approval");continue;
+        }
         await a.Approve(a.State.ApprovalId!,default);
         if(!fail) {
             await Until(()=>a.State.Phase=="complete"&&b.State.Phase=="complete");
