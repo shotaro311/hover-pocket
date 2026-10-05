@@ -31,7 +31,18 @@
 ## 実行範囲と引継ぎ
 
 - Windowsソース/UI/検証/この日別記録を本branchでcommit/pushする。共通契約・Mac実装・共通progress入口はMac担当が統合する。
-- 実ユーザーのライブラリ同期はオフのまま。稼働中の日本語チャット修正版開発アプリPID75932と、その実行ファイル・正規インストール先・自動起動は変更していない。新しい同期対応候補は別出力に準備済みで、今回本番配信していない。
+- 実装時点では実ライブラリを同期オフで保持した。その後の明示承認による開発版切り替え・実ライブラリ接続は下記に記録。本番アプリの更新配信・正規インストール先・自動起動先は変更していない。
 - 再検証: powershell -File windows/script/verify_asset_sync.ps1 -IncludeUi
 - 実転送用CLI: dotnet run --project windows/tests/Assets.Sync -- --root E:\HoverPocketSyncVerify-Windows-20261005 --action once
 - CLIは末尾名がHoverPocketSyncVerify-で始まる隔離rootのみ受け付け、readback.jsonへmanifest/status/SHAを保存する。create/joinには --transport、rename/trash/restore/favoriteには --sha（renameは --name）を指定する。
+
+## 2026-10-05 実ライブラリへの接続
+
+- ユーザーが旧開発版をトレイから終了し、PID75932のtray.quit / application.exit / process.exitを確認した。同期対応候補c66c0a8を通常起動し、PID69388のshell.readyを確認。正規インストール先・配布・自動起動先は変更していない。
+- 切り替え前に実DB、原本16件、設定をLocalAppDataのSyncSetupBackupsへ保全。切り替え後の全既存テーブル、原本SHA、設定ファイル、正規インストールEXEの一致とquick_check=okを確認した。
+- Windows側でも本人から専用共有追加と実ライブラリ同期の明示承認を受けた。Syncthingへhoverpocket-library-sync-v1 / E:\HoverPocketSyncTransportを追加し、既存Eagle共有・端末設定の完全一致を確認。Macで作成したmarkerと素材3件分の転送データが到着した。
+- 常駐パネルと設定画面がComputer Useのtargetable windowに現れず、ユーザーが設定の「既存グループに参加」から専用フォルダを選択した。参加操作はユーザー回答とDBのconfigured=true / enabled=trueで確認し、設定画面を自動操作で検証したとは扱わない。
+- WindowsのDBは16件から19件（通常14件・ゴミ箱5件）へ反映。全19原本のSHA一致、元16件の原本・素材名・お気に入り・ゴミ箱状態の保持、quick_check=ok、保留/送信待ち/競合0を確認。分類・所属は元から0件。
+- 専用共有は39ファイルでidle、needFiles/needBytes/errors/pullErrors=0。Macと同じ形式で素材・分類の比較用ダイジェストを取得した。元設定との差分は手動操作に伴う最終選択パネルのみで、それ以外の設定と正規インストールEXEは保持。
+- Mac担当の実DB読戻しでも19件（通常14件・ゴミ箱5件）、全19原本検証、保留/送信待ち/競合0を確認。指定の共通JSON形式でWindows/Macの比較ダイジェストが完全一致し、転送先到着だけでなく両端末DBへの反映を確認した。
+- 実素材名・原本・設定値はGitへ保存せず、保全と比較証跡は非公開のローカルに保持する。
