@@ -49,4 +49,12 @@ Windows側は独立してコード・検証・コミット・プッシュを担�
 
 以上の送信確認はコード変更後の文書コミットとして追加保存する。PRのCIは別途状態を確認し、ローカルの検証済み結果と区別して報告する。
 
+## PRの自動検査で判明した終了処理の修正
+
+Mac PRの最初のCIではビルドは成功したが、共通の `verify_voice_foundation.py` が失敗した。素材UI検証の `defer` が `previewWindow.orderOut(nil)` を直接呼び出しており、音声のdetach/muteを行う共通の終了処理を通っていなかった。検証用の後片付けも `orderOutPreviewWindow` へ統一し、検査条件は維持した。再発をローカルで検出できるよう、素材の集約検証から既存の音声契約検査も呼び出す。
+
+修正後は音声契約42ケース、再ビルド、素材の集約検証と `--verify-voice-foundation` がexit 0。保存40項目、UI58項目、再開2項目、撮影・短い音声3モード収録、既存機能100回反復を再確認した。window 3→3、thread 15→8（最大16）、RSS 101.812→104.484MiB、socket/child 0→0。署名の厳密検証と差分検査も通過した。
+
+[修正後のSHAと実行結果](../evidence/2026-10-05-mac-refactor/ci-repair/readback.json)と[音声検証](../evidence/2026-10-05-mac-refactor/ci-repair/voice-foundation.log)を保存。Windows PR #45の自動検査は[成功](https://github.com/shotaro311/hover-pocket/actions/runs/37247907670)。Mac PR #44は修正コミット後に自動検査を再実行し、最終結果はPRと完了報告で確認する。
+
 [実施計画](../../docs/plan/20261005_MAC_WINDOWS_REFACTOR.md) / [素材機能の実装記録](2026-10-05_hover-pocket-mac-assets.md)

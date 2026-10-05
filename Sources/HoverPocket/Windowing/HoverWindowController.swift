@@ -207,7 +207,7 @@ final class HoverWindowController {
         defer {
             runtime.endPreview(); runtime.incomingDrag = false
             runtime.onLayout = nil; runtime.openPanel = nil; runtime.closePanel = nil; runtime.openForDrop = nil; runtime.canAcceptDrop = nil
-            previewWindow.orderOut(nil); accessWindows.values.forEach { $0.orderOut(nil) }; stopHoverMonitor()
+            orderOutPreviewWindow(previewWindow); accessWindows.values.forEach { $0.orderOut(nil) }; stopHoverMonitor()
         }
         menuStore.providerStore.select(TimerProvider.pluginID)
         let previous = settings.lastSelectedProviderRawValue

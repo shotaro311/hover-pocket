@@ -11,6 +11,7 @@ status: windows-0.2.10-installed; public-windows-0.2.10; reported-freeze-inciden
 - 保存40項目、UI58項目、再開2項目、既存機能と100回反復、アニメーションの途中反転30回等が通過。元2,099ファイルと原本・Windows互換出力を独立readbackした。
 - Windows側はS311-winのCodexが保存・検索・分類・復旧と動画配信処理を整理。保存97項目、選択操作45項目、動画・編集・削除復元等の実機検査、Debug/Releaseビルドを通した。コード `2c65c4e` と記録 `3e7ba7c` を `codex/windows-refactor-20261005` へpush。[Draft PR #45](https://github.com/shotaro311/hover-pocket/pull/45)。
 - 両OSのリモートSHA一致をMac側から確認し、Windows差分・検証記録も取得して確認した。元の未コミット変更と音声開発を保持。公開macOS版644・Windows版0.2.10とmainは更新していない。[Macと両OS送信の記録](2026-10/2026-10-05_hover-pocket-mac-refactor.md)。
+- PRのCIで素材UI検証の後片付けが共通の音声停止処理を通っていないことを検出し修正。音声契約42ケースと素材一式・100回反復・音声停止/再開を再検証した。Windows PR #45のCIは成功。Mac PRは修正後のCI結果をPR上で確認する。
 
 ## 2026-10-05 Mac素材ライブラリのローカル実装
 
