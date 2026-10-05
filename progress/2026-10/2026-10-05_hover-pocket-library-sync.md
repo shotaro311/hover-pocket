@@ -46,4 +46,6 @@
 - [往復受信の検証用マニフェスト](../evidence/2026-10-05-library-sync/cross-platform-readback.json)
 - [利用中ライブラリ不変の照合](../evidence/2026-10-05-library-sync/user-library-preserved.json)
 
-Windows最終コミット、統合SHA、最終ビルド/CIは続けて追記する。
+- Mac実装 `d8f97c8`、Windows実装 `c66c0a8` を統合コミット `28a3120` に集約。Windows差分、102項目の同期ログ、120項目の既存保存/復旧、実WebView2の設定操作、往復マニフェストをMac側でも読み戻した。[Windows担当の記録](2026-10-05_hover-pocket-windows-sync.md)。
+- Mac最終開発版668の起動パスを確認（PID40767）。実行ファイルSHA-256は `4a228e340d5e83f771df423ecfbd66a7dd55330a6c406c8c8699b90ab67b4abd`。設定の同期欄はオフ。
+- Macの既存CIへ同期47項目、Windows CIへ同期102項目と保存検査を追加。統合ブランチの最終CI結果はPRのchecksで確認する。

@@ -215,6 +215,9 @@ jobs:
       - name: Verify weather model, cache, and settings
         run: dotnet run --project .\windows\tests\Weather.Core\Weather.Core.csproj --configuration Release
 
+      - name: Verify isolated library synchronization and storage
+        run: .\windows\script\verify_asset_sync.ps1
+
       - name: Verify settings UI modules
         run: |
           node --check .\windows\ui\js\app.js
