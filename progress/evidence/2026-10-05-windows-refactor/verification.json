@@ -1,0 +1,50 @@
+{
+  "schema_version": 1,
+  "checked_at": "2026-10-05T00:29:34.8900576Z",
+  "base_commit": "a02eb9f8f9347a8500b80b994e3af4addd6ca79d",
+  "branch": "codex/windows-refactor-20261005",
+  "builds": [
+    {
+      "configuration": "Debug",
+      "exit_code": 0,
+      "warnings": 0,
+      "errors": 0
+    },
+    {
+      "configuration": "Release",
+      "exit_code": 0,
+      "warnings": 0,
+      "errors": 0
+    }
+  ],
+  "storage_checks": {
+    "baseline": 93,
+    "after": 97,
+    "exit_code": 0
+  },
+  "native_assets": {
+    "log": "native-assets.log",
+    "exit_code": 0,
+    "video_fixture": "generated H.264/AAC, 640x360, 3 seconds",
+    "selection_checks": 45,
+    "range_cases": [
+      "full bytes SHA256",
+      "offset partial bytes",
+      "tail clamp",
+      "native 416 past EOF",
+      "previous lease 403",
+      "new lease 206",
+      "closed lease 403"
+    ]
+  },
+  "production_replaced": false,
+  "dependencies_changed": false,
+  "schema_changed": false,
+  "shared_ui_changed": false,
+  "release_published": false,
+  "verifier_limitations": [
+    "protected PDF fixture not provided",
+    "unrelated full UI suite not rerun",
+    "production replacement and update distribution outside this request"
+  ]
+}

@@ -49,6 +49,22 @@ using (var rangeStore = new AssetStore(Path.Combine(root, "selection-ranges")))
     await Reject(() => rangeStore.QueryAsync(new(Version: 2, SortBy: "name;DROP TABLE assets")), "unknown sort cannot enter SQL");
     await Reject(() => rangeStore.QueryAsync(new(Version: 2, Extension: "' OR 1=1")), "invalid extension rejected");
     await Reject(() => rangeStore.QueryAsync(new(Extension: "txt")), "new filter requires its explicit version");
+    await Reject(() => rangeStore.QueryAsync(new(Text: "\uD800")), "query failure inside the reader gate is propagated");
+    Check((await rangeStore.GetAsync(ordered[0]).WaitAsync(TimeSpan.FromSeconds(5)))?.Id == ordered[0], "failed query releases the reader gate for item lookup");
+    using (var cancelled = new CancellationTokenSource())
+    {
+        cancelled.Cancel();
+        try { await rangeStore.SelectionRangeAsync(new(), ordered[0], ordered[1], cancelled.Token); throw new Exception("FAILED: cancelled selection completed"); }
+        catch (OperationCanceledException) { tests++; }
+    }
+    var concurrentReads = await Task.WhenAll(Enumerable.Range(0, 12).Select(async index =>
+    {
+        var page = await rangeStore.QueryAsync(new(Offset: index % 6, Limit: 1));
+        var selected = await rangeStore.GetAsync(ordered[index % 6]);
+        var ids = await rangeStore.SelectionRangeAsync(new(), ordered[1], ordered[4]);
+        return page.Items.Single().Id == selected?.Id && ids.SequenceEqual(ordered[1..5]);
+    })).WaitAsync(TimeSpan.FromSeconds(10));
+    Check(concurrentReads.All(value => value), "query, lookup and range readers remain usable after cancellation and concurrent requests");
     var range = await rangeStore.SelectionRangeAsync(new(Offset: 4, Limit: 1), ordered[1], ordered[4]);
     Check(range.SequenceEqual(ordered[1..5]), "selection range includes both endpoints beyond the visible page");
     Check((await rangeStore.SelectionRangeAsync(new(), ordered[4], ordered[1])).SequenceEqual(range), "reverse selection uses displayed order");

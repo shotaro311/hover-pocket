@@ -37,7 +37,7 @@ internal sealed class AssetPaneController : IDisposable
     private bool _disposed;
     private AssetPreviewLayout _previewLayout = new(false);
     private Asset[]? _undo;
-    private readonly HashSet<BoundedReadStream> _resourceStreams = [];
+    private readonly AssetMediaServer _mediaServer;
     private PreparedDrag? _preparedDrag;
     private bool _dragPreparing;
     private readonly FrameworkElement? _webSurface;
@@ -108,8 +108,8 @@ internal sealed class AssetPaneController : IDisposable
             foreach (var directory in Directory.EnumerateDirectories(Path.Combine(_store.Root, "outbox"))) if (await AssetRecycle.MoveAsync(directory)) removed++;
             return new { removed };
         });
-        web.AddWebResourceRequestedFilter("https://asset-media.hoverpocket.local/*", CoreWebView2WebResourceContext.All);
-        web.WebResourceRequested += ServeMedia;
+        _mediaServer = new AssetMediaServer(store, web,
+            () => _selected is not null && _provider() == "assets" ? new(_selected, _lease) : null);
         web.ContainsFullScreenElementChanged += OnBrowserFullscreenChanged;
     }
 
@@ -140,7 +140,7 @@ internal sealed class AssetPaneController : IDisposable
     private async Task<object?> PreviewAsync(JsonElement? p)
     {
         _playback.Claim(this);
-        CloseMediaStreams();
+        _mediaServer.CloseStreams();
         _preview?.Cancel(); _preview?.Dispose(); _preview = new(); var token = _preview.Token;
         var generation = ++_generation; var id = Text(p, "id");
         var asset = await _store.GetAsync(id) ?? throw new FileNotFoundException();
@@ -186,40 +186,10 @@ internal sealed class AssetPaneController : IDisposable
     {
         _inlineEditor?.Cancel();
         _playback.Release(this);
-        CloseMediaStreams();
+        _mediaServer.CloseStreams();
         ++_generation; _preview?.Cancel(); _selected = null; _lease = null;
         _previewLayout = new(false); _layout(_previewLayout);
         if (!_disposed) _ = _bridge.PostEventAsync("assets.previewEnded", new { });
-    }
-    private async void ServeMedia(object? sender, CoreWebView2WebResourceRequestedEventArgs args)
-    {
-        using var deferral = args.GetDeferral();
-        try
-        {
-            var asset = _selected; var uri = new Uri(args.Request.Uri);
-            if (asset is null || asset.Kind != "video" || uri.AbsolutePath != $"/{_lease}/{asset.Id}" || _provider() != "assets")
-            { args.Response = _web.Environment.CreateWebResourceResponse(null, 403, "Forbidden", "Access-Control-Allow-Origin: https://app.hoverpocket.local\r\n"); return; }
-            var file = new FileStream(_store.ReadOriginalPath(asset), FileMode.Open, FileAccess.Read, FileShare.Read, 65536, true);
-            var start = 0L; var end = file.Length - 1; var ranged = false;
-            if (args.Request.Headers.Contains("Range"))
-            {
-                var range = args.Request.Headers.GetHeader("Range");
-                var parts = range.StartsWith("bytes=", StringComparison.Ordinal) ? range[6..].Split('-') : [];
-                if (parts.Length != 2 || !long.TryParse(parts[0], out start) || start < 0 || start >= file.Length
-                    || (parts[1].Length > 0 && (!long.TryParse(parts[1], out end) || end < start)))
-                { file.Dispose(); args.Response = _web.Environment.CreateWebResourceResponse(null, 416, "Range Not Satisfiable", $"Content-Range: bytes */{asset.SizeBytes}\r\n"); return; }
-                end = Math.Min(end, file.Length - 1); ranged = true;
-            }
-            file.Position = start;
-            var mime = asset.Extension switch { "webm" => "video/webm", "mov" => "video/quicktime", _ => "video/mp4" };
-            var headers = $"Access-Control-Allow-Origin: https://app.hoverpocket.local\r\nContent-Type: {mime}\r\nAccept-Ranges: bytes\r\nContent-Length: {end - start + 1}\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\n";
-            if (ranged) headers += $"Content-Range: bytes {start}-{end}/{file.Length}\r\n";
-            var stream = new BoundedReadStream(file, end - start + 1, value => { lock (_resourceStreams) _resourceStreams.Remove(value); });
-            lock (_resourceStreams) _resourceStreams.Add(stream);
-            args.Response = _web.Environment.CreateWebResourceResponse(stream, ranged ? 206 : 200, ranged ? "Partial Content" : "OK", headers);
-            await Task.CompletedTask;
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { args.Response = _web.Environment.CreateWebResourceResponse(null, 404, "Not Found", "Access-Control-Allow-Origin: https://app.hoverpocket.local\r\n"); }
     }
     private async Task<object?> PickAsync(JsonElement? p)
     {
@@ -421,31 +391,7 @@ internal sealed class AssetPaneController : IDisposable
     }
     private void OnChanged() { _preparedDrag = null; if (!_disposed) _ = _bridge.PostEventAsync("assets.changed", new { }); }
     private IDisposable PinForDialog() { _layout(_previewLayout with { Active = true, PinOnly = true }); return new DialogPin(() => { if (!_disposed) _layout(_previewLayout); }); }
-    private void CloseMediaStreams() { BoundedReadStream[] streams; lock (_resourceStreams) { streams = _resourceStreams.ToArray(); _resourceStreams.Clear(); } foreach (var stream in streams) stream.Dispose(); }
-    public void Dispose() { _disposed = true; _inlineEditor?.Cancel(); _thumbnails.Cancel(); _thumbnails.Dispose(); _playback.Release(this); _store.Changed -= OnChanged; _web.WebResourceRequested -= ServeMedia; _web.ContainsFullScreenElementChanged -= OnBrowserFullscreenChanged; _preview?.Cancel(); _preview?.Dispose(); CloseMediaStreams(); _selected = null; _lease = null; }
+    public void Dispose() { _disposed = true; _inlineEditor?.Cancel(); _thumbnails.Cancel(); _thumbnails.Dispose(); _playback.Release(this); _store.Changed -= OnChanged; _mediaServer.Dispose(); _web.ContainsFullScreenElementChanged -= OnBrowserFullscreenChanged; _preview?.Cancel(); _preview?.Dispose(); _selected = null; _lease = null; }
 }
 
 internal sealed class DialogPin(Action release) : IDisposable { public void Dispose() => release(); }
-
-internal sealed class BoundedReadStream(Stream inner, long length, Action<BoundedReadStream> completed) : Stream
-{
-    private readonly long _length = length;
-    private long remaining = length;
-    private readonly object _sync = new();
-    public override bool CanRead => true; public override bool CanSeek => false; public override bool CanWrite => false;
-    public override long Length => _length; public override long Position { get => _length - remaining; set => throw new NotSupportedException(); }
-    public override int Read(byte[] buffer, int offset, int count) => Read(buffer.AsSpan(offset, count));
-    public override int Read(Span<byte> buffer)
-    {
-        lock (_sync)
-        {
-            if (remaining == 0) return 0;
-            var read = inner.Read(buffer[..(int)Math.Min(buffer.Length, remaining)]); remaining -= read;
-            if (remaining == 0 || read == 0) { inner.Dispose(); remaining = 0; completed(this); }
-            return read;
-        }
-    }
-    protected override void Dispose(bool disposing) { if (disposing) { lock (_sync) { inner.Dispose(); remaining = 0; } completed(this); } base.Dispose(disposing); }
-    public override void Flush() => throw new NotSupportedException(); public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
-    public override void SetLength(long value) => throw new NotSupportedException(); public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
-}
