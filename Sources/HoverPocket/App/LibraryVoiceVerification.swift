@@ -183,6 +183,12 @@ enum LibraryVoiceVerification {
                 "callId": .string("bridge-search"), "tool": .string("library_search"), "arguments": .object([:])])),
             context: .init(rootThreadID: "bridge-library", clientGeneration: 1))
         try check(bridgeReply.error == nil && bridgeReply.result?.objectValue?["success"] == .bool(true), "Codex dynamic tool request executes library search through Broker")
+        let textRuntime = try OpenAIRealtimeMacOSCapabilityRuntime(context: .init(registry: registry, broker: broker),
+            library: service, inputOrigin: .text, calendarAccessGranted: { false })
+        let textReply = try StrictVoiceJSON.object(await textRuntime.execute(sessionID: "typed-library", callID: "typed-search", toolName: "library_search", argumentsJSON: "{}"))
+        let audit = try CapabilityBrokerAuditLog(rootDirectory: root).combinedData()
+        let entries = String(decoding: audit, as: UTF8.self).split(separator: "\n").compactMap { try? JSONSerialization.jsonObject(with: Data($0.utf8)) as? [String: Any] }
+        try check(succeeded(textReply) && entries.contains { $0["origin"] as? String == "text" }, "typed library requests retain text origin in Broker readback")
         let report: [String: Any] = ["checks": checks, "count": checks.count, "png": file.path, "mp4": videoURL.path,
             "scope": "isolated runtime, real ScreenCaptureKit and WKWebView; no microphone or external AI connection"]
         try JSONSerialization.data(withJSONObject: report, options: [.prettyPrinted, .sortedKeys]).write(to: root.appendingPathComponent("report.json"))

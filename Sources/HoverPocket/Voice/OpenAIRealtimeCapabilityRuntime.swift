@@ -322,6 +322,7 @@ final class OpenAIRealtimeMacOSCapabilityRuntime: OpenAIRealtimeCapabilityExecut
     private static let maximumReturnedEvents = 24
 
     let context: VoiceCapabilityContext
+    private let inputOrigin: CapabilityOrigin
     let library: LibraryVoiceService
     private let calendarAccessGranted: () -> Bool
     private let actionConfirmationEnabled: @MainActor () -> Bool
@@ -339,6 +340,7 @@ final class OpenAIRealtimeMacOSCapabilityRuntime: OpenAIRealtimeCapabilityExecut
     init(
         context: VoiceCapabilityContext,
         library: LibraryVoiceService = .shared,
+        inputOrigin: CapabilityOrigin = .voice,
         calendarAccessGranted: @escaping () -> Bool,
         actionConfirmationEnabled: @escaping @MainActor () -> Bool = { true },
         destructiveConfirmationEnabled: @escaping @MainActor () -> Bool = { true },
@@ -347,6 +349,7 @@ final class OpenAIRealtimeMacOSCapabilityRuntime: OpenAIRealtimeCapabilityExecut
         approvalHandler: ((VoiceNativeApprovalRequest) async -> Bool)? = nil
     ) throws {
         self.context = context
+        self.inputOrigin = inputOrigin
         self.library = library
         self.calendarAccessGranted = calendarAccessGranted
         self.actionConfirmationEnabled = actionConfirmationEnabled
@@ -628,7 +631,7 @@ final class OpenAIRealtimeMacOSCapabilityRuntime: OpenAIRealtimeCapabilityExecut
         let plan = CapabilityExecutionPlan(
             id: "voice.calendar.list.\(correlation.prefix(32))",
             createdAt: current,
-            origin: .voice,
+            origin: inputOrigin,
             principal: principal,
             appContext: nil,
             steps: [CapabilityPlanStep(
@@ -721,7 +724,7 @@ final class OpenAIRealtimeMacOSCapabilityRuntime: OpenAIRealtimeCapabilityExecut
         let plan = CapabilityExecutionPlan(
             id: "voice.calendar.create.\(correlation.prefix(32))",
             createdAt: current,
-            origin: .voice,
+            origin: inputOrigin,
             principal: principal,
             appContext: nil,
             steps: [CapabilityPlanStep(
@@ -817,7 +820,7 @@ final class OpenAIRealtimeMacOSCapabilityRuntime: OpenAIRealtimeCapabilityExecut
         let plan = CapabilityExecutionPlan(
             id: "voice.timer.start.\(correlation.prefix(32))",
             createdAt: current,
-            origin: .voice,
+            origin: inputOrigin,
             principal: principal,
             appContext: nil,
             steps: [CapabilityPlanStep(
@@ -1204,7 +1207,7 @@ final class OpenAIRealtimeMacOSCapabilityRuntime: OpenAIRealtimeCapabilityExecut
         let plan = CapabilityExecutionPlan(
             id: "\(planIDPrefix).\(correlation.prefix(32))",
             createdAt: current,
-            origin: .voice,
+            origin: inputOrigin,
             principal: principal,
             appContext: nil,
             steps: [CapabilityPlanStep(

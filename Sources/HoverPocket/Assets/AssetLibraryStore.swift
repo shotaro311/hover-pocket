@@ -9,6 +9,8 @@ actor AssetLibraryStore {
     private let fm = FileManager.default
     private let lockFD: Int32
     private var undo: [LibraryAsset] = []
+    private var organizeUndoToken: String?
+    private var organizeUndoAfter: [LibraryAsset] = []
     private(set) var notice: String?
 
     init(root: URL, contractRoot: URL) throws {
@@ -310,7 +312,46 @@ actor AssetLibraryStore {
                 }
             }
         }
+        undo = before; organizeUndoToken = nil
+    }
+    func organize(ids: [String], destination: String, folderId: String?, sourceFolderId: String?) throws -> String {
+        guard ["folder", "trash", "favorite", "unfiled"].contains(destination), !ids.isEmpty else {
+            throw LibraryError.message("移動先を選択してください。")
+        }
+        let target = try validFolder(folderId), source = try validFolder(sourceFolderId)
+        guard destination != "folder" || target != nil else { throw LibraryError.message("移動先のフォルダがありません。") }
+        let before = try Set(ids).map { id in
+            guard let asset = try get(id) else { throw LibraryError.message("移動する素材がありません。") }
+            return asset
+        }
+        try db.transaction {
+            for asset in before {
+                switch destination {
+                case "trash": try db.execute("UPDATE assets SET trashed=1 WHERE id=?", [asset.id])
+                case "favorite": try db.execute("UPDATE assets SET trashed=0,favorite=1 WHERE id=?", [asset.id])
+                case "unfiled":
+                    try db.execute("UPDATE assets SET trashed=0 WHERE id=?", [asset.id])
+                    try db.execute("DELETE FROM memberships WHERE asset=? AND category IN (SELECT id FROM categories WHERE type='folder')", [asset.id])
+                default:
+                    try db.execute("UPDATE assets SET trashed=0 WHERE id=?", [asset.id])
+                    if let source, source != target, !asset.trashed {
+                        try db.execute("DELETE FROM memberships WHERE asset=? AND category=?", [asset.id, source])
+                    }
+                    try db.execute("INSERT OR IGNORE INTO memberships VALUES(?,?)", [asset.id, target])
+                }
+            }
+        }
         undo = before
+        organizeUndoAfter = try before.compactMap { try get($0.id) }
+        let token = UUID().uuidString; organizeUndoToken = token
+        return token
+    }
+    func undoOrganize(token: String) throws {
+        guard organizeUndoToken == token else { throw LibraryError.message("後の操作があるため、この移動は元に戻せません。") }
+        guard try organizeUndoAfter.allSatisfy({ try get($0.id) == $0 }) else {
+            throw LibraryError.message("素材が変更されたため、この移動は元に戻せません。")
+        }
+        try undoLast()
     }
     func undoLast() throws {
         try db.transaction {
@@ -322,7 +363,7 @@ actor AssetLibraryStore {
                 }
             }
         }
-        undo = []
+        undo = []; organizeUndoToken = nil
     }
     func saveSearch(name: String, query: LibraryQuery) throws {
         try query.validate()
@@ -345,6 +386,16 @@ actor AssetLibraryStore {
             while stem.utf8.count > 180 { stem.removeLast() }
             output = directory.appendingPathComponent("asset-" + stem + (a.extension.isEmpty ? "" : "." + a.extension))
         }
+        try Self.writeCopy(asset: a, original: original, output: output)
+        return output
+    }
+    func prepareDragCopy(_ id: String) throws -> AssetDragCopy {
+        guard let asset = try get(id) else { throw LibraryError.message("素材がありません。") }
+        return AssetDragCopy(asset: asset, original: try readPath(asset), outbox: root.appendingPathComponent("outbox"))
+    }
+    nonisolated static func writeCopy(asset a: LibraryAsset, original: URL, output: URL) throws {
+        let fm = FileManager.default
+        try noLinks(original); try noLinks(output)
         try fm.copyItem(at: original, to: output)
         try fm.setAttributes([.posixPermissions: 0o600], ofItemAtPath: output.path)
         if a.internetOrigin {
@@ -354,7 +405,6 @@ actor AssetLibraryStore {
             }
         }
         guard try Self.hash(output) == a.sha256 else { throw LibraryError.message("作業コピーを検証できませんでした。") }
-        return output
     }
     func export(to destination: URL) throws -> LibraryManifest {
         try Self.noLinks(destination)

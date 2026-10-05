@@ -11,7 +11,7 @@ struct AssetWebView: NSViewRepresentable {
         let settings = "window.assetConfiguration={language:'\(language == .japanese ? "ja" : "en")',organizer:\(organizer)};"
         configuration.userContentController.addUserScript(WKUserScript(source: settings, injectionTime: .atDocumentStart, forMainFrameOnly: true))
         let web = AssetNativeWebView(frame: .zero, configuration: configuration)
-        web.registerForDraggedTypes([.fileURL])
+        web.registerForDraggedTypes(AssetIncomingDrop.types)
         pane.web = web; pane.organizer = organizer; web.pane = pane
         if organizer { AssetLibraryRuntime.shared.organizerPane = pane }
         web.navigationDelegate = pane; web.setValue(false, forKey: "drawsBackground")
@@ -30,8 +30,24 @@ struct AssetWebView: NSViewRepresentable {
 @MainActor
 final class AssetNativeWebView: WKWebView, NSDraggingSource {
     weak var pane: AssetPaneModel?
-    private var dragCompletion: CheckedContinuation<(Bool, Bool), Never>?
-    private var trashRect: NSRect?
+    private var dragCompletion: CheckedContinuation<(Bool, [String: String]?), Never>?
+    private var dropTargets: [(NSRect, [String: String])] = []
+    private var acceptedDrop: [String: String]?
+    private var legacyTrashTarget: [String: Any]?
+    func updateDropTargets(_ targets: [[String: Any]]) {
+        dropTargets = (targets + (legacyTrashTarget.map { [$0] } ?? [])).compactMap { item in
+            guard let kind = item["kind"] as? String, ["folder", "trash", "favorite", "unfiled"].contains(kind),
+                  let rect = item["bounds"] as? [String: Double], let x = rect["x"], let y = rect["y"],
+                  let width = rect["width"], let height = rect["height"],
+                  [x, y, width, height].allSatisfy({ $0.isFinite }), width > 0, height > 0 else { return nil }
+            var value = ["kind": kind]
+            if let id = item["folderId"] as? String { value["folderId"] = id }
+            let bounds = NSRect(x: x, y: isFlipped ? y : self.bounds.height - y - height, width: width, height: height)
+            return (bounds, value)
+        }
+    }
+    private func target(at point: NSPoint) -> [String: String]? { dropTargets.first { $0.0.contains(point) }?.1 }
+    private var pasteboardProviders: [AssetDragPasteboardProvider] = []
     private var mouseMonitor: Any?
     private var dragEvent: NSEvent?
     private var mouseIsDown = false
@@ -56,40 +72,52 @@ final class AssetNativeWebView: WKWebView, NSDraggingSource {
         if let mouseMonitor { NSEvent.removeMonitor(mouseMonitor) }
         mouseMonitor = nil; mouseIsDown = false; dragEvent = nil
     }
-    override func draggingEntered(_ sender: any NSDraggingInfo) -> NSDragOperation { .copy }
+    override func draggingEntered(_ sender: any NSDraggingInfo) -> NSDragOperation { draggingUpdated(sender) }
     override func draggingUpdated(_ sender: any NSDraggingInfo) -> NSDragOperation {
         if dragCompletion != nil {
-            let over = trashRect?.contains(convert(sender.draggingLocation, from: nil)) == true
-            pane?.event("assets.trashHover", ["hovered": over]); return over ? .copy : []
+            let point = convert(sender.draggingLocation, from: nil)
+            pane?.event("assets.dragMoved", ["x": point.x, "y": isFlipped ? point.y : bounds.height - point.y])
+            return target(at: point) != nil ? .copy : []
         }
-        return .copy
+        return AssetIncomingDrop.accepts(sender.draggingPasteboard) ? .copy : []
     }
     override func performDragOperation(_ sender: any NSDraggingInfo) -> Bool {
-        if dragCompletion != nil { return trashRect?.contains(convert(sender.draggingLocation, from: nil)) == true }
-        guard let urls = sender.draggingPasteboard.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL] else { return false }
-        AssetLibraryRuntime.shared.dropReceived = true
-        pane?.importURLs(urls); return !urls.isEmpty
-    }
-    func startFileDrag(_ urls: [URL], trashBounds: [String: Double]?) async -> (Bool, Bool) {
-        guard canStartFileDrag, let event = dragEvent else { return (false, false) }
-        trashRect = trashBounds.map {
-            let y = $0["y"] ?? 0, height = $0["height"] ?? 0
-            return NSRect(x: $0["x"] ?? 0, y: isFlipped ? y : bounds.height - y - height,
-                          width: $0["width"] ?? 0, height: height)
+        if dragCompletion != nil {
+            acceptedDrop = target(at: convert(sender.draggingLocation, from: nil))
+            return acceptedDrop != nil
         }
-        let items = urls.map { url in
-            let item = NSDraggingItem(pasteboardWriter: url as NSURL)
-            item.setDraggingFrame(NSRect(origin: convert(event.locationInWindow, from: nil), size: NSSize(width: 64, height: 64)), contents: NSWorkspace.shared.icon(forFile: url.path)); return item
+        return AssetIncomingDrop.receive(sender.draggingPasteboard) { [weak self] urls, error in
+            if let error { self?.pane?.event("assets.dropUnsupported", ["message": error]) }
+            guard !urls.isEmpty else { return }
+            AssetLibraryRuntime.shared.dropReceived = true
+            self?.pane?.importURLs(urls)
+        }
+    }
+    func startFileDrag(_ copies: [AssetDragCopy], trashBounds: [String: Double]?, dropTargets: [[String: Any]] = []) async -> (Bool, [String: String]?) {
+        guard canStartFileDrag, let event = dragEvent else { return (false, nil) }
+        AssetLibraryRuntime.shared.internalDrag = true
+        defer { AssetLibraryRuntime.shared.internalDrag = false }
+        acceptedDrop = nil
+        legacyTrashTarget = trashBounds.map { ["kind": "trash", "bounds": $0] }
+        updateDropTargets(dropTargets)
+        pasteboardProviders = copies.map { copy in
+            AssetDragPasteboardProvider(copy) { [weak self] message in
+                Task { @MainActor in self?.pane?.event("assets.dropUnsupported", ["message": message]) }
+            }
+        }
+        let items = pasteboardProviders.map { provider in
+            let boardItem = NSPasteboardItem(); boardItem.setDataProvider(provider, forTypes: [.fileURL])
+            let item = NSDraggingItem(pasteboardWriter: boardItem)
+            item.setDraggingFrame(NSRect(origin: convert(event.locationInWindow, from: nil), size: NSSize(width: 64, height: 64)), contents: NSWorkspace.shared.icon(forFile: provider.copy.original.path)); return item
         }
         return await withCheckedContinuation { continuation in
             dragCompletion = continuation
             beginDraggingSession(with: items, event: event, source: self)
         }
     }
-    func draggingSession(_ session: NSDraggingSession, sourceOperationMaskFor context: NSDraggingContext) -> NSDragOperation { .copy }
+    func draggingSession(_ session: NSDraggingSession, sourceOperationMaskFor context: NSDraggingContext) -> NSDragOperation { context == .withinApplication ? [.copy, .move] : .copy }
     func draggingSession(_ session: NSDraggingSession, endedAt point: NSPoint, operation: NSDragOperation) {
-        let local = window.map { convert($0.convertPoint(fromScreen: point), from: nil) } ?? .zero
-        let trash = operation != [] && trashRect?.contains(local) == true
-        dragCompletion?.resume(returning: (operation != [], trash)); dragCompletion = nil; trashRect = nil
+        dragCompletion?.resume(returning: (operation != [], operation != [] ? acceptedDrop : nil))
+        dragCompletion = nil; dropTargets = []; acceptedDrop = nil; legacyTrashTarget = nil
     }
 }

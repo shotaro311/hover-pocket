@@ -19,6 +19,7 @@ final class AssetLibraryRuntime: ObservableObject {
     var openForDrop: (() -> Void)?
     var canAcceptDrop: (() -> Bool)?
     var incomingDrag = false
+    var internalDrag = false
     var dropReceived = false
     private var organizer: NSWindow?
     weak var organizerPane: AssetPaneModel?

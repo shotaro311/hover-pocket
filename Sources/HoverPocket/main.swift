@@ -5,6 +5,17 @@ import Foundation
 _ = signal(SIGPIPE, SIG_IGN)
 _ = HoverPocketRuntimeEnvironment.shared
 
+if CommandLine.arguments.contains("--verify-chat") {
+    let app = NSApplication.shared
+    Task { @MainActor in
+        do {
+            let root = FileManager.default.temporaryDirectory.appendingPathComponent("HoverPocket-ChatVerify-" + UUID().uuidString)
+            try CodexChatController.verify(at: root); print("chat_verification=ok evidence=\(root.path)"); exit(0)
+        } catch { print("chat_verification=failed \(error)"); exit(1) }
+    }
+    app.run(); exit(1)
+}
+
 if CommandLine.arguments.contains("--verify-library-voice") {
     let app = NSApplication.shared
     Task { @MainActor in

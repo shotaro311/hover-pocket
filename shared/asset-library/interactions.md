@@ -12,3 +12,9 @@ Mac owns the shared assets UI; each OS implements its native bridge. No database
 
 - `assets.preview` may return `audioUrl` for supported audio extensions while keeping persisted `kind:other`. Video keeps `videoUrl`. The shared player never autoplays, pauses on hiding, and removes its source on preview close.
 - Windows organizer publishes `window.hpLibrary.showAsset(id) -> Promise<boolean>`; it resolves `assets.get {id}` and uses the same preview implementation as Mac `openAsset(asset)`.
+
+## 構造と互換性
+
+新しいorganize/undo/capture要求と音声preview結果のJSON構造は[interactions.schema.json](interactions.schema.json)、代表入力と不正入力は[fixtures/interactions-v1.json](fixtures/interactions-v1.json)を参照。IDは空でないopaque文字列、`sourceFolderId`の省略/nullは元フォルダ指定なし、`folderId`の省略/nullは未分類。Undo tokenはHost発行の一度だけ使える文字列。DOMとnativeの両方で実dropした宛先だけを返し、hover終了やキャンセルでは移動しない。
+
+DB版1・原本・バックアップ形式は変更しないためmigrationは不要。旧アプリへ戻しても分類/ゴミ箱状態と原本は読める。新しいbridge操作は旧Hostでは未対応エラーとなるため、画面とHostは同一成果物で配る。旧版で音声previewを開けなくても原本の取り出しは可能。

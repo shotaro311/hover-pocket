@@ -43,6 +43,9 @@ struct ProviderHeaderView: View {
                 .disabled(!appUpdater.canCheckForUpdates)
             }
 
+            Button { CodexChatController.shared.show(settings: settings) } label: { Image(systemName: "text.bubble") }
+                .buttonStyle(IconButtonStyle(selected: false)).help("Codex チャット")
+
             Button {
                 onOpenSettings()
             } label: {

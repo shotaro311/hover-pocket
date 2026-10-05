@@ -55,6 +55,8 @@ struct VoiceLaneHostView: View {
                 .foregroundStyle(.secondary)
                 .accessibilityLabel(sessionCountAccessibilityLabel)
 
+            Button { CodexChatController.shared.show(settings: settings) } label: { Image(systemName: "text.bubble") }
+                .buttonStyle(.plain).help("Codex チャット")
             muteButton
 
             Button {

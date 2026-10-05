@@ -1211,6 +1211,8 @@ final class HoverWindowController {
     private func monitorAccessWindows() {
         let assets = AssetLibraryRuntime.shared
         let dragBoard = NSPasteboard(name: .drag)
+        AssetDropOverlay.shared.track(board: dragBoard, dragging: NSEvent.pressedMouseButtons != 0 && dragBoard.changeCount != dragChangeCount,
+                                      allowed: assets.canAcceptDrop?() == true && assets.editing == nil)
         if NSEvent.pressedMouseButtons == 0 {
             dragChangeCount = dragBoard.changeCount
             if assets.incomingDrag {
@@ -1218,8 +1220,8 @@ final class HoverWindowController {
                 if !assets.dropReceived { menuStore.providerStore.restoreTemporarySelection(); closePreview() }
                 else { awaitingPointerAfterExplicitOpen = true }
             }
-        } else if !assets.incomingDrag, dragBoard.changeCount != dragChangeCount,
-                  dragBoard.types?.contains(.fileURL) == true, assets.canAcceptDrop?() == true,
+        } else if !AssetDropOverlay.shared.isPresented, !assets.incomingDrag, dragBoard.changeCount != dragChangeCount,
+                  AssetIncomingDrop.accepts(dragBoard), assets.canAcceptDrop?() == true,
                   screenSelection.access.contains(where: { panelFrames(on: $0).access.insetBy(dx: -12, dy: -6).contains(NSEvent.mouseLocation) }) {
             assets.openForDrop?()
         }
@@ -1229,7 +1231,7 @@ final class HoverWindowController {
             repairAccessWindowsIfNeeded()
         }
 
-        guard !isPanelSoakVerification, previewWindow?.isVisible != true else { return }
+        guard !isPanelSoakVerification, !AssetDropOverlay.shared.isPresented, previewWindow?.isVisible != true else { return }
 
         let mouseLocation = NSEvent.mouseLocation
         for screen in screenSelection.access {

@@ -139,6 +139,29 @@ enum AssetLibraryVerification {
             try check(try await store.importFile(file).status == "restoreAvailable", "duplicate in trash offers restore")
             try await store.undoLast()
             try check(try await store.query(LibraryQuery()).total == 1, "undo restores selection metadata")
+            let destination = try await store.category(type: "folder", name: "Move destination", parent: nil)
+            let token = try await store.organize(ids: [id], destination: "folder", folderId: destination, sourceFolderId: child)
+            let moved = try await store.get(id)!
+            try check(moved.folderIds.contains(destination) && !moved.folderIds.contains(child) && moved.tagIds.contains(tag), "drag move replaces only source folder and preserves tags")
+            try check(moved.sha256 == originalHash && (try AssetLibraryStore.hash(managed)) == originalHash, "organize preserves original bytes")
+            try await store.undoOrganize(token: token)
+            try check(try await store.get(id)!.folderIds.contains(child), "organize undo restores original folder")
+            _ = try await store.organize(ids: [id], destination: "folder", folderId: destination, sourceFolderId: nil)
+            try check(try await store.get(id)!.folderIds.count == 2, "drag from all assets adds membership")
+            try await store.update(ids: [id], operation: "trash")
+            let restoreToken = try await store.organize(ids: [id], destination: "folder", folderId: child, sourceFolderId: nil)
+            let restoredByDrop = try await store.get(id)!
+            try check(!restoredByDrop.trashed && restoredByDrop.folderIds.count == 2, "trash to folder restores and preserves other memberships")
+            try await store.undoOrganize(token: restoreToken)
+            try check(try await store.get(id)!.trashed == true, "undo returns restored asset to trash")
+            _ = try await store.organize(ids: [id], destination: "unfiled", folderId: nil, sourceFolderId: nil)
+            let unfiledByDrop = try await store.get(id)!
+            try check(unfiledByDrop.folderIds.isEmpty && unfiledByDrop.tagIds.contains(tag), "unfiled removes folders but retains tags")
+            do { _ = try await store.organize(ids: [id, "missing-asset"], destination: "trash", folderId: nil, sourceFolderId: nil); throw LibraryError.message("partial organize accepted") }
+            catch { let afterFailure = try await store.get(id)!; try check(error.localizedDescription != "partial organize accepted" && !afterFailure.trashed, "missing ID rejects entire batch") }
+            _ = try await store.organize(ids: [id], destination: "folder", folderId: child, sourceFolderId: nil)
+            do { try await store.undoOrganize(token: restoreToken); throw LibraryError.message("stale organize undo accepted") }
+            catch { try check(error.localizedDescription != "stale organize undo accepted", "old undo token cannot undo a later operation") }
             try await store.update(ids: [id], operation: "favorite")
             var query = LibraryQuery(); query.text = "half"
             try check(try await store.query(query).total == 1, "tag normalized search")
@@ -150,6 +173,21 @@ enum AssetLibraryVerification {
             catch { try check(error.localizedDescription != "accepted invalid v1", "v1 refuses v2 search semantics") }
             do { try await store.changeCategory(id: folder, operation: "move", name: nil, parent: child); throw LibraryError.message("accepted cycle") }
             catch { try check(error.localizedDescription != "accepted cycle", "category cycle rejected") }
+            let outbox = store.root.appendingPathComponent("outbox")
+            let countBefore = try FileManager.default.contentsOfDirectory(atPath: outbox.path).count
+            let prepared = try await store.prepareDragCopy(id)
+            try check(try FileManager.default.contentsOfDirectory(atPath: outbox.path).count == countBefore, "internal drag preparation creates no external copy")
+            let lazyCopy = try prepared.materialize()
+            try check(try AssetLibraryStore.hash(lazyCopy) == originalHash, "external drag lazily writes a verified working copy")
+            let board = NSPasteboard.withUniqueName(); defer { board.releaseGlobally() }
+            board.writeObjects([file as NSURL])
+            var received: [URL] = []
+            try check(AssetIncomingDrop.receive(board) { urls, _ in received = urls } && received == [file], "native file drop preserves source URLs")
+            AssetLibraryRuntime.shared.internalDrag = true
+            try check(!AssetIncomingDrop.accepts(board), "external overlay ignores internal library drags")
+            AssetLibraryRuntime.shared.internalDrag = false
+            board.clearContents(); board.setString("ordinary text", forType: .string)
+            try check(!AssetIncomingDrop.accepts(board), "ordinary text drag does not open import overlay")
             let copy = try await store.copyOut(id)
             try Data("External editor changes".utf8).write(to: copy)
             try check(try AssetLibraryStore.hash(managed) == originalHash, "external working copy cannot alter original")

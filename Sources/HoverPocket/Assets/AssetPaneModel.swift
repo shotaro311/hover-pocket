@@ -16,7 +16,6 @@ final class AssetPaneModel: NSObject, ObservableObject, WKScriptMessageHandlerWi
     private var cancellables = Set<AnyCancellable>()
     private var importTask: Task<Void, Never>?
     private var importProgress: [String: Any] = [:]
-    private var dragCopies: [String: URL] = [:]
     private let runtime = AssetLibraryRuntime.shared
 
     override init() {
@@ -122,19 +121,30 @@ final class AssetPaneModel: NSObject, ObservableObject, WKScriptMessageHandlerWi
         if method == "assets.cancelImport" { importTask?.cancel(); return ["ok": true] }
         if method == "assets.capture" {
             let kind = p["kind"] as? String ?? "screenshot"
-            if kind == "recording" { await AssetCaptureController.shared.toggleRecording(folder: p["folderId"] as? String) }
+            if ["cameraPhoto", "cameraVideo", "audio"].contains(kind) { AssetDeviceCapture.shared.show(kind: kind, folder: p["folderId"] as? String) }
+            else if kind == "recording" { await AssetCaptureController.shared.toggleRecording(folder: p["folderId"] as? String) }
             else { await AssetCaptureController.shared.screenshot(folder: p["folderId"] as? String) }
             return ["ok": true]
         }
         let store = try await runtime.store()
         switch method {
+        case "assets.dragTargets": web?.updateDropTargets(p["dropTargets"] as? [[String: Any]] ?? []); return ["ok": true]
         case "assets.status": return ["warning": await store.notice ?? ""]
         case "assets.query": return try json(await store.query(decode(p, as: LibraryQuery.self)))
         case "assets.matches": return try ["matches": await store.matches(text(p, "id"), query: decode(p["query"] ?? [:], as: LibraryQuery.self))]
         case "assets.selectionRange": return try ["ids": await store.range(decode(p["query"] ?? [:], as: LibraryQuery.self), anchor: text(p, "anchorId"), target: text(p, "targetId"))]
         case "assets.update":
-            try await store.update(ids: p["ids"] as? [String] ?? [], operation: text(p, "operation"), value: p["value"] as? String)
-            dragCopies.removeAll(); runtime.notifyChange(); return ["ok": true]
+            if p["operation"] as? String == "organize" {
+                guard let destination = p["destination"] as? [String: Any] else { throw LibraryError.message("移動先がありません。") }
+                let token = try await store.organize(ids: p["ids"] as? [String] ?? [], destination: text(destination, "kind"),
+                    folderId: destination["folderId"] as? String, sourceFolderId: p["sourceFolderId"] as? String)
+                runtime.notifyChange(); return ["ok": true, "undoToken": token]
+            } else if p["operation"] as? String == "undoOrganize" {
+                try await store.undoOrganize(token: text(p, "undoToken"))
+            } else {
+                try await store.update(ids: p["ids"] as? [String] ?? [], operation: text(p, "operation"), value: p["value"] as? String)
+            }
+            runtime.notifyChange(); return ["ok": true]
         case "assets.undo": try await store.undoLast(); runtime.notifyChange(); return ["ok": true]
         case "assets.category":
             let id = try await store.category(type: text(p, "type"), name: text(p, "name"), parent: p["parentId"] as? String)
@@ -154,6 +164,7 @@ final class AssetPaneModel: NSObject, ObservableObject, WKScriptMessageHandlerWi
                 guard current == revision, active else { return ["cancelled": true] }
                 mediaScheme.revoke()
                 if a.kind == "video" { frame.videoUrl = mediaScheme.lease(url) }
+                else if AssetMedia.audioExtensions.contains(a.extension) { frame.audioUrl = mediaScheme.lease(url); frame.width = 500; frame.height = 120 }
                 mediaSize = CGSize(width: max(1, frame.width), height: max(1, frame.height))
             }
             return try json(frame)
@@ -183,21 +194,11 @@ final class AssetPaneModel: NSObject, ObservableObject, WKScriptMessageHandlerWi
                     _ = try await store.copyOut(id, destination: url); return ["ok": true]
                 }
                 if mode == "drag" {
-                    for id in ids {
-                        if let copy = dragCopies[id], let asset = try await store.get(id) {
-                            _ = try await store.readPath(asset)
-                            if (try? AssetLibraryStore.hash(copy)) != asset.sha256 { dragCopies[id] = nil }
-                        }
-                    }
-                    if !ids.allSatisfy({ dragCopies[$0] != nil }) {
-                        event("assets.dragPreparing")
-                        for id in ids { dragCopies[id] = try await store.copyOut(id) }
-                    }
-                    guard let web, web.canStartFileDrag else { event("assets.dragReady"); return ["ok": false] }
-                    let urls = ids.compactMap { dragCopies[$0] }
-                    let result = await web.startFileDrag(urls, trashBounds: p["trashBounds"] as? [String: Double])
-                    if result.0 { for id in ids { dragCopies[id] = nil } }
-                    return ["ok": result.0, "droppedInTrash": result.1]
+                    var copies: [AssetDragCopy] = []
+                    for id in ids { copies.append(try await store.prepareDragCopy(id)) }
+                    guard let web, web.canStartFileDrag else { return ["ok": false] }
+                    let result = await web.startFileDrag(copies, trashBounds: p["trashBounds"] as? [String: Double], dropTargets: p["dropTargets"] as? [[String: Any]] ?? [])
+                    return ["ok": result.0, "droppedInTrash": result.1?["kind"] == "trash", "dropTarget": result.1 as Any? ?? NSNull()]
                 }
                 var urls: [URL] = []
                 for id in ids { urls.append(try await store.copyOut(id)) }
@@ -252,13 +253,13 @@ final class AssetPaneModel: NSObject, ObservableObject, WKScriptMessageHandlerWi
                 let outbox = store.root.appendingPathComponent("outbox")
                 let copies = try FileManager.default.contentsOfDirectory(at: outbox, includingPropertiesForKeys: nil)
                 for copy in copies { try FileManager.default.trashItem(at: copy, resultingItemURL: nil) }
-                dragCopies.removeAll(); return ["removed": copies.count]
+                return ["removed": copies.count]
             }
         default: throw LibraryError.message("この操作は対応していません: " + method)
         }
     }
-    func importURLs(_ urls: [URL]) {
-        guard importTask == nil else { return }
+    func importURLs(_ urls: [URL], folderId: String? = nil, completion: ((String) -> Void)? = nil) {
+        guard importTask == nil else { completion?("取り込み中です。完了後にもう一度ドロップしてください。"); return }
         importTask = Task { @MainActor in
             var completed = 0, failed = 0, duplicates = 0, skipped = 0, restore: [String] = [], lastError = ""
             @MainActor func report(_ busy: Bool) {
@@ -273,7 +274,7 @@ final class AssetPaneModel: NSObject, ObservableObject, WKScriptMessageHandlerWi
                     runtime.holdCount += 1
                     let accepted = confirm("\(estimate.count)件（\(ByteCountFormatter.string(fromByteCount: estimate.bytes, countStyle: .file))）を取り込みます。")
                     runtime.holdCount -= 1
-                    if !accepted { report(false); importTask = nil; return }
+                    if !accepted { report(false); importTask = nil; completion?("取り消しました。"); return }
                 }
                 let store = try await runtime.store()
                 var visited = 0
@@ -298,13 +299,14 @@ final class AssetPaneModel: NSObject, ObservableObject, WKScriptMessageHandlerWi
                     }
                 }
                 for url in urls {
-                    do { try await visit(url, folder: nil) }
+                    do { try await visit(url, folder: folderId) }
                     catch is CancellationError { break }
                     catch { failed += 1; lastError = error.localizedDescription }
                 }
             } catch { failed += 1; lastError = error.localizedDescription }
             report(false); if !restore.isEmpty { event("assets.restoreAvailable", ["ids": restore]) }
             runtime.notifyChange(); importTask = nil
+            completion?(failed > 0 ? "\(failed)件の取り込みに失敗: \(lastError)" : restore.isEmpty ? "\(completed)件を保存・\(duplicates)件は登録済み" : "ゴミ箱に同じ素材があります。ライブラリから復元してください。")
         }
     }
     private func consumeDrop() {

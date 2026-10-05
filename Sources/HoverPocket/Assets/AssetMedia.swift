@@ -13,10 +13,12 @@ struct LibraryFrame: Codable, Sendable {
     var pages: Int = 0
     var dataUrl: String? = nil
     var videoUrl: String? = nil
+    var audioUrl: String? = nil
     var error: String? = nil
 }
 
 enum AssetMedia {
+    static let audioExtensions: Set<String> = ["m4a", "mp3", "aac", "wav", "aiff", "aif", "flac", "ogg"]
     static func image(_ url: URL, maximum: Int = 4096) throws -> CGImage {
         guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
               let props = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
