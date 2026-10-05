@@ -37,6 +37,16 @@ Macの開発ビルド662、Bundle ID `local.codex.hover-pocket.asset-dev`、Keyc
 
 今回の整理で、前回未受入だった外部への実ドロップ、通知の全操作、長時間収録、権限拒否、複数画面、両OS実機往復を受入済みにしない。アニメーション検査の複数画面部分も単一画面のためskip。注入したノッチfixtureを実ノッチ端末の受入としない。
 
-Windows側は独立してコード・検証・コミット・プッシュを担当する。各OSのブランチをレビューしてから統合する。mainの更新、公開リリース、更新feed、本番アプリの置換は今回行わない。
+Windows側は独立してコード・検証・コミット・プッシュを担当した。各OSのブランチをレビューしてから統合する。mainの更新、公開リリース、更新feed、本番アプリの置換は今回行っていない。
+
+## コミット・プッシュと両OSの確認
+
+- Mac: 土台 `7931f8e`、今回の整理 `57e097d30e54ea46b6f68853aa604b49a04b16c0`。`codex/macos-asset-library-0210` へpushし、`git ls-remote` のSHA一致、作業ツリーclean、[Draft PR #44](https://github.com/shotaro311/hover-pocket/pull/44)のhead一致を確認した。
+- Windows: Windows Codexが専用worktreeで実施。コード `2c65c4eede167540b1d9d58e484b5fcf75bf9b0f`、送信確認の文書 `3e7ba7c95e5c9975f7c2235d285f1820a1c815d4`。`codex/windows-refactor-20261005` へpushし、Mac側からもremote SHA一致を確認してfetchした。[Draft PR #45](https://github.com/shotaro311/hover-pocket/pull/45)。
+- Windows側の13ファイル差分はWindowsコード・Windows専用の日別ログと検証結果のみ。Macのコード、共通UI、同期契約、共有progressは変更されていない。取得した差分の `git diff --check` も通過した。
+- Windowsの保存97項目、選択操作45項目、Debug/Release警告0・エラー0、実機exit 0を[Windowsの記録](https://github.com/shotaro311/hover-pocket/blob/3e7ba7c95e5c9975f7c2235d285f1820a1c815d4/progress/2026-10/2026-10-05_hover-pocket-windows-refactor.md)と検証JSON・ログで確認した。動画バイト数/SHA、部分配信、416、旧URL/終了後URLの拒否も記録されている。Windows実機検査はWindows Codexが実行したもので、Macでの再実行ではない。
+- Windowsの暗号化PDFと複数モニターは未検証。元dirtyと音声開発版プロセスの保持はWindows Codexのreadback報告で確認。Mac検証用プロセスは終了済み。
+
+以上の送信確認はコード変更後の文書コミットとして追加保存する。PRのCIは別途状態を確認し、ローカルの検証済み結果と区別して報告する。
 
 [実施計画](../../docs/plan/20261005_MAC_WINDOWS_REFACTOR.md) / [素材機能の実装記録](2026-10-05_hover-pocket-mac-assets.md)
