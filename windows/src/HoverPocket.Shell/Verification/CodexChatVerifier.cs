@@ -9,27 +9,7 @@ namespace HoverPocket.Shell.Verification;
 
 internal static class CodexChatVerifier
 {
-    public static async Task<int> RunPanelAsync(HoverShellController controller)
-    {
-        CodexChatWindow? window = null;
-        try
-        {
-            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(12));
-            var token = timeout.Token;
-            var web = controller.Panel.WebView!.CoreWebView2;
-            var found = await web.ExecuteScriptAsync("(()=>{const b=document.querySelector('[data-chat]'); if(!b || !b.title) return false; b.click(); return true;})()");
-            Check(found == "true", "panel exposes labelled independent chat entry");
-            await Until(() => System.Windows.Application.Current.Windows.OfType<CodexChatWindow>().Any(), token);
-            window = System.Windows.Application.Current.Windows.OfType<CodexChatWindow>().Single();
-            window.DraftForVerify.Text = "送信前の下書き";
-            Check(window.IsVisible && window.SendForVerify.IsEnabled && !window.DictationForVerify.IsEnabled, "real panel bridge opens native composer");
-            window.Close(); await Until(() => window.ClosedForVerify, token);
-            VerifyConsole.WriteLine("PASS chat-panel: real WebView entry -> bridge -> native composer -> editable unsent draft -> closed");
-            return 0;
-        }
-        catch (Exception exception) { VerifyConsole.WriteLine("FAIL chat-panel: " + exception.GetType().Name); return 1; }
-        finally { if (window is { ClosedForVerify: false }) window.Close(); }
-    }
+    public static Task<int> RunPanelAsync(HoverShellController controller) => InlineChatPanelVerifier.RunAsync(controller);
 
     public static async Task<int> RunAsync()
     {
@@ -99,21 +79,22 @@ internal static class CodexChatVerifier
                 await pending.StopAsync(); await task;
                 Check(!pending.Snapshot.Busy && pending.Snapshot.ErrorCode == "chat_stopped" && pending.Snapshot.Messages.Count == 0, "stop during connection sends no turn");
             }
-            var window = new CodexChatWindow(chat, false, _ => Task.CompletedTask) { Left = -20000, Top = -20000, WindowStartupLocation = System.Windows.WindowStartupLocation.Manual, ShowActivated = false, ShowInTaskbar = false };
-            window.Show();
-            window.DraftForVerify.Text = "未送信の下書き";
-            await Task.Delay(120, token);
-            Check(harnesses.Count == 2 && window.SendForVerify.IsEnabled && !window.DictationForVerify.IsEnabled, "native composer drafts without starting AI or microphone");
-            if (Environment.GetEnvironmentVariable("HOVERPOCKET_CHAT_EVIDENCE") is { Length: > 0 } evidence)
+            await using (var inline = new InlineChatController(chat, _ => Task.CompletedTask))
             {
-                Directory.CreateDirectory(evidence); window.UpdateLayout();
-                var bitmap = new System.Windows.Media.Imaging.RenderTargetBitmap((int)window.ActualWidth, (int)window.ActualHeight, 96, 96, System.Windows.Media.PixelFormats.Pbgra32);
-                bitmap.Render(window);
-                var encoder = new System.Windows.Media.Imaging.PngBitmapEncoder(); encoder.Frames.Add(System.Windows.Media.Imaging.BitmapFrame.Create(bitmap));
-                using var stream = File.Create(Path.Combine(evidence, "chat-composer.png")); encoder.Save(stream);
+                inline.SetDraft("未送信の下書き");
+                inline.Focused = true;
+                Check(harnesses.Count == 2 && inline.Draft == "未送信の下書き" && inline.KeepOpen, "inline draft pins panel without starting AI or microphone");
+                inline.Focused = false;
+                Check(!inline.KeepOpen && inline.Draft == "未送信の下書き", "manual hide preserves draft without keeping panel open");
             }
-            window.Close(); await Until(() => window.ClosedForVerify, token);
-            VerifyConsole.WriteLine("PASS chat verify: explicit send, stream/final, owned history, cancellation, root/turn fences, late-tool denial, native draft/no microphone, close cleanup");
+            await using (var failed = new InlineChatController(new CodexChatCoordinator(_ => Task.FromException<CodexAppServerClient>(new IOException("generated connection failure")),
+                tools, new CodexChatHistory(Path.Combine(root, "failed"))), _ => Task.CompletedTask))
+            {
+                failed.Send("接続できなかった下書き"); await failed.OperationForVerify;
+                Check(!failed.Busy && failed.Draft == "接続できなかった下書き" && failed.Snapshot.Messages.Count == 0 && failed.Snapshot.ErrorCode is not null,
+                    "failed connection restores the unsent draft without a phantom user message");
+            }
+            VerifyConsole.WriteLine("PASS chat verify: explicit send, stream/final, owned history, cancellation, root/turn fences, late-tool denial, inline draft and cleanup");
             return 0;
         }
         catch (Exception exception) { VerifyConsole.WriteLine("FAIL chat verify: " + exception.GetType().Name + " " + exception.Message); return 1; }
@@ -124,7 +105,7 @@ internal static class CodexChatVerifier
     private static async Task Until(Func<bool> ready, CancellationToken token)
     { while (!ready()) await Task.Delay(10, token); }
 
-    private sealed class TestTools : ICodexVoiceDynamicToolRuntime
+    internal sealed class TestTools : ICodexVoiceDynamicToolRuntime
     {
         public int Calls; public bool Cancelled;
         public JsonElement Definitions => JsonSerializer.SerializeToElement(new[] { new { type = "function", name = "library_search", description = "Search", inputSchema = new { type = "object", properties = new { } } } });

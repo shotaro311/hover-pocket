@@ -64,19 +64,12 @@ internal sealed class HoverShellController : IDisposable
     private AssetOrganizerWindow? _assetOrganizer;
     private AssetDropOverlayWindow? _assetDropOverlay;
     internal AssetDropOverlayWindow? DropOverlayForVerify => _assetDropOverlay;
-    private CodexChatWindow? _chatWindow;
-    private Task OpenChatAsync()
+    private async Task OpenChatAsync()
     {
-        if (_chatWindow is null)
-        {
-            _chatWindow = new CodexChatWindow(_panelBridgeController.CreateChatCoordinator(),
-                _panelBridgeController.CurrentSettings.Language == AppLanguage.English, _panelBridgeController.LoginChatAsync);
-            _chatWindow.Closed += (_, _) => _chatWindow = null;
-            _chatWindow.Show();
-        }
-        _chatWindow.Activate();
-        return Task.CompletedTask;
+        await ShowPanelAsync(ResolveLayoutForPointer());
+        _panel.BeginKeyboardInteraction();
     }
+    private void OnChatLayoutChanged() => _dispatcher.BeginInvoke(() => ResyncDisplayLayout(animateVisiblePanel: true));
     private bool _assetDragActive;
     private int _assetDragRevision;
     private async void OnAssetDragChanged(bool active)
@@ -168,7 +161,8 @@ internal sealed class HoverShellController : IDisposable
             isolatedVoiceE2EDefaults: isolatedVoiceE2EDefaults);
         _panelBridgeController.SettingsChanged += OnPanelSettingsChanged;
         _panelBridgeController.ChatRequested = OpenChatAsync;
-        _panelBridgeController.ChatApprovalOwner = () => _chatWindow;
+        _panelBridgeController.ChatApprovalOwner = () => _panel;
+        _panelBridgeController.ChatLayoutChanged += OnChatLayoutChanged;
         _panelBridgeController.SettingsOpenRequested += OnSettingsOpenRequested;
         _panelBridgeController.TimerAlertFired += OnTimerAlertFired;
         _panelBridgeController.TimerAlertChanged += OnTimerAlertChanged;
@@ -348,7 +342,7 @@ internal sealed class HoverShellController : IDisposable
         _panel.Win32MessageReceived -= OnWindowWin32MessageReceived;
         _assetOrganizer?.Close();
         _assetDropOverlay?.Close();
-        _chatWindow?.Close();
+        _panelBridgeController.ChatLayoutChanged -= OnChatLayoutChanged;
         _panelBridgeController.SettingsChanged -= OnPanelSettingsChanged;
         _panelBridgeController.SettingsOpenRequested -= OnSettingsOpenRequested;
         _panelBridgeController.TimerAlertFired -= OnTimerAlertFired;
@@ -501,8 +495,9 @@ internal sealed class HoverShellController : IDisposable
         _settingsWindow.Activate();
     }
 
-    private bool KeepPanelForVoice => _panelBridgeController.VoiceSnapshot.RealtimeAttached
-        || _panel.OwnedWindows.OfType<Window>().Any(window => window.IsVisible);
+    private bool KeepPanelForVoice => _panel.IsVisible && (_panelBridgeController.VoiceSnapshot.RealtimeAttached
+        || _panelBridgeController.KeepPanelForChat
+        || _panel.OwnedWindows.OfType<Window>().Any(window => window.IsVisible));
     private void PollPointer()
     {
         if (_captureSuppressed || _assetDropOverlay?.IsVisible == true) return;
@@ -632,14 +627,22 @@ internal sealed class HoverShellController : IDisposable
             var left = Math.Clamp(normal.Left + (normal.Width - width) / 2, monitor.WorkArea.Left / monitor.ScaleX, monitor.WorkArea.Right / monitor.ScaleX - width);
             return new WindowPlacement(new System.Windows.Rect(left, normal.Top, width, height), new PhysicalRect((int)Math.Round(left * monitor.ScaleX), layout.PanelTarget.PhysicalRect.Top, (int)Math.Round(width * monitor.ScaleX), (int)Math.Round(height * monitor.ScaleY)));
         }
+        var baseTarget = layout.PanelTarget;
+        var chatHeight = _panelBridgeController.ChatHeight;
+        var withChat = new WindowPlacement(
+            new Rect(baseTarget.DipRect.Left, baseTarget.DipRect.Top, baseTarget.DipRect.Width, baseTarget.DipRect.Height + chatHeight),
+            new PhysicalRect(baseTarget.PhysicalRect.Left, baseTarget.PhysicalRect.Top, baseTarget.PhysicalRect.Width, baseTarget.PhysicalRect.Height + (int)Math.Round(chatHeight * layout.Monitor.ScaleY)));
         var target = VoicePanelGeometry.ExtendDownward(
-            layout.PanelTarget,
+            withChat,
             layout.Monitor,
             _panelBridgeController.CurrentSettings.PanelSize,
             _panelBridgeController.PreferredRuntimeVoiceLaneMode,
             out var resolvedMode);
         _panelBridgeController.SetResolvedVoiceLaneMode(resolvedMode);
-        return target;
+        var availableHeight = Math.Max(1, layout.Monitor.WorkArea.Bottom - target.PhysicalRect.Top);
+        if (target.PhysicalRect.Height <= availableHeight) return target;
+        return new WindowPlacement(new Rect(target.DipRect.Left, target.DipRect.Top, target.DipRect.Width, availableHeight / layout.Monitor.ScaleY),
+            new PhysicalRect(target.PhysicalRect.Left, target.PhysicalRect.Top, target.PhysicalRect.Width, availableHeight));
     }
 
     private static bool IsInsideInflatedPlacement(

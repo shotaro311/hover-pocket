@@ -1,4 +1,5 @@
 import { on, request } from "./bridge.js";
+import { createInlineChat } from "./inline-chat.js";
 import { renderAssetsProvider } from "../providers/assets/assets.js";
 import { labelForSize, setLanguage, t } from "./i18n.js";
 import { renderCalculatorProvider, runCalculatorUiVerify } from "../providers/calculator/calculator.js";
@@ -23,6 +24,9 @@ const providerRenderers = {
 const titleEl = document.querySelector("[data-provider-title]");
 const providerContainerEl = document.querySelector("[data-provider-container]");
 const voiceLaneEl = document.querySelector("[data-voice-lane]");
+const voiceContentEl = document.createElement("div"); voiceContentEl.className = "hp-voice-content";
+voiceLaneEl.append(voiceContentEl);
+const inlineChat = createInlineChat({ container: voiceLaneEl, request, on });
 const providerIconsEl = document.querySelector("[data-provider-icons]");
 const sizeSwitchEl = document.querySelector("[data-size-switch]");
 const refreshButtonEl = document.querySelector("[data-refresh]");
@@ -99,12 +103,13 @@ async function renderNow(state, options = {}) {
   currentState = state;
   document.documentElement.style.setProperty("--hp-header-height", `${state.panel.headerHeight}px`);
   document.documentElement.style.setProperty("--hp-voice-height", `${state.panel.voiceLaneHeight ?? 0}px`);
+  document.documentElement.style.setProperty("--hp-chat-height", `${state.panel.chatHeight ?? 82}px`);
   document.documentElement.dataset.textSize = state.settings.textSize;
   document.documentElement.dataset.panelAttachment = state.settings.effectivePanelAttachmentStyle;
   document.documentElement.dataset.panelSize = state.settings.panelSize;
   setLanguage(state.settings.language);
   if (chatButtonEl) {
-    const label = state.settings.language === "en" ? "Open chat" : "チャットを開く";
+    const label = state.settings.language === "en" ? "Write a message" : "メッセージを入力";
     if (!chatButtonEl.firstElementChild) chatButtonEl.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke-width="1.8"><path d="M5 4h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H9l-5 3v-3a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z"/><path d="M7 9h10M7 13h7"/></svg>';
     chatButtonEl.title = label;
     chatButtonEl.setAttribute("aria-label", label);
@@ -116,6 +121,7 @@ async function renderNow(state, options = {}) {
   renderProviderIcons(state);
   renderProvider(state, options, providerWillRemount);
   renderVoiceLane(state);
+  inlineChat.updateLanguage(state.settings.language);
   renderCommands();
   return true;
 }
@@ -477,13 +483,14 @@ function providerRenderKey(state) {
 }
 
 function renderVoiceLane(state) {
-  voiceLaneEl.replaceChildren();
+  voiceContentEl.replaceChildren();
   voiceLaneEl.setAttribute("aria-label", t("voiceRegionLabel"));
   const lane = state.voiceLane;
   const mode = lane?.mode ?? "disabled";
-  voiceLaneEl.hidden = mode === "disabled";
+  voiceLaneEl.hidden = false;
+  voiceContentEl.hidden = mode === "disabled";
   voiceLaneEl.dataset.mode = mode;
-  if (voiceLaneEl.hidden) {
+  if (voiceContentEl.hidden) {
     cancelLocalVoiceTransport();
     return;
   }
@@ -507,10 +514,12 @@ function createVoiceMicrophoneButton(lane) {
   return microphone;
 }
 
-function createVoiceWaveform() {
-  const waveform = document.createElement("div");
-  waveform.className = "hp-voice-waveform";
-  waveform.setAttribute("aria-hidden", "true");
+function createVoiceWaveform(lane) {
+  const active = Boolean(lane.realtimeAttached || voiceTransport || voiceTransportStarting);
+  const waveform = voiceButton(active ? t("voiceEndSession") : t("voiceStartMicrophone"), "",
+    () => { void (active ? endVoiceRealtime() : startVoiceRealtime()); });
+  waveform.classList.add("hp-voice-waveform");
+  waveform.disabled = (!active && lane.availability !== "ready") || lane.sessionStatus === "stopping";
   for (const height of [6, 12, 18, 10, 14]) {
     const bar = document.createElement("span");
     bar.style.height = `${height}px`;
@@ -566,7 +575,7 @@ function renderCompactVoiceLane(lane) {
   root.className = "hp-voice-compact";
 
   const microphone = createVoiceMicrophoneButton(lane);
-  const waveform = createVoiceWaveform();
+  const waveform = createVoiceWaveform(lane);
 
   const conversation = document.createElement("div");
   conversation.className = "hp-voice-conversation";
@@ -605,7 +614,7 @@ function renderCompactVoiceLane(lane) {
     root.append(physicalConfirmation);
   }
   root.append(expand, end);
-  voiceLaneEl.append(root);
+  voiceContentEl.append(root);
 }
 
 function renderExpandedVoiceLane(lane) {
@@ -618,7 +627,7 @@ function renderExpandedVoiceLane(lane) {
   status.className = "hp-voice-status";
   status.textContent = voiceStatusText(lane);
   const microphone = createVoiceMicrophoneButton(lane);
-  const waveform = createVoiceWaveform();
+  const waveform = createVoiceWaveform(lane);
   const spacer = document.createElement("span");
   spacer.className = "hp-voice-spacer";
   const count = document.createElement("span");
@@ -705,7 +714,7 @@ function renderExpandedVoiceLane(lane) {
 
   grid.append(transcript, cards);
   root.append(toolbar, grid);
-  voiceLaneEl.append(root);
+  voiceContentEl.append(root);
 }
 
 async function startVoiceRealtime(dependencies = {}) {
@@ -1745,7 +1754,7 @@ window.__hoverPocketVerify = {
     const legacyAiLaneNotMountedOk = document.querySelector(".hp-ai-lane") === null
       && !document.body.textContent.includes("Codex Voice");
     const voiceDefaultOffOk = state.settings.voiceEnabled === false
-      && voiceLaneEl.hidden
+      && voiceContentEl.hidden && !voiceLaneEl.hidden && !!voiceLaneEl.querySelector('[data-chat-draft]')
       && Number(state.panel.voiceLaneHeight ?? 0) === 0;
     const voiceWebRtcHarnessOk = await verifyVoiceTransportHarness();
     const voiceFixture = {
@@ -1773,8 +1782,10 @@ window.__hoverPocketVerify = {
       voiceLane: { ...voiceFixture, mode: "compact", sessionStatus: "stopping" },
     });
     const voiceTeardownVisibleOk = !voiceLaneEl.hidden
+      && !voiceContentEl.hidden
       && voiceLaneEl.dataset.mode === "compact"
-      && voiceLaneEl.querySelector(".hp-voice-compact") !== null;
+      && voiceLaneEl.querySelector(".hp-voice-compact") !== null
+      && voiceLaneEl.querySelector("button.hp-voice-waveform")?.disabled === true;
     setLanguage("ja");
     renderVoiceLane({
       settings: { voiceEnabled: true },
@@ -1785,6 +1796,7 @@ window.__hoverPocketVerify = {
       && voiceLaneEl.querySelector(".hp-voice-preview")?.textContent === "マイクを押すと音声会話を開始します。"
       && voiceLaneEl.querySelector(".hp-voice-microphone")?.getAttribute("aria-label") === "マイクを開始"
       && voiceLaneEl.querySelector(".hp-voice-microphone")?.disabled === false
+      && voiceLaneEl.querySelector("button.hp-voice-waveform")?.disabled === false
       && voiceLaneEl.querySelector(".hp-voice-session-count")?.getAttribute("aria-label") === "セッション 1件";
     renderVoiceLane({
       settings: { voiceEnabled: true },
@@ -1808,6 +1820,7 @@ window.__hoverPocketVerify = {
       && voiceLaneEl.querySelector(".hp-voice-preview")?.textContent === "Press the microphone to start a Voice conversation."
       && voiceLaneEl.querySelector(".hp-voice-microphone")?.getAttribute("aria-label") === "Start microphone"
       && voiceLaneEl.querySelector(".hp-voice-microphone")?.disabled === false
+      && voiceLaneEl.querySelector("button.hp-voice-waveform")?.disabled === false
       && voiceLaneEl.querySelector(".hp-voice-session-count")?.getAttribute("aria-label") === "1 sessions";
     renderVoiceLane({
       settings: { voiceEnabled: true },

@@ -127,6 +127,7 @@ internal sealed class PanelWindow : NoActivateWindow
         var metrics = PanelSizeCatalog.Get(_bridgeController.CurrentSettings.PanelSize);
         Width = metrics.Width;
         Height = metrics.TotalHeight
+            + _bridgeController.ChatHeight
             + VoicePanelGeometry.Height(_bridgeController.CurrentSettings.PanelSize, _bridgeController.ResolvedVoiceLaneMode);
         _contentHost.Width = Width;
         _contentHost.Height = Height;
@@ -1001,7 +1002,7 @@ internal sealed class PanelWindow : NoActivateWindow
         webView.CoreWebView2.PostWebMessageAsJson(json);
     }
 
-    private object BeginKeyboardInteraction()
+    internal object BeginKeyboardInteraction()
     {
         var activated = SetActivationEnabled(true);
         _ = _webView?.Focus();
