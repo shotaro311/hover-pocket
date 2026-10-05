@@ -166,10 +166,9 @@ enum LiquidPanelGeometry {
         let preserveTop = attachment.contentTop
             + (attachment.preservedNeckTop - attachment.contentTop) * connectionReveal
         let drawTop = preserveTop * (1 - blend)
-        // Inset the buried anchor; a compact curve replaces the former rectangular neck.
-        let preserveNeck = attachment.notchWidth > 0
-            ? min(neckWidth, max(0, attachment.notchWidth - 4)) : neckWidth
-        let expandedNeck = preserveNeck + (width - preserveNeck) * blend
+        // Align the meniscus with the hardware edges, including one pixel of overlap.
+        // An inset anchor exposes a step where the hardware meets the drawn curve.
+        let expandedNeck = neckWidth + (width - neckWidth) * blend
         let spread = max(0, (width - expandedNeck) / 2)
         let upperRadius = min(8 * p * blend, max(0, bodyTop - drawTop))
         let preserveRadius = min(18, preserveWidth / 2, max(0, preserveBottom - attachment.contentTop) / 2)

@@ -2,8 +2,13 @@
 project_slug: hover-menu-preview
 updated: 2026-10-05
 updated_by: codex
-status: windows-0.2.10-installed; public-windows-0.2.10; reported-freeze-incident-unconfirmed-reproduced-preview-races-fixed; published-macos-644; macos-asset-library-local-663; macos-physical-acceptance-partial
+status: windows-0.2.10-installed; public-windows-0.2.10; reported-freeze-incident-unconfirmed-reproduced-preview-races-fixed; published-macos-644; macos-asset-library-local-664; macos-physical-acceptance-partial
 ---
+
+## 2026-10-05 Macのノッチ接合部の段差を修正
+
+- 曲線の起点を左右2pt内側へずらす処理を外し、ノッチの縁へ1物理ピクセル重ねる形に修正。開発版664を起動した。
+- 旧コードで失敗する左右端の回帰検証、実描画の隙間・横線0ピクセル、4サイズ・100回開閉・レイアウト128ケース等が通過。現在は外部画面のみのため、物理ノッチとの見た目は内蔵画面での確認が残る。[作業記録](2026-10/2026-10-05_hover-pocket-mac-notch-alignment.md)。
 
 ## 2026-10-05 Macの撮影画面が開かない問題を修正
 

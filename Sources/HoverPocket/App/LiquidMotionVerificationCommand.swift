@@ -66,6 +66,7 @@ enum LiquidMotionVerificationCommand {
             }
         }
         try verifyOpeningOrigins()
+        try verifyNotchEdgeAlignment()
         for header: CGFloat in [23, 33, 37.5] {
             for scale: CGFloat in [1, 2] {
                 for notch: CGFloat in [0, 185] {
@@ -101,6 +102,30 @@ enum LiquidMotionVerificationCommand {
         for _ in 0..<24 { highRate.step(seconds: 1 / 120, response: PanelAnimationTiming.openResponse) }
         try check(abs(lowRate.value - highRate.value) < 1e-12, "refresh_rate_equivalence")
         print("liquid_geometry=ok sizes=4 voice_heights=3 header_heights=2 notch_widths=3 attachment_blends=6 origins=4 samples=101 refresh_rates=60,120")
+    }
+
+    private static func verifyNotchEdgeAlignment() throws {
+        for scale: CGFloat in [1, 2, 3] {
+            for notch: CGFloat in [185, 246] {
+                let pixel = 1 / scale
+                let metrics = PanelAttachmentMetrics(headerHeight: 32, notchWidth: notch, pixelOverlap: pixel)
+                let frame = CGRect(x: 19, y: 27, width: 616, height: 462)
+                let shape = LiquidPanelGeometry.shape(progress: 1, panelRect: frame,
+                    originWidth: notch, attachment: metrics, attachmentBlend: 0)
+                let hardwareLeft = frame.midX - notch / 2
+                let hardwareRight = frame.midX + notch / 2
+                let sampleY = shape.neckRect.minY + pixel / 2
+                // Both physical edges must remain covered before the curve spreads outward.
+                // The old 2pt inset leaves these points transparent, creating a visible step.
+                guard shape.path.contains(CGPoint(x: hardwareLeft, y: sampleY)),
+                      shape.path.contains(CGPoint(x: hardwareRight, y: sampleY)),
+                      abs(hardwareLeft - shape.neckRect.minX - pixel) < 1e-9,
+                      abs(shape.neckRect.maxX - hardwareRight - pixel) < 1e-9 else {
+                    throw PanelSoakVerificationError.failed("liquid_notch_edge_alignment scale=\(scale) notch=\(notch)")
+                }
+            }
+        }
+        print("liquid_notch_edge_alignment=ok scales=1,2,3 notch_widths=185,246 sides=left,right")
     }
 
     private static func verifyOpeningOrigins() throws {

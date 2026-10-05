@@ -121,7 +121,7 @@ enum LiquidScreenEdgeVerification {
         let expectedTop = style == .preserveMenu ? Int(ceil(attachment.preservedNeckTop * scale)) : 0
         let joinBase = Int(attachment.contentTop * scale)
         let hasMeniscus = style == .preserveMenu && attachment.notchWidth > 0
-        let allowedJoinHalfWidth = Int(ceil((attachment.notchWidth / 2 + 6) * scale))
+        let allowedJoinHalfWidth = Int(ceil((attachment.notchWidth / 2 + attachment.pixelOverlap + 6) * scale))
         let expectedOriginWidth = Int((attachment.notchWidth > 0
             ? attachment.notchWidth + attachment.pixelOverlap * 2 : PanelLayout.miniBarExpandedWidth) * scale)
         let expectedOriginDepth = Int(attachment.headerHeight * scale)
@@ -211,6 +211,14 @@ enum LiquidScreenEdgeVerification {
             guard joinSeamPixels == 0, joinTopRows.count >= 2, joinTopRows.min() == expectedTop else {
                 throw PanelSoakVerificationError.failed("liquid_screen_edge_meniscus seam_pixels=\(joinSeamPixels) top_rows=\(joinTopRows.sorted())")
             }
+            let center = CGFloat(final.pixelsWide) / 2
+            let hardwareHalfWidth = attachment.notchWidth * scale / 2
+            let leftEdge = Int(floor(center - hardwareHalfWidth))
+            let rightEdge = Int(ceil(center + hardwareHalfWidth)) - 1
+            guard black(final, leftEdge, expectedTop), black(final, rightEdge, expectedTop) else {
+                throw PanelSoakVerificationError.failed("liquid_screen_edge_hardware_alignment")
+            }
+            print("liquid_notch_edge_pixels=ok sides=left,right row=\(expectedTop)")
         }
         print("liquid_screen_edge=ok control=\(expectsDisplacement ? "default" : "none") style=\(style.rawValue) frames=\(activeFrames) gap_pixels=\(maxGap) notch_band_pixels=\(notchBandPixels) clear_band_height_pixels=\(expectedTop) body_width=\(minBodyWidth)...\(maxBodyWidth) notch_origin=\(originObserved) simultaneous_growth_frames=\(simultaneousGrowthFrames) join_seam_pixels=\(joinSeamPixels) join_growth_rows=\(joinTopRows.count)")
     }

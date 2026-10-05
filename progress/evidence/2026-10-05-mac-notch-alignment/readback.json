@@ -1,0 +1,19 @@
+{
+  "build": "664",
+  "bundle_identifier": "local.codex.hover-pocket.asset-dev",
+  "binary_sha256": "91a400dc196371ad3734d42157e08e7e8cb8bca98ccc33f67d97ed89bf159494",
+  "processes": [
+    "73277 /Users/shotaro/.codex/worktrees/mac-asset-library/hover-menu-preview/dist/HoverPocket.app/Contents/MacOS/HoverPocket"
+  ],
+  "codesign_strict": true,
+  "active_display": {
+    "width_points": 3360,
+    "height_points": 1418,
+    "scale": 2,
+    "safe_area_top": 0,
+    "notch_detected": false
+  },
+  "physical_notch_acceptance": false,
+  "negative_control": "old geometry fails the same alignment check; new geometry passes",
+  "native_ui": "normal development app launched; Assets panel visible"
+}
