@@ -54,15 +54,23 @@
       "type": "boolean"
     },
     "asset": {
-      "type": [
-        "object",
-        "null"
+      "oneOf": [
+        {
+          "$ref": "../manifest.schema.json#/$defs/asset"
+        },
+        {
+          "type": "null"
+        }
       ]
     },
     "category": {
-      "type": [
-        "object",
-        "null"
+      "oneOf": [
+        {
+          "$ref": "../manifest.schema.json#/$defs/category"
+        },
+        {
+          "type": "null"
+        }
       ]
     }
   },
