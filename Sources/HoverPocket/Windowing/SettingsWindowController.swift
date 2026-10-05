@@ -85,9 +85,8 @@ final class SettingsWindowController {
     private func observeSettings() {
         settings.$appLanguage
             .dropFirst()
-            .sink { [weak self] _ in
-                guard let self else { return }
-                self.window?.title = self.settings.text(.settingsWindowTitle)
+            .sink { [weak self] language in
+                self?.window?.title = AppText.text(.settingsWindowTitle, language: language)
             }
             .store(in: &cancellables)
     }

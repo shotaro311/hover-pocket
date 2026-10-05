@@ -36,6 +36,11 @@ enum PanelLayoutVerificationCommand {
             }
         let persistenceCompatibility = verifySettingsPersistence()
         let settingsWindowCompatibility = verifySettingsWindowLayout()
+        let isolatedSettings = SettingsCategory.available(externalIntegrationsEnabled: false)
+        let settingsIsolation = !isolatedSettings.contains(.library) && !isolatedSettings.contains(.capture)
+            && isolatedSettings.contains(.ai) && isolatedSettings.contains(.general)
+        if !settingsIsolation { failures.append("settings-external-integrations-isolation") }
+        lines.append("settings_external_integrations_isolation=\(settingsIsolation ? "ok" : "failed")")
 
         if !panelSizeCompatibility {
             failures.append("panel-size-compatibility")

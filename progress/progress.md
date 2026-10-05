@@ -5,6 +5,11 @@ updated_by: codex
 status: windows-0.2.10-installed; public-windows-0.2.10; reported-freeze-incident-unconfirmed-reproduced-preview-races-fixed; published-macos-644; macos-library-sync-local-668; macos-physical-acceptance-partial
 ---
 
+## 2026-10-05 設定画面と端末連携の改善（作業中）
+
+- Mac開発版669で「一般・表示・素材と同期・撮影・AI・詳細」に整理し、説明の折りたたみと状態表示を追加。既存の確認設定を保持して6カテゴリの実画面と既存検査を確認。
+- Windows担当が共通のコード連携helperとWindows UIを担当し、Macはネイティブ連携を実装中。実ライブラリ19件とEagle共有を保持。コード連携による端末追加/解除の実受入は未完。[記録](2026-10/2026-10-05_hover-pocket-settings-pairing.md)。
+
 ## 2026-10-05 Eagle方式のMac・Windows素材同期
 
 - 各端末のDBを保持し、Syncthingの専用フォルダで原本と変更記録を交換する同期を実装。Mac開発版668の「設定 → データと履歴」に新規接続・参加・停止・再開・競合解決を追加し、初期状態はオフ。

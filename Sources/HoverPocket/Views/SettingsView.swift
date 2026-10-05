@@ -10,7 +10,7 @@ struct SettingsView: View {
     @ObservedObject private var codexVoiceHost = PocketCodexLibrary.host
     @ObservedObject private var codexVoiceAccount = CodexVoiceAccountLoginController.shared
     @StateObject private var weatherLocationModel = WeatherLocationSettingsModel()
-    @State private var selectedCategory: SettingsCategory? = .appearance
+    @State private var selectedCategory: SettingsCategory? = .general
     @State private var capabilityDataSnapshot: CapabilityDataGovernanceSnapshot?
     @State private var capabilityDataError: String?
     @State private var isShowingCapabilityHistoryDeleteConfirmation = false
@@ -30,7 +30,7 @@ struct SettingsView: View {
                 }
             }
             .listStyle(.sidebar)
-            .frame(width: 168)
+            .frame(width: 176)
             .accessibilityLabel(localized(japanese: "設定カテゴリ", english: "Settings categories"))
 
             Divider()
@@ -39,16 +39,10 @@ struct SettingsView: View {
             ZStack {
                 ForEach(availableCategories) { category in
                     ScrollView {
-                        VStack(alignment: .leading, spacing: 22) {
-                            VStack(alignment: .leading, spacing: 6) {
-                                Text(category.title(language: language))
-                                    .font(.title2.weight(.semibold))
-                                Text(category.detail(language: language))
-                                    .font(.callout)
-                                    .foregroundStyle(.secondary)
-                                    .fixedSize(horizontal: false, vertical: true)
-                            }
-                            Divider()
+                        VStack(alignment: .leading, spacing: 16) {
+                            Text(category.title(language: language))
+                                .font(.title2.weight(.semibold))
+                                .accessibilityAddTraits(.isHeader)
                             categoryContent(category)
                         }
                         .padding(24)
@@ -119,54 +113,64 @@ struct SettingsView: View {
             }
         } message: {
             Text(localized(
-                japanese: "今日の予定の読み取りを許可します。予定の変更には、この設定に加えて音声カテゴリの確認設定が適用されます。",
-                english: "This permits reading today's events. Calendar changes also follow the confirmation options in Voice settings."
+                japanese: "今日の予定の読み取りを許可します。予定の変更には、この設定に加えてAIの確認設定が適用されます。",
+                english: "This permits reading today's events. Calendar changes also follow the confirmation options in AI settings."
             ))
         }
     }
 
     private var availableCategories: [SettingsCategory] {
-        SettingsCategory.allCases.filter {
-            $0 != .connections || HoverPocketRuntimeEnvironment.shared.externalIntegrationsEnabled
-        }
+        SettingsCategory.available(externalIntegrationsEnabled: HoverPocketRuntimeEnvironment.shared.externalIntegrationsEnabled)
     }
 
     @ViewBuilder
     private func categoryContent(_ category: SettingsCategory) -> some View {
         switch category {
-        case .appearance:
-            panelsSection
-            Divider()
-            displaySection
-            Divider()
-            entryPointSection
-        case .features:
-            providersSection
-            Divider()
-            stickyNotesSection
-            if HoverPocketRuntimeEnvironment.shared.externalIntegrationsEnabled {
-                Divider()
-                mirrorSection
-            }
-        case .tools:
-            pocketAppsSection
-        case .voice:
-            voiceSection
-        case .connections:
-            googleCalendarSection
-            Divider()
-            weatherSection
-        case .data:
-            AssetLibrarySyncSettings()
-            Divider()
-            capabilityHistorySection
         case .general:
-            languageSection
+            SettingsCard { languageSection }
             if HoverPocketRuntimeEnvironment.shared.externalIntegrationsEnabled {
-                Divider()
-                updatesSection
+                SettingsCard { updatesSection }
+                SettingsCard {
+                    SettingsDetails(title: localized(japanese: "カレンダーと天気", english: "Calendar & Weather")) {
+                        googleCalendarSection
+                        Divider()
+                        weatherSection
+                    }
+                }
             }
+            SettingsCard { stickyNotesSection }
+        case .appearance:
+            SettingsCard { panelsSection }
+            SettingsCard { displaySection }
+            SettingsCard { entryPointSection }
+            SettingsCard {
+                SettingsDetails(title: localized(japanese: "表示する機能", english: "Visible features")) { providersSection }
+            }
+        case .library:
+            AssetLibrarySyncSettings(language: language)
+        case .capture:
+            SettingsCard { mirrorSection }
+            SettingsCard {
+                Text(localized(japanese: "カメラとマイクの許可", english: "Camera & microphone permissions")).font(.headline)
+                ViewThatFits(in: .horizontal) {
+                    HStack { capturePermissionButtons }
+                    VStack(alignment: .leading) { capturePermissionButtons }
+                }
+                Text(localized(japanese: "撮影・録音は、素材パネルのカメラボタンから開始できます。", english: "Start capturing or recording from the camera button in your library panel."))
+                    .font(.callout).foregroundStyle(.secondary)
+            }
+        case .ai:
+            SettingsCard { voiceSection }
+            SettingsCard { pocketAppsSection }
+        case .advanced:
+            SettingsCard { capabilityHistorySection }
         }
+    }
+
+    @ViewBuilder
+    private var capturePermissionButtons: some View {
+        Button(localized(japanese: "カメラの設定を開く", english: "Camera settings")) { SystemSettingsOpener.openCameraPrivacy() }
+        Button(localized(japanese: "マイクの設定を開く", english: "Microphone settings")) { SystemSettingsOpener.openMicrophonePrivacy() }
     }
 
     private var language: AppLanguage {
@@ -199,18 +203,9 @@ struct SettingsView: View {
             }
             .pickerStyle(.segmented)
 
-            Text(settings.displayPlacementMode.detail(language: language))
-                .font(.system(size: 11))
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-
             VStack(alignment: .leading, spacing: 4) {
                 Toggle(settings.text(.showMirrorOnSecondaryDisplays), isOn: $settings.showMirrorOnSecondaryDisplays)
-
-                Text(settings.text(.showMirrorOnSecondaryDisplaysDetail))
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+                    .help(settings.text(.showMirrorOnSecondaryDisplaysDetail))
             }
         }
     }
@@ -222,11 +217,7 @@ struct SettingsView: View {
 
             VStack(alignment: .leading, spacing: 6) {
                 Toggle(settings.text(.showSideHandle), isOn: $settings.showNotchSideHandleArea)
-
-                Text(handleIconDetail)
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+                    .help(handleIconDetail)
             }
 
             VStack(alignment: .leading, spacing: 6) {
@@ -257,19 +248,11 @@ struct SettingsView: View {
                 }
                 .pickerStyle(.segmented)
 
-                Text(settings.panelAttachmentStyle.detail(language: language))
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-
                 Toggle(localized(japanese: "ノッチがない画面では自動で上端モードにする",
                                  english: "Use top-edge mode on displays without a notch"),
                        isOn: $settings.automaticallyCoverMenuOnNoNotchDisplays)
-                Text(localized(japanese: "外部ディスプレイなど、ノッチがない画面では「上端まで覆う」を使います。ノッチがある画面では上で選んだ表示を使います。重なるメニューは、開いている間だけ隠れます。",
-                               english: "Use Cover menu area on displays without a notch. Notched displays use the mode selected above. Covered menus are hidden while the panel is open."))
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+                .help(localized(japanese: "ノッチがない画面で、パネルを開いている間だけ上端のメニューを覆います。",
+                                english: "On displays without a notch, cover the menu area while the panel is open."))
             }
 
             VStack(alignment: .leading, spacing: 6) {
@@ -279,11 +262,6 @@ struct SettingsView: View {
                     }
                 }
                 .pickerStyle(.segmented)
-
-                Text(settings.panelSize.detail(language: language))
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
             }
 
             VStack(alignment: .leading, spacing: 6) {
@@ -293,11 +271,6 @@ struct SettingsView: View {
                     }
                 }
                 .pickerStyle(.segmented)
-
-                Text(settings.panelTextSize.detail(language: language))
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
             }
 
             if !settings.rememberLastSelectedProvider, !providerStore.visibleManifests.isEmpty {
@@ -324,11 +297,6 @@ struct SettingsView: View {
                 }
                 .pickerStyle(.segmented)
 
-                Text(settings.providerSwitchingMode.detail(language: language))
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-
                 Text(settings.text(.providerOrderHint))
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
@@ -348,7 +316,7 @@ struct SettingsView: View {
                         Spacer()
 
                         Toggle(
-                            "",
+                            manifest.title(language: language),
                             isOn: providerVisibilityBinding(for: manifest)
                         )
                         .labelsHidden()
@@ -372,7 +340,7 @@ struct SettingsView: View {
                 .font(.system(size: 13, weight: .bold))
 
             Toggle(
-                localized(japanese: "AIネイティブ機能", english: "AI-native features"),
+                localized(japanese: "自作ツールを使う", english: "Enable personal tools"),
                 isOn: $settings.aiNativeEnabled
             )
 
@@ -402,7 +370,7 @@ struct SettingsView: View {
     private var capabilityHistorySection: some View {
         VStack(alignment: .leading, spacing: 20) {
             VStack(alignment: .leading, spacing: 8) {
-                Text(localized(japanese: "監査ログと実行履歴", english: "Audit logs and execution history"))
+                Text(localized(japanese: "AIの操作履歴", english: "AI action history"))
                     .font(.system(size: 11, weight: .semibold))
 
                 Picker(
@@ -417,8 +385,8 @@ struct SettingsView: View {
 
                 if let snapshot = capabilityDataSnapshot {
                     Text(localized(
-                        japanese: "監査ファイル \(snapshot.auditFileCount)件・保存済み履歴 \(snapshot.storedReceiptCount)件・削除済み墓標 \(snapshot.redactedTombstoneCount)件",
-                        english: "\(snapshot.auditFileCount) audit files, \(snapshot.storedReceiptCount) stored receipts, \(snapshot.redactedTombstoneCount) redacted tombstones"
+                        japanese: "保存済みの履歴：\(snapshot.storedReceiptCount)件",
+                        english: "Saved history: \(snapshot.storedReceiptCount) entries"
                     ))
                     .font(.system(size: 10))
                     .foregroundStyle(.secondary)
@@ -441,11 +409,6 @@ struct SettingsView: View {
                 .buttonStyle(.bordered)
                 .disabled(aiNativeRuntime.capabilityDataGovernanceController == nil)
             }
-            .padding(10)
-            .background(.quaternary.opacity(0.22))
-            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-
-
         }
     }
 
@@ -496,96 +459,19 @@ struct SettingsView: View {
     }
 
     private var voiceSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text(localized(japanese: "Voice Lane", english: "Voice Lane"))
-                .font(.system(size: 13, weight: .bold))
-
-            Picker(
-                localized(japanese: "音声Provider", english: "Voice provider"),
-                selection: $settings.voiceProvider
-            ) {
+        VStack(alignment: .leading, spacing: 14) {
+            Text(localized(japanese: "チャットと音声", english: "Chat & voice")).font(.headline)
+            Picker(localized(japanese: "音声の接続先", english: "Voice service"), selection: $settings.voiceProvider) {
                 Text(localized(japanese: "オフ", english: "Off")).tag(VoiceProviderID.off)
-                Text(localized(japanese: "Codex app-server（推奨）", english: "Codex app-server (Recommended)"))
-                    .tag(VoiceProviderID.codexAppServer)
-                Text("Realtime BYOK").tag(VoiceProviderID.openAIRealtimeBYOK)
+                Text("Codex / ChatGPT").tag(VoiceProviderID.codexAppServer)
+                Text(localized(japanese: "OpenAI API（別途料金）", english: "OpenAI API (usage charges)"))
+                    .tag(VoiceProviderID.openAIRealtimeBYOK)
             }
-            .pickerStyle(.segmented)
-
-            if settings.voiceProvider == .codexAppServer {
-                Picker(localized(japanese: "対話の声", english: "Conversation voice"), selection: $settings.codexVoiceSelection) {
-                    Text(localized(japanese: "接続先の既定", english: "Server default")).tag("")
-                    ForEach(codexVoiceHost.availableVoices, id: \.self) { voice in Text(voice.capitalized).tag(voice) }
-                    if !settings.codexVoiceSelection.isEmpty && !codexVoiceHost.availableVoices.contains(settings.codexVoiceSelection) {
-                        Text(settings.codexVoiceSelection + "（未確認）").tag(settings.codexVoiceSelection)
-                    }
-                }
-                Text(localized(japanese: "声は次回の音声接続から反映します。候補は接続先の確認後に表示されます。", english: "Applies on your next voice connection. Choices appear after checking the server."))
-                    .font(.caption).foregroundStyle(.secondary)
-            }
-
-            Toggle(
-                localized(japanese: "Voice Laneを有効化", english: "Enable Voice Lane"),
-                isOn: $settings.voiceEnabled
-            )
-            .disabled(settings.voiceProvider == .off)
-
-            VStack(alignment: .leading, spacing: 4) {
-                Toggle(
-                    localized(
-                        japanese: "パネルを閉じても音声を続ける",
-                        english: "Continue voice when the panel is hidden"
-                    ),
-                    isOn: $settings.voiceContinueWhenPanelHidden
-                )
-                .disabled(settings.voiceProvider == .off || !settings.voiceEnabled)
-
-                Text(localized(
-                    japanese: "接続済みでミュート解除中のときだけ、パネルを閉じても音声を維持します。接続中・ミュート中に自動開始や解除はしません。",
-                    english: "Keeps audio only when the session is already connected and unmuted. It never starts or unmutes a connecting or muted session."
-                ))
-                .font(.system(size: 10))
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-            }
-
-            VStack(alignment: .leading, spacing: 4) {
-                Toggle(
-                    localized(
-                        japanese: "通常操作を音声で確認",
-                        english: "Confirm regular actions by voice"
-                    ),
-                    isOn: $settings.voiceActionConfirmationEnabled
-                )
-                .disabled(settings.voiceProvider == .off || !settings.voiceEnabled)
-
-                Text(localized(
-                    japanese: "追加・編集・開始などの前に音声で確認します。オフでは依頼した操作をそのまま実行します。",
-                    english: "Ask by voice before adding, editing, or starting. When off, execute the requested action directly."
-                ))
-                .font(.system(size: 10))
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-            }
-
-            VStack(alignment: .leading, spacing: 4) {
-                Toggle(
-                    localized(japanese: "削除・取消操作を音声で確認", english: "Confirm deletions and cancellations by voice"),
-                    isOn: $settings.voiceDestructiveConfirmationEnabled
-                )
-                .disabled(settings.voiceProvider == .off || !settings.voiceEnabled)
-                Text(localized(
-                    japanese: "予定・付箋・記録の削除、タイマーの取消、追加ツールの取り外しを対象にします。両方オフなら確認画面も追加の音声確認も出しません。macOSの権限許可は別途必要です。",
-                    english: "Covers deleting events, notes and records, cancelling timers, and removing added tools. With both options off, there are no confirmation dialogs or follow-up voice approvals. macOS permissions still apply."
-                ))
-                .font(.system(size: 10))
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-            }
+            .pickerStyle(.menu)
 
             if settings.voiceProvider == .codexAppServer {
                 codexVoiceAccountSection
             }
-
             if settings.voiceProvider == .openAIRealtimeBYOK {
                 VStack(alignment: .leading, spacing: 8) {
                     SecureField(
@@ -630,6 +516,84 @@ struct SettingsView: View {
 
             }
 
+
+            if settings.voiceProvider != .off {
+                Toggle(localized(japanese: "音声対話を使う", english: "Enable voice conversation"), isOn: $settings.voiceEnabled)
+                if settings.voiceProvider == .codexAppServer {
+                    Picker(localized(japanese: "対話の声", english: "Conversation voice"), selection: $settings.codexVoiceSelection) {
+                        Text(localized(japanese: "接続先の既定", english: "Server default")).tag("")
+                        ForEach(codexVoiceHost.availableVoices, id: \.self) { voice in Text(voice.capitalized).tag(voice) }
+                        if !settings.codexVoiceSelection.isEmpty && !codexVoiceHost.availableVoices.contains(settings.codexVoiceSelection) {
+                            Text(settings.codexVoiceSelection).tag(settings.codexVoiceSelection)
+                        }
+                    }
+                    .help(localized(japanese: "次回の音声接続から反映します。", english: "Applies to your next voice connection."))
+                }
+                SettingsDetails(title: localized(japanese: "音声の詳細設定", english: "Voice options")) {
+                    voiceOptions
+                }
+            }
+
+            if let voiceCredentialError {
+                Text(voiceCredentialError).font(.callout).foregroundStyle(.red)
+            }
+            Text(localized(japanese: "テキストチャットは、パネルの入力欄からいつでも利用できます。", english: "Use the text field in your panel to chat."))
+                .font(.callout).foregroundStyle(.secondary)
+            SettingsDetails(title: localized(japanese: "接続方式について", english: "About voice services")) {
+                Text(localized(
+                    japanese: "CodexはChatGPTログインを使い、APIキーは不要です。OpenAI APIは別途従量課金です。接続先を自動で切り替えることはありません。マイクは、パネルの音声ボタンを押した時にだけ接続します。",
+                    english: "Codex uses ChatGPT sign-in, without an API key. OpenAI API has separate usage charges. Services never switch automatically. The microphone connects only after you press the voice button in the panel."
+                )).font(.callout).foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private var voiceOptions: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: 4) {
+                Toggle(
+                    localized(
+                        japanese: "パネルを閉じても音声を続ける",
+                        english: "Continue voice when the panel is hidden"
+                    ),
+                    isOn: $settings.voiceContinueWhenPanelHidden
+                )
+                .disabled(settings.voiceProvider == .off || !settings.voiceEnabled)
+
+                .help(localized(
+                    japanese: "接続済みでミュート解除中のときだけ、パネルを閉じても音声を維持します。接続中・ミュート中に自動開始や解除はしません。",
+                    english: "Keeps audio only when the session is already connected and unmuted. It never starts or unmutes a connecting or muted session."
+                ))
+            }
+
+            VStack(alignment: .leading, spacing: 4) {
+                Toggle(
+                    localized(
+                        japanese: "通常操作を音声で確認",
+                        english: "Confirm regular actions by voice"
+                    ),
+                    isOn: $settings.voiceActionConfirmationEnabled
+                )
+                .disabled(settings.voiceProvider == .off || !settings.voiceEnabled)
+
+                .help(localized(
+                    japanese: "追加・編集・開始などの前に音声で確認します。オフでは依頼した操作をそのまま実行します。",
+                    english: "Ask by voice before adding, editing, or starting. When off, execute the requested action directly."
+                ))
+            }
+
+            VStack(alignment: .leading, spacing: 4) {
+                Toggle(
+                    localized(japanese: "削除・取消操作を音声で確認", english: "Confirm deletions and cancellations by voice"),
+                    isOn: $settings.voiceDestructiveConfirmationEnabled
+                )
+                .disabled(settings.voiceProvider == .off || !settings.voiceEnabled)
+                .help(localized(
+                    japanese: "予定・付箋・記録の削除、タイマーの取消、追加ツールの取り外しを対象にします。両方オフなら確認画面も追加の音声確認も出しません。macOSの権限許可は別途必要です。",
+                    english: "Covers deleting events, notes and records, cancelling timers, and removing added tools. With both options off, there are no confirmation dialogs or follow-up voice approvals. macOS permissions still apply."
+                ))
+            }
+
             if settings.voiceProvider != .off {
                 Toggle(
                     localized(
@@ -650,12 +614,6 @@ struct SettingsView: View {
                 .disabled(!settings.voiceEnabled)
             }
 
-            if let voiceCredentialError {
-                Text(voiceCredentialError)
-                    .font(.system(size: 10))
-                    .foregroundStyle(.red)
-            }
-
             Picker(
                 localized(japanese: "表示", english: "Layout"),
                 selection: $settings.voiceLaneLayoutPreference
@@ -668,23 +626,8 @@ struct SettingsView: View {
             .pickerStyle(.segmented)
             .disabled(!settings.voiceEnabled)
 
-            Text(settings.voiceProvider == .codexAppServer
-                ? localized(
-                    japanese: "Codex app-serverを使う標準経路です。Codexアプリのログインを安全に共有できない場合は、HoverPocket専用プロファイルからChatGPTへログインできます。APIキーは不要で、BYOKへ自動切替はしません。",
-                    english: "This is the primary Codex app-server path. If the Codex app login cannot be shared safely, you can sign in to ChatGPT with a dedicated HoverPocket profile. No API key is required and it never falls back to BYOK automatically."
-                )
-                : settings.voiceProvider == .off
-                    ? localized(
-                        japanese: "Providerは既定でオフです。オフではcredential・network・transport処理を行いません。",
-                        english: "The provider is Off by default. Off performs no credential, network, or transport work."
-                    )
-                    : localized(
-                        japanese: "OpenAI Realtime BYOKは任意の代替経路です。利用時だけAPI料金が発生します。CalendarとTimerはCapability Broker、既定ONのVoice確認、実行後readbackを通ります（確認OFFでもBroker処理は維持）。",
-                        english: "OpenAI Realtime BYOK is an optional alternative and incurs API charges only when used. Calendar and Timer cross Capability Broker, the default-on Voice confirmation, and post-execution readback; Broker processing remains when confirmation is off."
-                    ))
-            .font(.system(size: 11))
-            .foregroundStyle(.secondary)
-            .fixedSize(horizontal: false, vertical: true)
+            Text(localized(japanese: "確認をオフにすると、削除を含む依頼をそのまま実行します。", english: "With confirmations off, requested actions—including deletions—run immediately."))
+                .font(.caption).foregroundStyle(.secondary)
         }
     }
 
@@ -694,7 +637,7 @@ struct SettingsView: View {
             switch codexVoiceAccount.state {
             case .idle:
                 Text(localized(
-                    japanese: "ChatGPTのログイン状態は未確認です。",
+                    japanese: "ChatGPTの接続を確認できます。",
                     english: "ChatGPT sign-in status has not been checked."
                 ))
                 Button(localized(japanese: "ログイン状態を確認", english: "Check sign-in status")) {
@@ -711,7 +654,7 @@ struct SettingsView: View {
             case .signedOut(let managedLoginAvailable, _):
                 Text(managedLoginAvailable
                     ? localized(
-                        japanese: "HoverPocket専用のCodexプロファイルは未ログインです。",
+                        japanese: "ChatGPTへログインしてください。",
                         english: "The dedicated HoverPocket Codex profile is signed out."
                     )
                     : localized(
@@ -746,8 +689,8 @@ struct SettingsView: View {
                     Image(systemName: "checkmark.circle.fill")
                         .foregroundStyle(.green)
                     Text(localized(
-                        japanese: "ChatGPTへログイン済みです。",
-                        english: "Signed in to ChatGPT."
+                        japanese: "ChatGPTに接続済み",
+                        english: "Connected to ChatGPT"
                     ))
                     Spacer()
                     Button(localized(japanese: "再確認", english: "Check again")) {
@@ -765,10 +708,7 @@ struct SettingsView: View {
                 }
             }
         }
-        .font(.system(size: 10))
-        .padding(10)
-        .background(.quaternary.opacity(0.22))
-        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .font(.callout)
     }
 
     private func refreshVoiceCredentialState() {
@@ -998,11 +938,6 @@ struct SettingsView: View {
                 }
             }
             .pickerStyle(.segmented)
-
-            Text(settings.text(.weatherRegionDetail))
-                .font(.system(size: 11))
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
         }
     }
 
