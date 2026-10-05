@@ -33,15 +33,24 @@ internal static class VoiceLibraryVerifier
             await controller.HideForCaptureAsync();
             await store.Ready;
             fixture.Show();
-            for (var attempt = 0; attempt < 20 && !fixture.IsActive; attempt++)
+            var point = fixture.PointToScreen(new System.Windows.Point(30, 70));
+            var previous = System.Windows.Forms.Cursor.Position;
+            try
+            {
+                System.Windows.Forms.Cursor.Position = new((int)point.X, (int)point.Y);
+                MouseEvent(2, 0, 0, 0, 0); MouseEvent(4, 0, 0, 0, 0);
+                await Task.Delay(80);
+            }
+            finally { MouseEvent(4, 0, 0, 0, 0); System.Windows.Forms.Cursor.Position = previous; }
+            var currentWindowMatched = false;
+            for (var attempt = 0; attempt < 20 && !currentWindowMatched; attempt++)
             {
                 Interop.NativeMethods.ActivateWindowForTextInput(new System.Windows.Interop.WindowInteropHelper(fixture).Handle);
                 fixture.Activate();
                 await Task.Delay(100);
+                if (fixture.IsActive) currentWindowMatched = capture.VoiceTargets.Resolve("current_window", null, null).Title == fixture.Title;
             }
-            Require(fixture.IsActive, "fixture foreground activation");
-            await Task.Delay(100);
-            Require(capture.VoiceTargets.Resolve("current_window", null, null).Title == fixture.Title, "last active window");
+            Require(currentWindowMatched, "fixture foreground and last active window");
             var monitorTarget = capture.VoiceTargets.Resolve("screen", null, null);
             Require(monitorTarget.Monitor, "screen target resolution without capturing display");
             try { capture.VoiceTargets.Resolve("window", monitorTarget.Id, null); throw new InvalidOperationException("screen ID accepted as window"); } catch (ArgumentException) { }
@@ -146,5 +155,6 @@ internal static class VoiceLibraryVerifier
         finally { await capture.StopRecordingAsync(); duplicate?.Close(); fixture.Close(); controller.RestoreAfterCapture(); }
     }
     private static JsonElement Output(CodexVoiceDynamicToolResponse response) => JsonDocument.Parse(response.Text).RootElement.GetProperty("output").Clone();
+    [System.Runtime.InteropServices.DllImport("user32.dll", EntryPoint = "mouse_event")] private static extern void MouseEvent(uint flags, uint dx, uint dy, uint data, nuint extra);
     private static void Require(bool value, string reason) { if (!value) throw new InvalidOperationException(reason); }
 }

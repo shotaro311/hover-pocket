@@ -27,7 +27,7 @@ internal sealed class AssetDropOverlayWindow : NoActivateWindow
     internal bool BusyForVerify => _busy;
     internal string StatusForVerify => _status.Text;
     internal string TraceForVerify => _native?.Trace ?? "uninitialized";
-    internal AssetDropOverlayWindow(AssetStore store, Func<AssetDropPayload, string?, Task<string>> import)
+    internal AssetDropOverlayWindow(AssetStore store, Func<AssetDropPayload, string?, Task<string>> import) : base(allowsTransparency: false)
     {
         _store = store; _import = import; Width = 320; Height = 44;
         var body = new StackPanel(); body.Children.Add(_status); body.Children.Add(_items);

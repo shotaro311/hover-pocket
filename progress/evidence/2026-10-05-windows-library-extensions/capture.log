@@ -1,0 +1,23 @@
+UI verify: WebView2 host + bridge + provider registry + settings
+PASS capture: shell stays hidden during pointer/recovery notifications and resumes after selection
+PASS capture preferences: legacy JSON remains readable; screenshots now edit in place
+PASS image editing: original bytes retained, full-resolution frozen pixels, edited PNG readback, folders/tags, trash guard
+PICKER native: foreground_owned=False, owner_visible=False
+PASS recording native picker: system picker shown without settings, native cancel returns cleanly
+PASS screenshot: success/cancel/failure without constructing settings, existing settings stay hidden, saved folder preserved
+PASS capture: crop, pen/text/rectangle/ellipse/arrow rendering, undo/redo, classified PNG, native region overlay, hotkey conflict/dispatch/unregister, settings persistence, root/named folder handoff before/after load, PCM clipping
+PASS screenshot overlay: app hover, desktop/negative monitor fallback, overlapping windows, Enter selection, inline tools, failed save retained, native double-click saved identical annotation pixels once
+PASS screenshot overlay cancel: X closes without saving
+MEASURE toast hit: process=70908, own=70908, rect=626,195,450,366, inside=Border, style=8080088
+MEASURE toast: start=761,345, cursor=761,345, actual=626,195,450,366, dip=417.3333333333333,130,300,244, over=True, hit=12721724, hwnd=12721724, events=enter
+PASS screenshot toast: frozen thumbnail, no focus steal, hover and drag pause, native PNG file drop, recipient edits preserve library original, successful drop closes, remaining timeout resumes
+PASS capture: repeated worker desktop capture -> modal selection -> annotated PNG pixel readback, original PNG, native mouse drag, Enter, Escape, crop error boundary
+PASS recording shortcut: hidden valid picker owner, cancel/error cleanup, saved options, no settings on start/stop, settings close keeps recording, classified save
+PASS recording orientation: mode=audio, decoded_four_quadrants=True
+SKIP hardware microphone/system audio: generated-window recording only
+PASS recording: frames=67, duration_ms=2233, dimensions=942x590, audio_track_nonzero=False, microphone_packets=0, automatic_import=true
+PASS recording orientation: mode=silent, decoded_four_quadrants=True
+PASS recording orientation: mode=scaled, decoded_four_quadrants=True
+PASS recording scale: input=2682x1491, encoded=1920x1066
+PASS capture pending: malformed/null records, missing original and trash duplicate retained; healthy captures continue
+PASS recording: video-only mode, resize automatic stop/finalize/import, completed capture recovery

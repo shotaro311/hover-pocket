@@ -204,9 +204,9 @@ internal static class AssetInteractionVerifier
             await UntilAsync(async () => !(await store.GetAsync(imageId))!.Trashed);
             var restored = (await store.GetAsync(imageId))!;
             if (!restored.FolderIds.Contains(fromFolder) || !restored.FolderIds.Contains(toFolder)) failures.Add("assets: trash-to-folder lost former membership");
-            await libraryWeb.ExecuteScriptAsync("document.querySelector('.assets-sidebar button')?.click()");
+            await libraryWeb.ExecuteScriptAsync("window.__recentReady=false;const recentObserver=new MutationObserver(()=>{window.__recentReady=true;recentObserver.disconnect()});recentObserver.observe(document.querySelector('.assets-sidebar'),{childList:true});document.querySelector('.assets-sidebar button')?.click()");
             VerifyConsole.WriteLine("PASS native sidebar: folder-to-folder move and Undo, trash-to-folder restores former memberships and adds destination");
-            await UntilAsync(async () => await libraryWeb.ExecuteScriptAsync($$"""!!document.querySelector('[data-asset-id="{{imageId}}"]')""") == "true");
+            await UntilAsync(async () => await libraryWeb.ExecuteScriptAsync($$"""window.__recentReady && !!document.querySelector('[data-asset-id="{{imageId}}"]')""") == "true");
             var bounds = new Size(organizer.ActualWidth, organizer.ActualHeight);
             await libraryWeb.ExecuteScriptAsync($$"""document.querySelector('[data-asset-id="{{imageId}}"]')?.dispatchEvent(new MouseEvent('dblclick',{bubbles:true}));""");
             await UntilAsync(async () => await libraryWeb.ExecuteScriptAsync("!!document.querySelector('.assets-edit-image') && !document.querySelector('.assets-edit-image').disabled") == "true");

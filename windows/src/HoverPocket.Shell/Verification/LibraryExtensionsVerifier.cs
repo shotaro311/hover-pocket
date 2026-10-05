@@ -111,13 +111,22 @@ internal static class LibraryExtensionsVerifier
                         overlay = controller.DropOverlayForVerify ?? throw new Exception("Top-edge drag did not reveal overlay");
                         return overlay.PointToScreen(new Point(80, 25));
                     });
-                    SetCursorPos((int)finish.X, (int)finish.Y); await Task.Delay(150); SetCursorPos((int)finish.X, (int)finish.Y + 35); await Task.Delay(150);
+                    SetCursorPos((int)finish.X, (int)finish.Y);
+                    wait = DateTime.UtcNow.AddSeconds(4);
+                    while (!await source.Dispatcher.InvokeAsync(() => overlay!.IsVisible && overlay.ActualHeight >= 82))
+                    {
+                        if (DateTime.UtcNow >= wait) throw new Exception("Top-edge destinations did not finish expanding");
+                        await Task.Delay(30);
+                    }
+                    finish = await source.Dispatcher.InvokeAsync(() => overlay!.PointToScreen(new Point(80, 60)));
+                    SetCursorPos((int)finish.X, (int)finish.Y); await Task.Delay(150);
+                    await source.Dispatcher.InvokeAsync(() => VerifyConsole.WriteLine($"MEASURE automatic drop: overlay={overlay!.Hwnd}, top-window={WindowFromPoint(new NativePoint { X = (int)finish.X, Y = (int)finish.Y })}, finish={finish}, origin={overlay.PointToScreen(new Point())}, size={overlay.ActualWidth}x{overlay.ActualHeight}, trace={overlay.TraceForVerify}"));
                 }
                 finally { MouseEvent(4, 0, 0, 0, 0); }
             });
             deadline = DateTime.UtcNow.AddSeconds(8);
             while (DateTime.UtcNow < deadline && (await store.QueryAsync(new())).Total < 5) await Task.Delay(50);
-            if ((await store.QueryAsync(new())).Total != 5 || controller.Panel.IsVisible || !File.Exists(sourceFile)) throw new Exception("Automatic top-edge drop or panel suppression failed: " + overlay?.StatusForVerify);
+            if ((await store.QueryAsync(new())).Total != 5 || controller.Panel.IsVisible || !File.Exists(sourceFile)) throw new Exception($"Automatic top-edge drop or panel suppression failed: total={(await store.QueryAsync(new())).Total}, panel={controller.Panel.IsVisible}, status={overlay?.StatusForVerify}, trace={overlay?.TraceForVerify}");
             while (overlay!.BusyForVerify) await Task.Delay(30);
             overlay.Hide(); overlay = null;
             VerifyConsole.WriteLine("PASS automatic top-edge native drag: overlay revealed from access surface, imported file without opening main panel, source preserved");
@@ -129,6 +138,12 @@ internal static class LibraryExtensionsVerifier
                 await deviceCapture.CaptureAsync(new("cameraPhoto", null, null, folder));
                 if (deviceCapture.Recording || deviceCapture.Busy || !deviceCapture.Status.Contains("完了できません")) throw new Exception("Invalid device did not fail without recording");
                 var devices = await Capture.DeviceCaptureController.DevicesAsync();
+                if (Environment.GetEnvironmentVariable("HOVERPOCKET_VERIFY_LOG") is { Length: > 0 } log && deviceCapture.WindowForVerify is { } captureWindow)
+                {
+                    var bitmap = new System.Windows.Media.Imaging.RenderTargetBitmap((int)captureWindow.ActualWidth, (int)captureWindow.ActualHeight, 96, 96, System.Windows.Media.PixelFormats.Pbgra32);
+                    bitmap.Render(captureWindow); bitmap.Freeze();
+                    await Capture.CaptureFiles.WritePngAsync(Path.Combine(Path.GetDirectoryName(log)!, "device-capture-ui.png"), bitmap);
+                }
                 VerifyConsole.WriteLine($"PASS device capture UI/device enumeration/missing-device recovery; cameras={devices.Cameras.Length}, microphones={devices.Microphones.Length}; hardware capture not exercised");
             }
             return 0;

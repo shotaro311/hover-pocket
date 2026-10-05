@@ -49,5 +49,25 @@ internal static class AudioPreviewVerifier
         if (!result.RootElement.TryGetProperty("ok", out var ok) || !ok.GetBoolean()) throw new Exception("AAC playback/range/lease failed: " + raw);
         using (new FileStream(store.OriginalPath(audio), FileMode.Open, FileAccess.Read, FileShare.None)) { }
         VerifyConsole.WriteLine("PASS generated AAC: pending-file recovery, original bytes/folder, muted native playback/seek, range bytes, revoked lease and released file handle");
+        await web.ExecuteScriptAsync($$"""
+            window.__audioUi={done:false};
+            (async()=>{try{
+              const wait=async predicate=>{for(let i=0;i<150;i++){if(predicate())return;await new Promise(r=>setTimeout(r,30));}throw Error('audio UI timeout');};
+              await wait(()=>document.querySelector('[data-asset-id="{{audio.Id}}"]'));
+              document.querySelector('[data-asset-id="{{audio.Id}}"]')?.dispatchEvent(new MouseEvent('dblclick',{bubbles:true}));
+              await wait(()=>document.querySelector('.assets-media audio')?.src);
+              const player=document.querySelector('.assets-media audio'),paused=player.paused;
+              player.muted=true;await player.play();
+              document.querySelector('[data-action=endPreview]').click();
+              await wait(()=>!document.querySelector('.assets-media audio'));
+              window.__audioUi={done:true,ok:paused&&player.paused&&!player.getAttribute('src')};
+            }catch(error){window.__audioUi={done:true,ok:false,error:error.message};} })();
+            """);
+        deadline = DateTime.UtcNow.AddSeconds(12);
+        while (DateTime.UtcNow < deadline && await web.ExecuteScriptAsync("window.__audioUi.done") != "true") await Task.Delay(40);
+        raw = await web.ExecuteScriptAsync("window.__audioUi");
+        using var ui = JsonDocument.Parse(raw);
+        if (!ui.RootElement.TryGetProperty("ok", out var uiOk) || !uiOk.GetBoolean()) throw new Exception("Shared audio UI failed: " + raw);
+        VerifyConsole.WriteLine("PASS shared audio UI: real card opens controls without autoplay; end-preview pauses and releases source");
     }
 }

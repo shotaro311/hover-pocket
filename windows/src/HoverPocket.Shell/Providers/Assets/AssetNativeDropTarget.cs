@@ -37,7 +37,7 @@ internal sealed class AssetNativeDropTarget : IAssetOleDropTarget, IDisposable
         return 0;
     }
     public int DragOver(uint keys, AssetDragPoint point, ref uint effect) { try { effect = _accepted && _hover(point) ? effect & 1u : 0; } catch { effect = 0; } return 0; }
-    public int DragLeave() { _accepted = false; _leave(); return 0; }
+    public int DragLeave() { Trace += "; leave"; _accepted = false; _leave(); return 0; }
     public int Drop(IDataObject data, uint keys, AssetDragPoint point, ref uint effect)
     {
         try { if (_accepted && _hover(point)) { Trace += "; drop"; _drop(new System.Windows.DataObject(data), data, point); effect &= 1; } else effect = 0; }

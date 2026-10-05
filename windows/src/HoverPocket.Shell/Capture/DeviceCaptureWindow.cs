@@ -23,6 +23,7 @@ internal sealed class DeviceCaptureWindow : Window
     private readonly TextBlock _time = new() { Foreground = Brushes.LightCoral, FontSize = 16 };
     private readonly Button _start = new(), _stop = new() { Content = "■ 停止して保存" }, _previewButton = new() { Content = "カメラを表示" };
     private readonly WrapPanel _modes = new();
+    private readonly StackPanel _cameraField, _microphoneField;
     private string _kind = "cameraPhoto"; private string? _folder;
     private bool _closing, _loaded;
     internal DeviceCaptureWindow(DeviceCaptureController controller)
@@ -30,13 +31,14 @@ internal sealed class DeviceCaptureWindow : Window
         _controller = controller; Title = "HoverPocket — カメラ・録音"; Width = 620; Height = Math.Min(730, SystemParameters.WorkArea.Height * .88); MinWidth = 440; MinHeight = 400;
         WindowStartupLocation = WindowStartupLocation.CenterScreen; Background = new SolidColorBrush(Color.FromRgb(12, 14, 18)); Foreground = Brushes.White;
         Resources.MergedDictionaries.Add(new ResourceDictionary { Source = new Uri("/HoverPocket.Shell;component/Capture/EditorTheme.xaml", UriKind.Relative) });
+        Resources.MergedDictionaries.Add(new ResourceDictionary { Source = new Uri("/HoverPocket.Shell;component/Capture/DeviceCaptureTheme.xaml", UriKind.Relative) });
         var body = new StackPanel { Margin = new Thickness(18) }; Content = new ScrollViewer { Content = body, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
         body.Children.Add(new TextBlock { Text = "ライブラリへ撮影・録音", FontSize = 20, Foreground = Brushes.White, Margin = new Thickness(3, 0, 3, 12) });
         foreach (var (kind, label) in new[] { ("cameraPhoto", "写真"), ("cameraVideo", "カメラ動画"), ("audio", "音声録音") })
         { var button = new Button { Content = label, Tag = kind }; button.Click += (_, _) => { Select(kind, _folder, true); _ = _controller.ReleasePreviewAsync(); }; _modes.Children.Add(button); }
         body.Children.Add(_modes); body.Children.Add(_preview);
-        Add(body, "カメラ", _cameras); Add(body, "マイク（動画では音声なしも選べます）", _microphones); Add(body, "保存先", _folders);
-        _cameras.SelectionChanged += (_, _) => { _preview.Source = null; _ = _controller.ReleasePreviewAsync(); Update(_controller.Busy, _controller.Recording, TimeSpan.Zero, _controller.Status); };
+        _cameraField = Add(body, "カメラ", _cameras); _microphoneField = Add(body, "マイク（動画では音声なしも選べます）", _microphones); Add(body, "保存先", _folders);
+        _cameras.SelectionChanged += (_, _) => { _preview.Source = null; _preview.Visibility = Visibility.Collapsed; _ = _controller.ReleasePreviewAsync(); Update(_controller.Busy, _controller.Recording, TimeSpan.Zero, _controller.Status); };
         _folders.SelectionChanged += (_, _) => _folder = (_folders.SelectedItem as Category)?.Id;
         _microphones.SelectionChanged += (_, _) => Update(_controller.Busy, _controller.Recording, TimeSpan.Zero, _controller.Status);
         var actions = new WrapPanel(); actions.Children.Add(_previewButton); actions.Children.Add(_start); actions.Children.Add(_stop); body.Children.Add(actions); body.Children.Add(_time); body.Children.Add(_status);
@@ -49,12 +51,14 @@ internal sealed class DeviceCaptureWindow : Window
         Closing += (_, args) => { if (_closing) return; args.Cancel = true; Hide(); if (!controller.Recording) { _loaded = false; _ = controller.ReleasePreviewAsync(); } };
     }
     private static ListBox Devices() => new() { DisplayMemberPath = "Name", Height = 72, Background = new SolidColorBrush(Color.FromRgb(25, 28, 34)), Foreground = Brushes.White, BorderBrush = new SolidColorBrush(Color.FromRgb(53, 60, 72)), Margin = new Thickness(3, 4, 3, 10) };
-    private static void Add(StackPanel panel, string label, UIElement element) { panel.Children.Add(new TextBlock { Text = label, Foreground = Brushes.LightGray, Margin = new Thickness(3, 4, 3, 0) }); panel.Children.Add(element); }
+    private static StackPanel Add(StackPanel panel, string label, UIElement element) { var field = new StackPanel(); field.Children.Add(new TextBlock { Text = label, Foreground = Brushes.LightGray, Margin = new Thickness(3, 4, 3, 0) }); field.Children.Add(element); panel.Children.Add(field); return field; }
     internal void Select(string kind, string? folder, bool change)
     {
-        if (!change) return; _kind = kind; _folder = folder;
+        if (!change) return; if (_kind != kind) _preview.Source = null; _kind = kind; _folder = folder;
         foreach (Button button in _modes.Children) button.Opacity = (string)button.Tag == kind ? 1 : .5;
-        _preview.Visibility = kind == "audio" ? Visibility.Collapsed : Visibility.Visible;
+        _preview.Visibility = kind == "audio" || _preview.Source is null ? Visibility.Collapsed : Visibility.Visible;
+        _cameraField.Visibility = kind == "audio" ? Visibility.Collapsed : Visibility.Visible;
+        _microphoneField.Visibility = kind == "cameraPhoto" ? Visibility.Collapsed : Visibility.Visible;
         _cameras.IsEnabled = kind != "audio"; _previewButton.Visibility = kind == "audio" ? Visibility.Collapsed : Visibility.Visible;
         _microphones.IsEnabled = kind != "cameraPhoto";
         if (kind == "audio" && _microphones.SelectedIndex <= 0 && _microphones.Items.Count > 1) _microphones.SelectedIndex = 1;
@@ -77,7 +81,7 @@ internal sealed class DeviceCaptureWindow : Window
     }
     private DeviceCaptureOptions Options() => new(_kind, (_cameras.SelectedItem as CaptureDevice)?.Id, _kind == "cameraPhoto" ? null : NullIfEmpty((_microphones.SelectedItem as CaptureDevice)?.Id), NullIfEmpty(_folder));
     private static string? NullIfEmpty(string? value) => string.IsNullOrEmpty(value) ? null : value;
-    internal void SetPreview(BitmapSource image) => _preview.Source = image;
+    internal void SetPreview(BitmapSource image) { _preview.Source = image; if (_kind != "audio") _preview.Visibility = Visibility.Visible; }
     internal void Update(bool busy, bool recording, TimeSpan duration, string status)
     {
         _status.Text = status; _time.Text = recording ? "● " + duration.ToString(@"hh\:mm\:ss") : "";
