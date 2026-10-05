@@ -25,7 +25,7 @@ internal enum BridgeSurface
     Settings
 }
 
-internal sealed class PanelBridgeController : IDisposable
+internal sealed partial class PanelBridgeController : IDisposable
 {
     public HoverPocket.Assets.AssetStore AssetLibrary { get; }
     internal ClipboardHistoryStore ClipboardHistoryForVerify => _clipboardBridgeController.StoreForVerify;
@@ -436,7 +436,7 @@ internal sealed class PanelBridgeController : IDisposable
         Register("updates.check", CheckForUpdatesAsync);
         if (surface == BridgeSurface.Panel)
         {
-            Register("chat.open", async (_, _) => { if (ChatRequested is not null) await ChatRequested(); return new { ok = true }; });
+            RegisterChat(Register);
             Register("provider.select", SelectProviderAsync);
             Register(
                 "voice.requestMicrophone",
@@ -567,6 +567,7 @@ internal sealed class PanelBridgeController : IDisposable
         }
 
         _disposed = true;
+        if (_inlineChat is not null) _ = _inlineChat.DisposeAsync();
         _timerBridgeHandlers.AlertFired -= OnTimerAlertFired;
         _timerBridgeHandlers.AlertChanged -= OnTimerAlertChanged;
         _timerBridgeHandlers.Dispose();
@@ -668,11 +669,12 @@ internal sealed class PanelBridgeController : IDisposable
                 headerHeight = PanelSizeCatalog.HeaderHeight,
                 aiLaneHeight = PanelSizeCatalog.AiLaneHeight,
                 voiceLaneHeight,
+                chatHeight = ChatHeight,
                 voiceLaneMode = ToWireValue(_resolvedVoiceLaneMode),
                 width = metrics.Width,
                 providerHeight = metrics.ProviderHeight,
                 baselineHeight = metrics.TotalHeight,
-                totalHeight = metrics.TotalHeight + voiceLaneHeight,
+                totalHeight = metrics.TotalHeight + voiceLaneHeight + ChatHeight,
                 sizes = PanelSizeCatalog.All.Select(size => new
                 {
                     id = size.Id,
@@ -2314,6 +2316,7 @@ internal sealed class PanelBridgeController : IDisposable
 
     public async Task NotifyPanelClosedAsync()
     {
+        if (_inlineChat is not null) _inlineChat.Focused = false;
         if (_assetDropPreviousProvider is not null) await FinishAssetDropAsync(false);
         _panelOpen = false;
         _voiceCoordinator.SetMuted(true);

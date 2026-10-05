@@ -101,7 +101,8 @@ internal static class AssetInteractionVerifier
             await ClickSurfaceAsync(web, web.CoreWebView2, $"[data-size-id='{previousSize}']");
             await UntilAsync(async () => await web.ExecuteScriptAsync($"document.querySelector('[data-size-id={previousSize}]').getAttribute('aria-pressed')==='true'") == "true");
             await ClickSurfaceAsync(web, web.CoreWebView2, "[data-refresh]");
-            await UntilAsync(async () => await web.ExecuteScriptAsync("window.__editorHeaderClicks===3") == "true");
+            try { await UntilAsync(async () => await web.ExecuteScriptAsync("window.__editorHeaderClicks===3") == "true"); }
+            catch (TimeoutException) { throw new TimeoutException("Native header refresh: " + await web.ExecuteScriptAsync("({clicks:window.__editorHeaderClicks,focus:document.activeElement.tagName,hit:window.__surfaceClickTarget,refreshDisabled:document.querySelector('[data-refresh]').disabled})")); }
             if (!editor!.IsVisible || controller.Panel.LiquidTargetForVerify != previewBounds || !controller.Panel.AssetLayout.PinOnly)
                 failures.Add("assets: shell header interaction dismissed or resized inline editing");
             VerifyConsole.WriteLine("PASS inline header: original header visible above editor, native size/refresh clicks, editing and bounds preserved");
