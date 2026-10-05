@@ -7,6 +7,10 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Asset sync checks failed' }
     dotnet run --project windows/tests/Assets.Core
     if ($LASTEXITCODE -ne 0) { throw 'Asset storage checks failed' }
+    dotnet run --project windows/tests/Pairing
+    if ($LASTEXITCODE -ne 0) { throw 'Device pairing checks failed' }
+    node --check windows/ui/settings/settings-navigation.js
+    if ($LASTEXITCODE -ne 0) { throw 'Settings navigation syntax failed' }
     node --check windows/ui/settings/asset-sync-settings.js
     if ($LASTEXITCODE -ne 0) { throw 'Settings script syntax failed' }
     if ($IncludeUi) {

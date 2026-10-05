@@ -127,7 +127,12 @@ internal sealed partial class PanelBridgeController : IDisposable
         AssetLibrary = new HoverPocket.Assets.AssetStore(string.Equals(Path.GetFullPath(settingsStore.RootDirectory), Path.GetFullPath(productionSettingsRoot), StringComparison.OrdinalIgnoreCase)
             ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "HoverPocket", "AssetLibrary")
             : Path.Combine(settingsStore.RootDirectory, "AssetLibrary"), HoverPocket.Shell.Providers.Assets.AssetRecycle.MoveAsync);
-        if (externalIntegrationsEnabled) _assetSync = new HoverPocket.Assets.AssetSyncRunner(AssetLibrary);
+        if (externalIntegrationsEnabled)
+        {
+            _assetSync = new HoverPocket.Assets.AssetSyncRunner(AssetLibrary);
+            if (string.Equals(Path.GetFullPath(settingsStore.RootDirectory), Path.GetFullPath(productionSettingsRoot), StringComparison.OrdinalIgnoreCase))
+                _pairing = new Sync.DevicePairingService(AssetLibrary);
+        }
         _weatherStore = new WeatherStore(Path.Combine(settingsStore.RootDirectory, "weather"));
         _startupRegistration = startupRegistration ?? new RunKeyStartupRegistrationService();
         _updaterService = updaterService ?? new UpdaterService();
@@ -468,6 +473,9 @@ internal sealed partial class PanelBridgeController : IDisposable
         }
         if (surface == BridgeSurface.Settings)
         {
+            foreach (var method in new[] { "status", "invite", "join", "approve", "cancel", "remove" })
+                Register("pairing." + method, (p, token) => PairingRequest(method, p, token));
+            Register("settings.openCapture", async (_, _) => { if (AssetCaptureRequested is not { } capture) throw new InvalidOperationException("撮影を利用できません。"); await capture("settings", null); return new { opened = true }; });
             Register("assetSync.status", async (_, token) => await AssetLibrary.GetSyncStatusAsync(token));
             Register("assetSync.configure", ConfigureAssetSyncAsync);
             Register("assetSync.enable", EnableAssetSyncAsync);
@@ -573,6 +581,7 @@ internal sealed partial class PanelBridgeController : IDisposable
 
         _disposed = true;
         if (_assetSync is not null) _ = _assetSync.DisposeAsync();
+        _pairing?.Dispose();
         if (_inlineChat is not null) _ = _inlineChat.DisposeAsync();
         _timerBridgeHandlers.AlertFired -= OnTimerAlertFired;
         _timerBridgeHandlers.AlertChanged -= OnTimerAlertChanged;

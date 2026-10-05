@@ -269,3 +269,13 @@ AI command lane の audit log は `%APPDATA%\HoverPocket\auditlog\ailane-YYYYMMD
 - display 再同期は WPF の `HwndSource.AddHook` で `WM_DISPLAYCHANGE` / `WM_DPICHANGED` を受け、加えて `SystemEvents.DisplaySettingsChanged`、`SystemEvents.PowerModeChanged`、`SystemEvents.SessionSwitch`から段階的に再計算します。
 - 120ms pointer pollingとは別に約2秒ごとのshell health checkを行い、access surface / panelのHWND、native visibility、WPF visibility、必須extended styles、期待frameを照合します。修復可能な異常は同じwindowへ再適用し、HWNDが無効なwindowだけを再生成します。panel再生成時もprovider stateを持つ`PanelBridgeController`は維持します。
 - display / DPI change、Power Resume、`SystemEvents.SessionSwitch`のunlock / console connect / remote connectでは、polling timerを再始動し、即時・0.45秒後・1.4秒後の3段階でdisplay再同期とhealth checkを実行します。
+
+### 端末コード連携と設定画面
+
+設定は「一般・表示・素材と同期・撮影・AI・詳細」の6カテゴリと検索で操作します。通常の端末連携は「端末を追加」→別端末でコード入力→元端末で相手を確認して許可、の順です。既存の共有先は保持し、新規参加時はアプリが転送用フォルダを用意します。手動フォルダ設定は復旧用の「接続の詳細」にあります。
+
+両端末でSyncthingを起動してください。短いコードの交換にはTLS仲介サービスとSPAKE2を使います。メディアは仲介サービスへ送りません。コードは5分・1回限りで、承認後に専用共有を登録します。解除はそのライブラリの共有だけを停止し、受信済みのコピーは残します。Eagleの共有や既存端末設定は変更しません。
+
+WindowsビルドにはCargo/Rust 1.87以降が必要です。MSBuildが `shared/pairing-helper` の固定依存をビルドし、単独EXEとライセンスを同梱します。共通プロトコルは同ディレクトリのREADMEを参照してください。
+
+検証: `dotnet run --project windows/tests/Pairing`（隔離API/パス検査）、`cargo test --locked --manifest-path shared/pairing-helper/Cargo.toml`、`windows/script/verify_asset_sync.ps1 -IncludeUi`。公開仲介への隔離接続試験は、架空の端末IDだけを使って `python shared/pairing-helper/verify_pairing.py <helper.exe>` を実行できます。
