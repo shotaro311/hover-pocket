@@ -39,4 +39,11 @@
 - カメラ実撮影/実動画、実マイク録音、物理デバイス切断、混在DPIの移動は未検証。外部ドロップは上端の既存入口へ到達すると表示し、最近の保存先はセッション内で保持する。全OSドラッグの常時監視や保存先ピン留めは未実装。
 - 統合版は隔離fixture内で実際に各画面を起動して検証し、終了後に専用ウィンドウを閉じた。Timerのみの既存隔離モードを全機能常駐版として扱わず、新しい開発プロファイルは追加していない。
 - 元の常駐本番 `HoverPocketWin/current/HoverPocket.Shell.exe`（PID 72424）を維持。main統合、公開配信、本番置換、自動起動変更、同期機能の実装は実施していない。
-- Mac親タスクの既存承認範囲として実装・検証・commit/push・draft PR作成を行い、追加確認は求めていない。Git/PRのreadbackは下記へ追記する。
+- Mac親タスクの既存承認範囲として実装・検証・commit/push・draft PR作成を行い、追加確認は求めていない。
+
+## Gitと引き継ぎのreadback
+
+- 実装コミット `a5fedee80f22a06300352bf57d052238b84bcda8` をpushし、`git ls-remote` とローカルHEADの一致を確認。作業ツリーはclean。
+- [draft PR #47](https://github.com/shotaro311/hover-pocket/pull/47) を作成・このタスクへattach。GitHubの `headRefOid` 一致、`isDraft=true`、`state=OPEN`、base `codex/windows-refactor-20261005` をreadback。
+- Mac親へSHA、PR、検証証跡、残る物理受入、本番維持を送信済み。最終プロセス確認はPID 72424のみ、既存 `HoverPocketWin/current` の実行ファイルでResponding=true。
+- このreadback追記は文書のみであり、上記検証済み実装を変更しない。
