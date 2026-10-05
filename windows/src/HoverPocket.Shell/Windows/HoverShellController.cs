@@ -62,6 +62,19 @@ internal sealed class HoverShellController : IDisposable
     private bool _panelExpectedVisible;
     private bool _previewFocusDismissed;
     private AssetOrganizerWindow? _assetOrganizer;
+    private CodexChatWindow? _chatWindow;
+    private Task OpenChatAsync()
+    {
+        if (_chatWindow is null)
+        {
+            _chatWindow = new CodexChatWindow(_panelBridgeController.CreateChatCoordinator(),
+                _panelBridgeController.CurrentSettings.Language == AppLanguage.English, _panelBridgeController.LoginChatAsync);
+            _chatWindow.Closed += (_, _) => _chatWindow = null;
+            _chatWindow.Show();
+        }
+        _chatWindow.Activate();
+        return Task.CompletedTask;
+    }
     private bool _assetDragActive;
     private int _assetDragRevision;
     private async void OnAssetDragChanged(bool active)
@@ -86,6 +99,16 @@ internal sealed class HoverShellController : IDisposable
         _assetOrganizer = new AssetOrganizerWindow(_panelBridgeController, _applicationData.RootDirectory);
         _assetOrganizer.Closed += (_, _) => _assetOrganizer = null;
         _assetOrganizer.Show(); _assetOrganizer.Activate();
+    }
+    internal async Task<bool> OpenAssetLibraryForVoiceAsync(string? assetId, CancellationToken token)
+    {
+        if (_assetOrganizer is null)
+        {
+            _assetOrganizer = new AssetOrganizerWindow(_panelBridgeController, _applicationData.RootDirectory) { ShowActivated = false };
+            _assetOrganizer.Closed += (_, _) => _assetOrganizer = null;
+            _assetOrganizer.Show();
+        }
+        return await _assetOrganizer.ShowForVoiceAsync(assetId, token);
     }
     private bool _captureOrganizerVisible;
     private bool _captureSuppressed;
@@ -142,6 +165,8 @@ internal sealed class HoverShellController : IDisposable
             voiceE2EReceiptStore: voiceE2EReceiptStore,
             isolatedVoiceE2EDefaults: isolatedVoiceE2EDefaults);
         _panelBridgeController.SettingsChanged += OnPanelSettingsChanged;
+        _panelBridgeController.ChatRequested = OpenChatAsync;
+        _panelBridgeController.ChatApprovalOwner = () => _chatWindow;
         _panelBridgeController.SettingsOpenRequested += OnSettingsOpenRequested;
         _panelBridgeController.TimerAlertFired += OnTimerAlertFired;
         _panelBridgeController.TimerAlertChanged += OnTimerAlertChanged;
@@ -168,7 +193,7 @@ internal sealed class HoverShellController : IDisposable
             var pointer = GetPointerPosition();
             var inside = IsPointerInHoverRegion(pointer, out var hoveredLayout);
             TraceHover("close-delay", pointer, inside, hoveredLayout, inside ? "keep-open" : "close");
-            if (!_timerAlertActive && !_panel.AssetLayout.PinOnly && !_assetDragActive && !inside)
+            if (!_timerAlertActive && !KeepPanelForVoice && !_panel.AssetLayout.PinOnly && !_assetDragActive && !inside)
             {
                 _ = HidePanelAsync();
             }
@@ -320,6 +345,7 @@ internal sealed class HoverShellController : IDisposable
 
         _panel.Win32MessageReceived -= OnWindowWin32MessageReceived;
         _assetOrganizer?.Close();
+        _chatWindow?.Close();
         _panelBridgeController.SettingsChanged -= OnPanelSettingsChanged;
         _panelBridgeController.SettingsOpenRequested -= OnSettingsOpenRequested;
         _panelBridgeController.TimerAlertFired -= OnTimerAlertFired;
@@ -472,10 +498,12 @@ internal sealed class HoverShellController : IDisposable
         _settingsWindow.Activate();
     }
 
+    private bool KeepPanelForVoice => _panelBridgeController.VoiceSnapshot.RealtimeAttached
+        || _panel.OwnedWindows.OfType<Window>().Any(window => window.IsVisible);
     private void PollPointer()
     {
         if (_captureSuppressed) return;
-        if (_panel.AssetLayout.PinOnly || _assetDragActive) { _closeDelayTimer.Stop(); return; }
+        if (_panel.AssetLayout.PinOnly || _assetDragActive || KeepPanelForVoice) { _closeDelayTimer.Stop(); return; }
         var pointer = GetPointerPosition();
         if (_previewFocusDismissed)
         {

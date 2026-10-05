@@ -109,6 +109,10 @@ await Reject(() => store.SaveSearchAsync("unknown", new(Version:99)), "unknown s
 Check((await store.QueryAsync(new(Text: "' OR 1=1 --"))).Total == 0, "SQL metacharacters remain literals");
 Check((await store.QueryAsync(new(View: "uncategorized"))).Total == 0, "uncategorized is folder membership");
 await store.UpdateAsync([id], "favorite"); Check((await store.QueryAsync(new(View: "favorites"))).Total == 1, "favorite filter");
+await store.UpdateAsync([id], "favoriteSet", "True"); await store.UpdateAsync([id], "favoriteSet", "True");
+Check((await store.GetAsync(id))!.Favorite, "repeated favorite set does not toggle");
+await store.UpdateAsync([id], "favoriteSet", "False"); Check(!(await store.GetAsync(id))!.Favorite, "favorite unset");
+await store.UpdateAsync([id], "favoriteSet", "True");
 await store.UpdateAsync([id], "rename", "改名済み.pdf"); Check(Hash(store.OriginalPath(saved)) == sourceHash && (await store.GetAsync(id))!.Extension == "png", "rename preserves ID, path, extension, bytes");
 await store.SaveSearchAsync("画像", new(Kind: "image", Version: 2, Extension: "png", SortBy: "name", Descending: false));
 var copy = await store.CopyOutAsync(id); await File.WriteAllTextAsync(copy, "external edit");

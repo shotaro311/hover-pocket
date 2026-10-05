@@ -57,3 +57,5 @@ body.assets-fullscreen .hp-voice-lane{display:none!important}body.assets-fullscr
 .assets-root .assets-context-menu button:hover,.assets-root .assets-context-menu button:focus-visible{background:#91b5ff20;outline:0}
 
 .assets-root select option,.assets-root select optgroup{background-color:#20242d;color:#e5eaf4}
+
+.assets-sidebar .is-drop-target{background:#6d9de64a;outline:2px solid #9cbaff;outline-offset:-2px}.assets-root.is-dragging .assets-sidebar [data-drop-kind]{border:1px dashed #a5bdee38}

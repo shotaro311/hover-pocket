@@ -1,0 +1,9 @@
+# Windowsの既存音声基盤をチャット開発へ分離
+
+2026-10-04にDownloadsの作業コピーで検証したRealtime・標準操作・Library11の未コミット実装を、Windows refactor `3e7ba7c` の上へ移した。元のdirty checkoutは変更しない。Mac親担当とWindows library担当の調整により、通常チャットが使う依存だけを独立コミットにする。
+
+音声の隔離profile、実CLIのツール照合、ログイン、19操作のCapabilityBroker経路、撮影・収録・素材の検索と整理、保存後の確認を収録。AssetStoreの整理済み分割を保持し、favoriteSetだけMetadataへ追加した。AssetPaneControllerの新しい動画配信処理も保持し、assets.getだけ追加した。共有assets UIは親担当が所有し、window.hpLibrary.showAssetの公開は別の共有UIコミットで接続する。
+
+検証: Release buildは警告・エラー0、音声foundationとnative、保存コア99項目が成功。通常チャットと共有UIを合わせた検証は続くチャット専用ログへ記載する。素材本体のモデル送信、main統合、公開、本番アプリ・自動起動の変更は行わない。
+
+既知の制約: Realtimeによる操作完了の自動読み上げは安定せずHostが会話欄へ結果を表示する。実マイク/スピーカーの受入は今回の依存移植では行っていない。

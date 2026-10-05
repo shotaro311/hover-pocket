@@ -1,0 +1,26 @@
+{
+  "cli": "0.160.0",
+  "transport": "websocket",
+  "outputModality": "text",
+  "clientManagedHandoffs": true,
+  "tools": 0,
+  "auth_copied": false,
+  "microphone_used": false,
+  "events": {
+    "remoteControl/status/changed": 1,
+    "account/updated": 1,
+    "thread/started": 1,
+    "thread/realtime/error": 1,
+    "realtime start error": 1
+  },
+  "errors": [
+    {
+      "method": "thread/realtime/error",
+      "safe_message": "realtime conversation requires API key auth",
+      "categories": []
+    },
+    {
+      "probe_error": "realtime start error"
+    }
+  ]
+}
