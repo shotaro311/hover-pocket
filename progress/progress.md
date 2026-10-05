@@ -8,7 +8,7 @@ status: windows-0.2.10-installed; public-windows-0.2.10; reported-freeze-inciden
 ## 2026-10-05 チャットをパネル内へ統合
 
 - Mac開発版667に下部の常設入力欄、同じパネル内の返信/履歴、Enter送信・Shift+Enter改行・停止・新規会話を実装。別チャット画面を廃止した。
-- 4サイズ・100回開閉と入力/IMEを検査し、実パネルの返信・会話再開・停止・Esc収納後の下書き保持を確認。Windowsも担当Codexが実装と実パネル接続を検証中。[作業記録](2026-10/2026-10-05_hover-pocket-inline-chat.md)。
+- 4サイズ・100回開閉と入力/IMEを検査し、実パネルの返信・会話再開・停止・Esc収納後の下書き保持を確認。Windows担当の `678c2ae` を取り込み、同じパネルでの実返信とUI検査記録を読み戻した。両OSを統合PR #44へpushし、最終CIはPRのchecksで確認する。[作業記録](2026-10/2026-10-05_hover-pocket-inline-chat.md)。
 
 ## 2026-10-05 ライブラリ操作・撮影・チャットの拡張
 

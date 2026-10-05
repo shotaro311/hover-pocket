@@ -19,4 +19,8 @@ CodexChatControllerのApp Server接続・権限確認・保存形式は再利用
 
 ## 両OS統合
 
-Windows担当へ既存タスクで委譲。Windows専用コードと日別ログを担当し、共通検査と統合はMac側で担当する。Windowsの最終SHAと統合CIは結果確認後に追記する。
+Windows担当の `678c2aeb8ca78b51e715f43b94d8b4e139be1653` を取り込んだ。Windows専用コードと日別ログを担当端末で更新し、Mac側は共通静的検査を常設チャット＋音声部に分かれた構造へ合わせた。42契約を再度通過。検証画像とログをfetchして読み戻し、小/特大で停止ボタン・入力が枠内に収まることと、音声オフで実Codexの返答7を確認した。
+
+WindowsのRelease/Debugは警告0・エラー0。専用パネル/チャット/音声/ui-model検査はexit 0。既存UI全体の最終PASSとプロセス終了を担当端末で確認したが、その長い検査のexit codeは回収できていない。最終変更は専用パネル検査で再確認済み。[Windows詳細](2026-10-05_hover-pocket-windows-inline-chat.md)。通常起動中のWindows版は置換していない。
+
+MacとWindowsを統合Draft PR #44へcommit/push。統合後のGitHub検査結果は[PR checks](https://github.com/shotaro311/hover-pocket/pull/44/checks)で追跡する。元のdirty checkoutは保持し、mainへの統合・公開配信は行っていない。

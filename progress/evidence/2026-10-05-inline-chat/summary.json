@@ -29,5 +29,25 @@
       "Regression suite ran before the final native focus release and Escape refinements; chat and real panel soak were rerun on the final binary.",
       "Live UI tests used generated arithmetic only; no library tools or new authentication were used."
     ]
+  },
+  "windows": {
+    "sourceCommit": "678c2aeb8ca78b51e715f43b94d8b4e139be1653",
+    "implementationAndNativeVerification": "S311-win Codex",
+    "livePanelReply": "7",
+    "voiceDisabledChat": true,
+    "standaloneChatWindow": false,
+    "fixtureChecks": [
+      "IME",
+      "single send and stop",
+      "streaming caret preservation",
+      "small and extraLarge",
+      "manual hide and hover reopen",
+      "history and drafts",
+      "text selection",
+      "library keyboard shortcut isolation"
+    ],
+    "fullUIRegression": "final PASS and process exit observed; exit code was not recovered",
+    "productionAppReplaced": false,
+    "evidence": "windows/verification/inline-chat-20261005/"
   }
 }
