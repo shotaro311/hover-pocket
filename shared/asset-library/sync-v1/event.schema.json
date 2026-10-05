@@ -1,0 +1,107 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "HoverPocket library sync event v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "groupId",
+    "revision",
+    "deviceId",
+    "entityType",
+    "entityId",
+    "parents",
+    "deleted",
+    "asset",
+    "category"
+  ],
+  "properties": {
+    "version": {
+      "const": 1
+    },
+    "groupId": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+    },
+    "revision": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+    },
+    "deviceId": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+    },
+    "entityType": {
+      "enum": [
+        "asset",
+        "folder",
+        "tag"
+      ]
+    },
+    "entityId": {
+      "type": "string"
+    },
+    "parents": {
+      "type": "array",
+      "uniqueItems": true,
+      "maxItems": 256,
+      "items": {
+        "type": "string",
+        "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+      }
+    },
+    "deleted": {
+      "type": "boolean"
+    },
+    "asset": {
+      "type": [
+        "object",
+        "null"
+      ]
+    },
+    "category": {
+      "type": [
+        "object",
+        "null"
+      ]
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "entityType": {
+            "const": "asset"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "entityId": {
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "asset": {
+            "type": "object"
+          },
+          "category": {
+            "type": "null"
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "entityId": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+          },
+          "asset": {
+            "type": "null"
+          },
+          "category": {
+            "type": "object"
+          }
+        }
+      }
+    }
+  ]
+}
