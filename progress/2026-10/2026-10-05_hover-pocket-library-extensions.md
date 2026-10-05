@@ -17,3 +17,9 @@
 - Library: thread 01a0ff46-72f0-7582-afea-1f910bf1abb6、branch codex/windows-library-extensions-20261005。
 - Chat: thread 01a10712-359c-7560-89da-e89d14751fdc、branch codex/windows-chat-dictation-20261005。
 - Windows CLI 0.160.0のChatGPTログインで、Realtime text v3はv2必須、v2はAPI key auth必須として拒否されたとの実検証報告。課金APIへ切り替えず、音声入力は制限表示、通常chatを進める。Macでの同等検証は未実施。
+
+## 共有UIの音声プレビューとWindows AI入口
+
+- 音声ファイルの手動再生と終了時のsource解放、Windows `showAsset(id)` と `window.hpLibrary` を共通UIへ追加。
+- Mac保存54、UI65（新規drag・音声preview・Windows入口を含む）、再開2項目が通過。通常chatの状態・履歴9項目も通過。根拠は `/private/tmp/hp-666-chat-final.log` と `/private/var/folders/mv/0d7m444d25d_q88sj2wfntj80000gn/T/HoverPocket-Assets-SO5sjn/`。
+- 一度UI検査だけを空のevidence先で実行しnative fixture不足で失敗した。保存検査でfixtureを作成した後の再検査は通過。初期追加時のSwiftコンパイルエラーを修正し、成功したビルドで上記を確認。

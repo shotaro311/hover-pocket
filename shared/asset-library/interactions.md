@@ -9,3 +9,6 @@ Mac owns the shared assets UI; each OS implements its native bridge. No database
 - `assets.update {operation:"undoOrganize",undoToken}` restores the snapshot once; later edits or state conflicts reject stale undo. Existing `assets.undo` remains the ordinary undo action.
 - `assets.capture {kind:"cameraPhoto"|"cameraVideo"|"audio",folderId:null|string}` opens native device/save UI. Recording requires explicit start. Existing screenshot/recording kinds remain supported. Closing library does not stop an active capture.
 - External import copies source files, image data, file promises/virtual files, and direct media URLs. It must never ingest the app's own internal drag or claim web pages/streaming video are downloadable. A native top-edge overlay offers destination folders and import/error feedback.
+
+- `assets.preview` may return `audioUrl` for supported audio extensions while keeping persisted `kind:other`. Video keeps `videoUrl`. The shared player never autoplays, pauses on hiding, and removes its source on preview close.
+- Windows organizer publishes `window.hpLibrary.showAsset(id) -> Promise<boolean>`; it resolves `assets.get {id}` and uses the same preview implementation as Mac `openAsset(asset)`.

@@ -441,8 +441,12 @@ export function renderAssetsProvider({ container, request, state }) {
     preview = result;
     if (result.error && result.kind === "video") report(result.error);
     if (result.error && result.kind !== "video") { media.textContent = result.error; }
+    else if (result.audioUrl) {
+      const audio=document.createElement("audio"); audio.controls=true; audio.src=result.audioUrl; audio.preload="metadata";
+      audio.addEventListener("error",()=>report(english?"This audio cannot be played. The original is preserved.":"この音声は再生できません。原本は保存されています。")); media.replaceChildren(audio);
+    }
     else if (result.kind === "video") {
-      let video = media.querySelector("video");
+      let video = media.querySelector("video,audio");
       if (!video) { video = document.createElement("video"); video.controls = true; video.preload = "metadata"; video.autoplay = false; video.playsInline = true; video.src = result.videoUrl; if (result.dataUrl) video.poster = result.dataUrl; video.onerror = () => report(`この動画は再生できません。原本は保存されています。${platformLabel}のメディア機能と形式を確認してください。`); media.replaceChildren(video); }
     } else if (result.dataUrl) { const image = document.createElement("img"); image.src = result.dataUrl; image.alt = asset.name; image.draggable = false; media.replaceChildren(image); }
     else media.textContent = t("この形式はプレビューに対応していません。コピー・保存先から原本を取り出せます。");
@@ -479,7 +483,7 @@ export function renderAssetsProvider({ container, request, state }) {
       await run("assets.transition", { cancel: transition?.revision || 0 });
     }
   }
-  function stopMedia() { const video = media.querySelector("video"); if (video) { video.pause(); video.removeAttribute("src"); video.load(); } }
+  function stopMedia() { const video = media.querySelector("video,audio"); if (video) { video.pause(); video.removeAttribute("src"); video.load(); } }
   async function endPreview() {
     const current = ++previewGeneration;
     const transition = await run("assets.transition");
@@ -541,7 +545,7 @@ export function renderAssetsProvider({ container, request, state }) {
       void openContextMenu(selectedAsset, bounds.left + 12, bounds.top + 12);
     }
     else if (event.key === "Delete" && !preview && query.view !== "trash" && selection.size) { event.preventDefault(); void update("trash"); }
-    else if (event.key === " " && preview) { event.preventDefault(); const video = media.querySelector("video"); if (video) { if (video.paused) void video.play().catch(error=>report(error.message)); else video.pause(); } else void endPreview(); }
+    else if (event.key === " " && preview) { event.preventDefault(); const video = media.querySelector("video,audio"); if (video) { if (video.paused) void video.play().catch(error=>report(error.message)); else video.pause(); } else void endPreview(); }
     else if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "z") { event.preventDefault(); void undo(); }
     else if (event.key === " " && selectedAsset && !preview) { event.preventDefault(); void openPreview(selectedAsset); }
     else if (event.key.startsWith("Arrow") && !preview && page?.items.length) {
@@ -560,7 +564,7 @@ export function renderAssetsProvider({ container, request, state }) {
   media.addEventListener("pointerup", () => { pan = null; });
   // Occlusion can hide the WebView while its native window is still open. Keep the
   // source so returning to a paused video remains playable; panel.closed releases it.
-  const visibilityChanged = () => { if (document.hidden) { media.querySelector("video")?.pause(); void run("assets.visibility",{visible:false}); } else void run("assets.visibility",{visible:true}).then(() => { if (!preview) return refresh(); }); };
+  const visibilityChanged = () => { if (document.hidden) { media.querySelector("video,audio")?.pause(); void run("assets.visibility",{visible:false}); } else void run("assets.visibility",{visible:true}).then(() => { if (!preview) return refresh(); }); };
   document.addEventListener("visibilitychange",visibilityChanged);
   let eventTimer;
   const showImportProgress = progress => {
@@ -579,7 +583,7 @@ export function renderAssetsProvider({ container, request, state }) {
   void run("assets.visibility", {visible:true});
   void run("assets.importState").then(progress=>{if(progress&&(progress.busy||progress.completed||progress.failed||progress.duplicates))showImportProgress(progress);});
   void refresh();
-  return { refresh, async openAsset(asset) { if (!asset?.id || disposed || editingImage) return false; const opened = await openPreview(asset); return opened === true && !disposed && preview?.id === asset.id && root.classList.contains("has-preview"); }, dispose() { closeContextMenu(); finishMarquee(); ++selectionRevision; document.body.classList.remove("assets-fullscreen"); disposed = true; clearInterval(dragScrollTimer); ++generation; ++previewGeneration; clearTimeout(queryTimer); clearTimeout(eventTimer); observer.disconnect(); document.removeEventListener("keydown", keydown); document.removeEventListener("visibilitychange",visibilityChanged); unsubscribers.forEach(unsubscribe => unsubscribe()); stopMedia(); void request("assets.visibility", {visible:false}).catch(() => {}); void request("assets.endPreview").catch(() => {}); thumbnails.clear(); } };
+  return { refresh, async showAsset(id) { const asset = await request("assets.get", {id}); if (!asset || disposed || editingImage) return false; return !!(await openPreview(asset)) && !disposed && preview?.id === asset.id; }, async openAsset(asset) { if (!asset?.id || disposed || editingImage) return false; const opened = await openPreview(asset); return opened === true && !disposed && preview?.id === asset.id && root.classList.contains("has-preview"); }, dispose() { closeContextMenu(); finishMarquee(); ++selectionRevision; document.body.classList.remove("assets-fullscreen"); disposed = true; clearInterval(dragScrollTimer); ++generation; ++previewGeneration; clearTimeout(queryTimer); clearTimeout(eventTimer); observer.disconnect(); document.removeEventListener("keydown", keydown); document.removeEventListener("visibilitychange",visibilityChanged); unsubscribers.forEach(unsubscribe => unsubscribe()); stopMedia(); void request("assets.visibility", {visible:false}).catch(() => {}); void request("assets.endPreview").catch(() => {}); thumbnails.clear(); } };
 }
 
 function bytes(value) { return value < 1024 ? `${value} B` : value < 1024 * 1024 ? `${(value / 1024).toFixed(1)} KB` : `${(value / (1024 * 1024)).toFixed(1)} MB`; }

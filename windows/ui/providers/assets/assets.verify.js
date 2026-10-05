@@ -7,7 +7,7 @@ export async function verifyAssetSelection() {
   const a = { id:"a", name:"visible.txt", extension:"txt", kind:"other", sizeBytes:5, createdAt:"2026-10-03T00:00:00Z", favorite:true, folderIds:["folder-a"], tagIds:[] };
   const rows = [a, { ...a, id:"b", name:"hidden.txt", favorite:false }, ...Array.from({length:218}, (_,i) => ({...a,id:`item-${i}`,favorite:false}))];
   const calls = [], checks = [];
-  let releaseMatch = null, delayMatch = false, failMatch = false, releaseDrag = null, dragResult = {ok:true};
+  let releaseMatch = null, delayMatch = false, failMatch = false, releaseDrag = null, dragResult = {ok:true}, audioPreview = false;
   const matches = (row, query) => (query.view !== "favorites" || row.favorite) && (!query.kind || row.kind === query.kind) && (query.extension == null || row.extension === query.extension);
   const request = async (method, params) => {
     calls.push({method,params:structuredClone(params)});
@@ -27,6 +27,8 @@ export async function verifyAssetSelection() {
       return {matches:matches(rows.find(row => row.id === params.id),params.query)};
     }
     if (method === "assets.update" && params.operation === "favorite") for (const row of rows.filter(row => params.ids.includes(row.id))) row.favorite = !row.favorite;
+    if (method === "assets.get") return rows.find(row=>row.id===params.id);
+    if (method === "assets.preview" && audioPreview) return {id:params.id,kind:"other",width:500,height:120,audioUrl:"data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA="};
     if (method === "assets.preview") return {id:params.id,kind:"image",width:1,height:1,dataUrl:"data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs="};
     if (method === "assets.copy" && params.mode === "drag") { await new Promise(resolve => { releaseDrag=resolve; }); return dragResult; }
     if (method === "assets.importState") return {busy:false,completed:0,duplicates:0,skipped:0,failed:0};
@@ -207,6 +209,12 @@ export async function verifyAssetSelection() {
     host.querySelector("[data-action=captureMenu]").click();
     button(".assets-dialog","音声を録音").click(); await wait(20);
     check(last("assets.capture").kind==="audio","capture menu dispatches audio recording without a screen capture");
+    audioPreview=true;
+    check(await provider.showAsset("a"),"Windows voice showAsset resolves metadata and opens the shared preview");
+    const audio=host.querySelector("audio");
+    check(!!audio && audio.controls && audio.paused && !audio.autoplay,"audio preview requires explicit playback");
+    host.querySelector("[data-action=endPreview]").click(); await wait(60);
+    check(!audio.hasAttribute("src") && host.querySelector(".assets-preview").hidden,"closing audio preview releases its media source");
     return {ok:true,checks};
   } catch(error) { return {ok:false,checks,error:error.stack}; }
   finally { delayMatch=false; releaseMatch?.(); releaseDrag?.(); provider.dispose(); host.remove(); }
