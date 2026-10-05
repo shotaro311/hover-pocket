@@ -102,6 +102,8 @@ internal static class InlineChatPanelVerifier
         var bridge = controller.PanelBridgeController;
         var root = Path.Combine(bridge.AssetLibrary.Root, "inline-chat-live");
         Directory.CreateDirectory(root);
+        HoverPocket.Shell.Services.AppDiagnostics.Start(root);
+        VerifyConsole.WriteLine("MEASURE diagnostics root: " + root);
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(100));
         var token = timeout.Token;
         try
@@ -114,21 +116,22 @@ internal static class InlineChatPanelVerifier
             VerifyConsole.WriteLine($"PASS inline chat: live installed model route exactly matches the app's current grants; tools={tools.Definitions.GetArrayLength()}");
             var profile = CodexVoiceProfile.Prepare(profileRoot, reuseExistingLogin: false);
             await bridge.ReplaceChatForVerifyAsync(new CodexChatCoordinator(ct => CodexAppServerClient.StartProcessAsync(identity.Path,
-                ["app-server", "--stdio"], TimeSpan.FromSeconds(25), ct, profile.Environment, root), tools, new CodexChatHistory(root)));
+                ["app-server", "--stdio"], TimeSpan.FromSeconds(25), ct, profile.Environment, profile.Root), tools, new CodexChatHistory(root)));
             var web = controller.Panel.WebView!.CoreWebView2;
             await web.ExecuteScriptAsync("window.__chatTestRequest=(method,params)=>import('./js/bridge.js').then(m=>m.request(method,params));window.__chatTestRequest('provider.select',{id:'assets'});document.querySelector('[data-chat]').click()");
             await Until(async () => await web.ExecuteScriptAsync("document.activeElement===document.querySelector('[data-chat-draft]')") == "true", token);
-            await web.ExecuteScriptAsync("const input=document.querySelector('[data-chat-draft]');input.value='計算の確認です。3+4の答えを数字1文字だけで返してください。ツールは使わないでください。';input.dispatchEvent(new Event('input',{bubbles:true}));document.querySelector('[data-chat-send]').click()");
-            while (bridge.InlineChat.Snapshot.Messages.All(message => message.Role != "assistant") || bridge.InlineChat.Busy) await Task.Delay(100, token);
-            Check(bridge.InlineChat.Snapshot.ErrorCode is null && bridge.InlineChat.Snapshot.Messages.Any(message => message.Role == "assistant" && message.Text.Trim() == "7"), "live Codex returned 7 from the panel composer");
-            await Until(async () => await web.ExecuteScriptAsync("Array.from(document.querySelectorAll('.hp-chat-message[data-role=assistant] span')).some(n=>n.textContent.trim()==='7')") == "true", token);
+            await web.ExecuteScriptAsync("const input=document.querySelector('[data-chat-draft]');input.value='日本語の通信確認です。「おはようございます」とだけ返してください。ツールは使わないでください。';input.dispatchEvent(new Event('input',{bubbles:true}));document.querySelector('[data-chat-send]').click()");
+            while ((bridge.InlineChat.Snapshot.Messages.All(message => message.Role != "assistant") && bridge.InlineChat.Snapshot.ErrorCode is null) || bridge.InlineChat.Busy) await Task.Delay(100, token);
+            VerifyConsole.WriteLine("MEASURE inline chat result: " + (bridge.InlineChat.Snapshot.ErrorCode ?? "ok"));
+            Check(bridge.InlineChat.Snapshot.ErrorCode is null && bridge.InlineChat.Snapshot.Messages.Any(message => message.Role == "assistant" && message.Text.Trim() == "おはようございます"), "live Codex returned exact Japanese text from the panel composer");
+            await Until(async () => await web.ExecuteScriptAsync("Array.from(document.querySelectorAll('.hp-chat-message[data-role=assistant] span')).some(n=>n.textContent.trim()==='おはようございます')") == "true", token);
             Check(!bridge.CurrentSettings.VoiceEnabled && controller.Panel.IsVisible, "live reply stays in the same panel with voice off");
             if (Environment.GetEnvironmentVariable("HOVERPOCKET_VERIFY_LOG") is { Length: > 0 } log)
             {
                 using var screenshot = File.Create(Path.Combine(Path.GetDirectoryName(log)!, "inline-chat-live.png"));
                 await web.CapturePreviewAsync(CoreWebView2CapturePreviewImageFormat.Png, screenshot);
             }
-            VerifyConsole.WriteLine("PASS inline-chat-live: composer -> real turn/start -> visible reply 7; isolated library/history; existing dedicated login; auth_copy=false; microphone=false");
+            VerifyConsole.WriteLine("PASS inline-chat-live: composer -> real turn/start -> visible Japanese reply; isolated library/history; existing dedicated login; auth_copy=false; microphone=false");
             return 0;
         }
         catch (Exception exception)

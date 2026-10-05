@@ -17,6 +17,7 @@ internal static class CodexChatVerifier
         {
             using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(40));
             var token = timeout.Token;
+            await VerifyUtf8ProcessAsync(token);
             var root = Path.Combine(Path.GetTempPath(), "HoverPocket-ChatVerify-" + Guid.NewGuid().ToString("N"));
             var history = new CodexChatHistory(root);
             var tools = new TestTools();
@@ -98,6 +99,38 @@ internal static class CodexChatVerifier
             return 0;
         }
         catch (Exception exception) { VerifyConsole.WriteLine("FAIL chat verify: " + exception.GetType().Name + " " + exception.Message); return 1; }
+    }
+
+    private static async Task VerifyUtf8ProcessAsync(CancellationToken token)
+    {
+        const string text = "おはようございます。漢字・画像📷・末尾よう";
+        const string script = """
+            [Console]::InputEncoding = [Text.UTF8Encoding]::new($false)
+            [Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
+            $request = [Console]::ReadLine() | ConvertFrom-Json
+            @{ id = $request.id; result = @{ text = $request.params.text } } | ConvertTo-Json -Compress
+            [void][Console]::ReadLine()
+            """;
+        var inputEncoding = Console.InputEncoding;
+        var outputEncoding = Console.OutputEncoding;
+        CodexAppServerClient client;
+        try
+        {
+            Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
+            Console.InputEncoding = Encoding.GetEncoding(932);
+            Console.OutputEncoding = Encoding.GetEncoding(932);
+            client = await CodexAppServerClient.StartProcessAsync(
+                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "WindowsPowerShell", "v1.0", "powershell.exe"),
+                ["-NoProfile", "-NonInteractive", "-Command", script], TimeSpan.FromSeconds(8), token);
+        }
+        finally { Console.InputEncoding = inputEncoding; Console.OutputEncoding = outputEncoding; }
+        await using (client)
+        {
+            client.StartReading();
+            var result = await client.SendRequestAsync("echo", JsonSerializer.SerializeToElement(new { text }), token);
+            Check(result.GetProperty("text").GetString() == text,
+                "real process preserves Japanese/emoji JSON under a Shift-JIS host without a UTF-8 BOM");
+        }
     }
 
     private static void Check(bool condition, string name)

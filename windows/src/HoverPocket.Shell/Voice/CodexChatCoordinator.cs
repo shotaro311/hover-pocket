@@ -85,6 +85,7 @@ internal sealed class CodexChatCoordinator(
         catch (Exception exception) when (exception is CodexAppServerProtocolException or IOException or JsonException or InvalidOperationException)
         {
             lock (_sync) _error = exception is CodexAppServerProtocolException protocol ? protocol.Code : "chat_request_failed";
+            HoverPocket.Shell.Services.AppDiagnostics.Record("chat.send.failed." + VoiceTextSafety.SanitizeErrorCode(_error), exception);
             await DisconnectAsync();
         }
         finally

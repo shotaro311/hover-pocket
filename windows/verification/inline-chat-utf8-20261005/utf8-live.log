@@ -1,0 +1,8 @@
+UI verify: WebView2 host + bridge + provider registry + settings
+PASS cold top-edge open: panel_visible_before_webview_ready=true, dispatch_ms=39.8
+MEASURE diagnostics root: C:\Users\shotaro\AppData\Local\Temp\HoverPocket\Shell\a10c942ce2bf4e54a969d0dbd62f9c95\AssetLibrary\inline-chat-live
+PASS inline chat: live installed model route exactly matches the app's current grants; tools=17
+MEASURE inline chat result: ok
+PASS inline chat: live Codex returned exact Japanese text from the panel composer
+PASS inline chat: live reply stays in the same panel with voice off
+PASS inline-chat-live: composer -> real turn/start -> visible Japanese reply; isolated library/history; existing dedicated login; auth_copy=false; microphone=false
