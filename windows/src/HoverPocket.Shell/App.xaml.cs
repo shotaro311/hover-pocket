@@ -71,6 +71,12 @@ public partial class App : System.Windows.Application
         if (options.VerifyVoice)
         {
             VerifyConsole.AttachParent();
+            if (Environment.GetEnvironmentVariable("HOVERPOCKET_CHAT_VERIFY_ONLY") == "1"
+                || Environment.GetEnvironmentVariable("HOVERPOCKET_CHAT_LIVE_VERIFY_ONLY") == "1")
+            {
+                _ = RunChatVerificationAsync();
+                return;
+            }
             var foundationResult = new VoiceFoundationVerifier().Run();
             var realtimeResult = new OpenAIRealtimeVoiceVerifier().Run();
             var nativeResult = VoiceNativeVerifier.Run();
@@ -269,6 +275,13 @@ public partial class App : System.Windows.Application
                 _ = updaterService.CheckOnStartupAsync();
             }
         }
+    }
+
+    private async Task RunChatVerificationAsync()
+    {
+        Environment.ExitCode = Environment.GetEnvironmentVariable("HOVERPOCKET_CHAT_LIVE_VERIFY_ONLY") == "1"
+            ? await CodexChatLiveVerifier.RunAsync() : await CodexChatVerifier.RunAsync();
+        Shutdown();
     }
 
     protected override void OnExit(ExitEventArgs e)

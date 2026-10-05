@@ -502,7 +502,7 @@ internal static class CodexVoiceRuntimeComposition
         bool featureEnabled,
         ICodexVoiceDynamicToolRuntime? dynamicToolRuntime = null,
         string? profileRoot = null,
-        bool reuseExistingLogin = true,
+        bool reuseExistingLogin = false,
         Func<bool>? useEnglish = null)
     {
         var runtime = new InstalledCodexVoiceRuntime(profileRoot ?? Path.Combine(

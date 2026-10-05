@@ -12,7 +12,8 @@ internal sealed class CodexNativeCapabilityRuntime(
     CapabilityRegistry registry,
     CapabilityBroker broker,
     Func<VoiceNativeApproval, CancellationToken, Task<bool>> approve,
-    VoiceLibraryCapabilities? library = null) : ICodexVoiceDynamicToolRuntime
+    VoiceLibraryCapabilities? library = null,
+    CapabilityOrigin origin = CapabilityOrigin.Voice) : ICodexVoiceDynamicToolRuntime
 {
     private readonly object _sync = new();
     private readonly Dictionary<string, (string Digest, Lazy<Task<CodexVoiceDynamicToolResponse>> Result)> _calls = [];
@@ -110,7 +111,7 @@ internal sealed class CodexNativeCapabilityRuntime(
             var principal = new CapabilityPrincipal("local-user", AgentSessionId: sessionId);
             var permissions = new CapabilityPermissionSet(principal, descriptor.Permissions);
             var plan = new CapabilityExecutionPlan("voice-native:" + correlation, DateTimeOffset.UtcNow,
-                CapabilityOrigin.Voice, principal, null,
+                origin, principal, null,
                 [new CapabilityPlanStep("operation", key, arguments, "voice.native." + correlation, [])], descriptor.Permissions);
             var preparation = broker.Prepare(plan, permissions, DateTimeOffset.UtcNow);
             approval = preparation.ApprovalRequest;

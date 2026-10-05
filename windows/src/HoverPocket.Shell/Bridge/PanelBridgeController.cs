@@ -32,6 +32,19 @@ internal sealed class PanelBridgeController : IDisposable
     public Func<string, string?, Task>? AssetCaptureRequested { get; set; }
     internal HoverPocket.Shell.Capture.CaptureController? VoiceCapture { get; set; }
     internal Func<string?, CancellationToken, Task<bool>>? VoiceLibraryRequested { get; set; }
+    internal Func<Task>? ChatRequested { get; set; }
+    internal Func<System.Windows.Window?>? ChatApprovalOwner { get; set; }
+    private readonly ICodexVoiceDynamicToolRuntime _chatTools;
+    internal CodexChatCoordinator CreateChatCoordinator() => CodexChatRuntime.Create(
+        Path.Combine(_settingsStore.RootDirectory, "CodexVoice"), _chatTools);
+    internal async Task LoginChatAsync(CancellationToken token)
+    {
+        using var login = new CodexVoiceAccountLogin();
+        using var cancellation = token.Register(login.Cancel);
+        await login.StartAsync(Path.Combine(_settingsStore.RootDirectory, "CodexVoice"), token);
+        while (login.Status == "waiting") await Task.Delay(150, token);
+        if (login.Status != "succeeded") throw new CodexAppServerProtocolException("chat_login_failed");
+    }
     public HoverPocket.Shell.Providers.Assets.AssetPlaybackOwner AssetPlayback { get; } = new();
     private readonly ProviderRegistry _providerRegistry;
     private readonly UserSettingsStore _settingsStore;
@@ -179,11 +192,17 @@ internal sealed class PanelBridgeController : IDisposable
         ICodexVoiceDynamicToolRuntime codexTools = new CodexRealtimeCapabilityAdapter(openAIRealtimeTools);
         if (capabilityRegistry is not null && _capabilityBroker is not null)
             codexTools = new CodexNativeCapabilityRuntime(codexTools, capabilityRegistry, _capabilityBroker, RequestVoiceNativeApprovalAsync, voiceLibrary);
+        _chatTools = capabilityRegistry is null || _capabilityBroker is null ? codexTools
+            : new CodexNativeCapabilityRuntime(new CodexRealtimeCapabilityAdapter(new OpenAIRealtimeCapabilityRuntime(
+                new BrokerOpenAIRealtimeCapabilityAuthority(capabilityRegistry, _capabilityBroker),
+                RequestVoiceTimerApprovalAsync, RequestVoiceCalendarCreateApprovalAsync,
+                () => CurrentSettings.VoiceCalendarAccessGranted, CapabilityTimeZoneId, origin: CapabilityOrigin.Text)),
+                capabilityRegistry, _capabilityBroker, RequestVoiceNativeApprovalAsync, voiceLibrary, CapabilityOrigin.Text);
         _voiceCoordinator = new VoiceProviderCoordinator(
             CurrentSettings.VoiceEnabled,
             CurrentSettings.VoiceProviderId,
             () => voiceCoordinator ?? CodexVoiceRuntimeComposition.Create(false, codexTools,
-                Path.Combine(settingsStore.RootDirectory, "CodexVoice"), externalIntegrationsEnabled, () => CurrentSettings.Language == AppLanguage.English),
+                Path.Combine(settingsStore.RootDirectory, "CodexVoice"), reuseExistingLogin: false, () => CurrentSettings.Language == AppLanguage.English),
             () => new OpenAIRealtimeVoiceCoordinator(
                 false,
                 _openAIRealtimeCredentialStore,
@@ -417,6 +436,7 @@ internal sealed class PanelBridgeController : IDisposable
         Register("updates.check", CheckForUpdatesAsync);
         if (surface == BridgeSurface.Panel)
         {
+            Register("chat.open", async (_, _) => { if (ChatRequested is not null) await ChatRequested(); return new { ok = true }; });
             Register("provider.select", SelectProviderAsync);
             Register(
                 "voice.requestMicrophone",
@@ -2112,7 +2132,7 @@ internal sealed class PanelBridgeController : IDisposable
         return await _voiceTimerApprovalCoordinator.RequestAsync(new VoiceTimerApprovalRequest(request.Title, 0),
             async (_, token) =>
             {
-                var owner = _voiceApprovalOwner?.Invoke();
+                var owner = ChatApprovalOwner?.Invoke() ?? _voiceApprovalOwner?.Invoke();
                 if (owner is null) return false;
                 return await VoiceTimerApprovalDialog.ShowContentAsync(owner, request.Title, request.Details,
                     CurrentSettings.Language == AppLanguage.English, token).ConfigureAwait(false);
@@ -2144,7 +2164,7 @@ internal sealed class PanelBridgeController : IDisposable
         CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        var owner = _voiceApprovalOwner?.Invoke();
+        var owner = ChatApprovalOwner?.Invoke() ?? _voiceApprovalOwner?.Invoke();
         if (owner is null)
         {
             return false;
@@ -2161,7 +2181,7 @@ internal sealed class PanelBridgeController : IDisposable
         CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        var owner = _voiceApprovalOwner?.Invoke();
+        var owner = ChatApprovalOwner?.Invoke() ?? _voiceApprovalOwner?.Invoke();
         if (owner is null)
         {
             return false;

@@ -27,6 +27,7 @@ const providerIconsEl = document.querySelector("[data-provider-icons]");
 const sizeSwitchEl = document.querySelector("[data-size-switch]");
 const refreshButtonEl = document.querySelector("[data-refresh]");
 const settingsButtonEl = document.querySelector("[data-settings]");
+const chatButtonEl = document.querySelector("[data-chat]");
 
 /** @type {any} */
 let currentState = null;
@@ -102,6 +103,13 @@ async function renderNow(state, options = {}) {
   document.documentElement.dataset.panelAttachment = state.settings.effectivePanelAttachmentStyle;
   document.documentElement.dataset.panelSize = state.settings.panelSize;
   setLanguage(state.settings.language);
+  if (chatButtonEl) {
+    const label = state.settings.language === "en" ? "Open chat" : "チャットを開く";
+    if (!chatButtonEl.firstElementChild) chatButtonEl.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke-width="1.8"><path d="M5 4h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H9l-5 3v-3a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z"/><path d="M7 9h10M7 13h7"/></svg>';
+    chatButtonEl.title = label;
+    chatButtonEl.setAttribute("aria-label", label);
+    chatButtonEl.onclick = () => request("chat.open");
+  }
 
   renderTitle(state);
   renderSizeSwitch(state);

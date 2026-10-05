@@ -64,6 +64,19 @@ internal sealed class HoverShellController : IDisposable
     private AssetOrganizerWindow? _assetOrganizer;
     private AssetDropOverlayWindow? _assetDropOverlay;
     internal AssetDropOverlayWindow? DropOverlayForVerify => _assetDropOverlay;
+    private CodexChatWindow? _chatWindow;
+    private Task OpenChatAsync()
+    {
+        if (_chatWindow is null)
+        {
+            _chatWindow = new CodexChatWindow(_panelBridgeController.CreateChatCoordinator(),
+                _panelBridgeController.CurrentSettings.Language == AppLanguage.English, _panelBridgeController.LoginChatAsync);
+            _chatWindow.Closed += (_, _) => _chatWindow = null;
+            _chatWindow.Show();
+        }
+        _chatWindow.Activate();
+        return Task.CompletedTask;
+    }
     private bool _assetDragActive;
     private int _assetDragRevision;
     private async void OnAssetDragChanged(bool active)
@@ -154,6 +167,8 @@ internal sealed class HoverShellController : IDisposable
             voiceE2EReceiptStore: voiceE2EReceiptStore,
             isolatedVoiceE2EDefaults: isolatedVoiceE2EDefaults);
         _panelBridgeController.SettingsChanged += OnPanelSettingsChanged;
+        _panelBridgeController.ChatRequested = OpenChatAsync;
+        _panelBridgeController.ChatApprovalOwner = () => _chatWindow;
         _panelBridgeController.SettingsOpenRequested += OnSettingsOpenRequested;
         _panelBridgeController.TimerAlertFired += OnTimerAlertFired;
         _panelBridgeController.TimerAlertChanged += OnTimerAlertChanged;
@@ -333,6 +348,7 @@ internal sealed class HoverShellController : IDisposable
         _panel.Win32MessageReceived -= OnWindowWin32MessageReceived;
         _assetOrganizer?.Close();
         _assetDropOverlay?.Close();
+        _chatWindow?.Close();
         _panelBridgeController.SettingsChanged -= OnPanelSettingsChanged;
         _panelBridgeController.SettingsOpenRequested -= OnSettingsOpenRequested;
         _panelBridgeController.TimerAlertFired -= OnTimerAlertFired;
