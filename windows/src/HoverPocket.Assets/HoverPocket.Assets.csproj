@@ -4,4 +4,5 @@
   <ItemGroup><EmbeddedResource Include="../../../shared/asset-library/001-initial.sql" LogicalName="AssetLibrary.001-initial.sql" /></ItemGroup>
   <ItemGroup><EmbeddedResource Include="../../../shared/asset-library/case-fold.json" LogicalName="AssetLibrary.case-fold.json" /></ItemGroup>
   <ItemGroup><AssemblyAttribute Include="System.Runtime.CompilerServices.InternalsVisibleTo"><_Parameter1>Assets.Core</_Parameter1></AssemblyAttribute></ItemGroup>
+  <ItemGroup><EmbeddedResource Include="../../../shared/asset-library/sync-v1/002-sync.sql" LogicalName="AssetLibrary.002-sync.sql" /></ItemGroup>
 </Project>

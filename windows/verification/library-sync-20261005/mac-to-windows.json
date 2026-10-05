@@ -1,0 +1,89 @@
+{
+  "status": {
+    "configured": true,
+    "transportPath": "E:\\HoverPocketSyncTransport-verify-20261005",
+    "groupId": "7cfbaf08-61da-4501-8c0b-044c35ec9e0f",
+    "deviceId": "0298275d-73e2-4a65-99e5-7016e5b0cea9",
+    "pending": 0,
+    "outgoing": 0,
+    "conflicts": [],
+    "error": null,
+    "enabled": true
+  },
+  "manifest": {
+    "version": 1,
+    "createdAt": "2026-10-05T11:56:41.3635878\u002B00:00",
+    "assets": [
+      {
+        "id": "d38e5f10-ee5c-4a4d-8c20-cfaf15420b10",
+        "name": "Mac-\u65E5\u672C\u8A9E.txt",
+        "extension": "txt",
+        "kind": "other",
+        "sha256": "35a59c0efc895c6684a577c8324e50be7bb1d90979230aef6cc2beadc9189931",
+        "sizeBytes": 39,
+        "createdAt": "2026-10-05T11:48:28.069Z",
+        "favorite": false,
+        "trashed": false,
+        "internetOrigin": false,
+        "folderIds": [
+          "c2e93dee-4278-46f8-b8ea-7454569500a6"
+        ],
+        "tagIds": []
+      },
+      {
+        "id": "31e2a6f6-9412-4655-a99a-63a8bd639da8",
+        "name": "Mac\u304B\u3089\u66F4\u65B0.txt",
+        "extension": "txt",
+        "kind": "other",
+        "sha256": "b949c16ff62b4bf707a5100d71bf89f22094db92221052141f92c38d1b1ae4ac",
+        "sizeBytes": 57,
+        "createdAt": "2026-10-05T11:52:21.1644342\u002B00:00",
+        "favorite": true,
+        "trashed": true,
+        "internetOrigin": false,
+        "folderIds": [
+          "ae36151d-9e71-4e9d-9f5a-a2eb4cd74ffe"
+        ],
+        "tagIds": [
+          "80b4bf86-b7b2-4720-837c-c4e2b6857518"
+        ]
+      }
+    ],
+    "folders": [
+      {
+        "id": "c2e93dee-4278-46f8-b8ea-7454569500a6",
+        "name": "Mac\u540C\u671F\u30C6\u30B9\u30C8",
+        "parentId": null
+      },
+      {
+        "id": "44df2f38-8138-45c9-a0cc-d40b67581fa6",
+        "name": "Windows\u691C\u8A3C",
+        "parentId": null
+      },
+      {
+        "id": "ae36151d-9e71-4e9d-9f5a-a2eb4cd74ffe",
+        "name": "\u5B50\u30D5\u30A9\u30EB\u30C0",
+        "parentId": "44df2f38-8138-45c9-a0cc-d40b67581fa6"
+      }
+    ],
+    "tags": [
+      {
+        "id": "80b4bf86-b7b2-4720-837c-c4e2b6857518",
+        "name": "Windows\u691C\u8A3C\u30BF\u30B0",
+        "parentId": null
+      }
+    ],
+    "searches": [],
+    "excludedPending": 0
+  },
+  "originals": [
+    {
+      "sha256": "35a59c0efc895c6684a577c8324e50be7bb1d90979230aef6cc2beadc9189931",
+      "actual": "35a59c0efc895c6684a577c8324e50be7bb1d90979230aef6cc2beadc9189931"
+    },
+    {
+      "sha256": "b949c16ff62b4bf707a5100d71bf89f22094db92221052141f92c38d1b1ae4ac",
+      "actual": "b949c16ff62b4bf707a5100d71bf89f22094db92221052141f92c38d1b1ae4ac"
+    }
+  ]
+}

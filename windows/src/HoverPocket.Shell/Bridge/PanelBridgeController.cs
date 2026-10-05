@@ -127,6 +127,7 @@ internal sealed partial class PanelBridgeController : IDisposable
         AssetLibrary = new HoverPocket.Assets.AssetStore(string.Equals(Path.GetFullPath(settingsStore.RootDirectory), Path.GetFullPath(productionSettingsRoot), StringComparison.OrdinalIgnoreCase)
             ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "HoverPocket", "AssetLibrary")
             : Path.Combine(settingsStore.RootDirectory, "AssetLibrary"), HoverPocket.Shell.Providers.Assets.AssetRecycle.MoveAsync);
+        if (externalIntegrationsEnabled) _assetSync = new HoverPocket.Assets.AssetSyncRunner(AssetLibrary);
         _weatherStore = new WeatherStore(Path.Combine(settingsStore.RootDirectory, "weather"));
         _startupRegistration = startupRegistration ?? new RunKeyStartupRegistrationService();
         _updaterService = updaterService ?? new UpdaterService();
@@ -467,6 +468,10 @@ internal sealed partial class PanelBridgeController : IDisposable
         }
         if (surface == BridgeSurface.Settings)
         {
+            Register("assetSync.status", async (_, token) => await AssetLibrary.GetSyncStatusAsync(token));
+            Register("assetSync.configure", ConfigureAssetSyncAsync);
+            Register("assetSync.enable", EnableAssetSyncAsync);
+            Register("assetSync.resolve", ResolveAssetSyncAsync);
             Register("settings.setVoiceEnabled", SetVoiceEnabledAsync);
             Register("settings.setVoiceProvider", SetVoiceProviderAsync);
             Register(
@@ -567,6 +572,7 @@ internal sealed partial class PanelBridgeController : IDisposable
         }
 
         _disposed = true;
+        if (_assetSync is not null) _ = _assetSync.DisposeAsync();
         if (_inlineChat is not null) _ = _inlineChat.DisposeAsync();
         _timerBridgeHandlers.AlertFired -= OnTimerAlertFired;
         _timerBridgeHandlers.AlertChanged -= OnTimerAlertChanged;
