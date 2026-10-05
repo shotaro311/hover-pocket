@@ -81,6 +81,7 @@ enum AssetMediaVerification {
             guard !audioTracks.isEmpty, !(try await recorded.loadTracks(withMediaType: .video)).isEmpty else { throw LibraryError.message("audio recording track missing") }
             audioChecks.append(["system": system, "microphone": microphone, "status": "passed", "systemSamplesCaptured": recorder.didCaptureSystemAudio, "audioTracks": audioTracks.count, "duration": try await recorded.load(.duration).seconds])
         }
-        return ["status": "passed", "duration": duration, "width": poster.width, "height": poster.height, "audio": audioChecks]
+        let presentation = try await AssetCaptureController.shared.verifyScreenshotPresentation()
+        return ["status": "passed", "duration": duration, "width": poster.width, "height": poster.height, "audio": audioChecks, "presentation": presentation]
     }
 }

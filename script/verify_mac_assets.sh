@@ -4,7 +4,7 @@ ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT_DIR"
 python3 script/verify_voice_foundation.py
 if [[ "${1:-}" != "--skip-build" ]]; then
-  BUNDLE_IDENTIFIER=local.codex.hover-pocket.asset-dev HOVERPOCKET_KEYCHAIN_SERVICE_SUFFIX=asset-dev APP_BUILD=662 ./script/build_and_run.sh --build-only
+  BUNDLE_IDENTIFIER=local.codex.hover-pocket.asset-dev HOVERPOCKET_KEYCHAIN_SERVICE_SUFFIX=asset-dev APP_BUILD=663 ./script/build_and_run.sh --build-only
 fi
 EVIDENCE_DIR="$(mktemp -d "${TMPDIR:-/tmp/}HoverPocket-Assets-XXXXXX")"
 APP="$ROOT_DIR/dist/HoverPocket.app/Contents/MacOS/HoverPocket"

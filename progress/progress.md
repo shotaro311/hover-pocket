@@ -2,8 +2,13 @@
 project_slug: hover-menu-preview
 updated: 2026-10-05
 updated_by: codex
-status: windows-0.2.10-installed; public-windows-0.2.10; reported-freeze-incident-unconfirmed-reproduced-preview-races-fixed; published-macos-644; macos-asset-library-local-662; macos-physical-acceptance-partial
+status: windows-0.2.10-installed; public-windows-0.2.10; reported-freeze-incident-unconfirmed-reproduced-preview-races-fixed; published-macos-644; macos-asset-library-local-663; macos-physical-acceptance-partial
 ---
+
+## 2026-10-05 Macの撮影画面が開かない問題を修正
+
+- 撮影画面がアプリの非アクティブ状態で隠れ、キー入力を受け取らない問題を修正。開発版663を起動し、素材画面の撮影ボタンから撮影・編集画面が開くことを確認した。
+- 背面からの開始、非アクティブ時の表示保持、Esc取消の3条件と、保存40項目・UI58項目・再開2項目・既存機能100回反復が通過。利用中ライブラリへ保存されたPNG1件のサイズ・SHA・DB整合性も別経路で確認した。[作業記録](2026-10/2026-10-05_hover-pocket-mac-capture-focus.md)。
 
 ## 2026-10-05 Mac / Windowsのリファクタリング
 

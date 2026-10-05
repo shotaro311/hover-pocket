@@ -111,8 +111,10 @@ final class AssetCaptureController: NSObject, ObservableObject {
                 frames.append((screen, image, rects))
             }
             guard !frames.isEmpty else { throw LibraryError.message("撮影できる画面がありません。") }
+            NSApp.activate(ignoringOtherApps: true)
             for (screen, image, rects) in frames {
                 let panel = AssetCapturePanel(contentRect: screen.frame, styleMask: [.borderless], backing: .buffered, defer: false)
+                panel.title = "スクリーンショットを撮影"; panel.hidesOnDeactivate = false
                 panel.level = .screenSaver; panel.isOpaque = true; panel.backgroundColor = .black
                 panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]; panel.isReleasedWhenClosed = false
                 let view = AssetCaptureOverlay(image: image, windowRects: rects)
@@ -158,6 +160,35 @@ final class AssetCaptureController: NSObject, ObservableObject {
         } catch { status = error.localizedDescription; closeOverlays(); showFailure(status) }
     }
     private func closeOverlays() { overlays.forEach { $0.orderOut(nil) }; overlays.removeAll(); busy = false }
+
+    func verifyScreenshotPresentation() async throws -> [String] {
+        guard CommandLine.arguments.contains("--verify-asset-library"), !busy, !recording else {
+            throw LibraryError.message("screenshot presentation verification precondition")
+        }
+        defer { closeOverlays() }
+        NSApp.deactivate()
+        try await Task.sleep(for: .milliseconds(100))
+        guard !NSApp.isActive else { throw LibraryError.message("capture verification must start with the app inactive") }
+        await screenshot(folder: nil)
+        try await Task.sleep(for: .milliseconds(100))
+        guard busy, !overlays.isEmpty, overlays.allSatisfy({ $0.isVisible }),
+              let panel = overlays.first(where: { $0.isKeyWindow }),
+              let view = panel.contentView as? AssetCaptureOverlay else {
+            throw LibraryError.message("screenshot overlay did not become visible and receive keyboard focus")
+        }
+        NSApp.deactivate()
+        try await Task.sleep(for: .milliseconds(100))
+        guard overlays.allSatisfy({ $0.isVisible && !$0.hidesOnDeactivate }) else {
+            throw LibraryError.message("screenshot overlay disappeared when the app became inactive")
+        }
+        guard let escape = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0,
+            windowNumber: panel.windowNumber, context: nil, characters: "\u{1b}", charactersIgnoringModifiers: "\u{1b}", isARepeat: false, keyCode: 53) else {
+            throw LibraryError.message("capture cancel event missing")
+        }
+        view.keyDown(with: escape)
+        guard overlays.isEmpty, !busy else { throw LibraryError.message("capture cancellation did not release the session") }
+        return ["inactive app capture presents a focused overlay", "overlay survives application deactivation", "Escape cancels and releases the capture session"]
+    }
     private func showToast(_ asset: LibraryAsset, screen: NSScreen) async {
         guard preferences.screenshotToastSeconds > 0 else { return }
         do {
