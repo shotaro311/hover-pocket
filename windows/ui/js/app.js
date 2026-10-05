@@ -27,6 +27,7 @@ const providerIconsEl = document.querySelector("[data-provider-icons]");
 const sizeSwitchEl = document.querySelector("[data-size-switch]");
 const refreshButtonEl = document.querySelector("[data-refresh]");
 const settingsButtonEl = document.querySelector("[data-settings]");
+const chatButtonEl = document.querySelector("[data-chat]");
 
 /** @type {any} */
 let currentState = null;
@@ -46,6 +47,7 @@ let suppressProviderSelection = false;
 let voiceTransport = null;
 let pendingVoiceTransportSignal = null;
 let voiceTransportStarting = false;
+let voiceStartAttempt = 0;
 
 on("state.changed", (state) => {
   void render(state);
@@ -101,6 +103,13 @@ async function renderNow(state, options = {}) {
   document.documentElement.dataset.panelAttachment = state.settings.effectivePanelAttachmentStyle;
   document.documentElement.dataset.panelSize = state.settings.panelSize;
   setLanguage(state.settings.language);
+  if (chatButtonEl) {
+    const label = state.settings.language === "en" ? "Open chat" : "チャットを開く";
+    if (!chatButtonEl.firstElementChild) chatButtonEl.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke-width="1.8"><path d="M5 4h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H9l-5 3v-3a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z"/><path d="M7 9h10M7 13h7"/></svg>';
+    chatButtonEl.title = label;
+    chatButtonEl.setAttribute("aria-label", label);
+    chatButtonEl.onclick = () => request("chat.open");
+  }
 
   renderTitle(state);
   renderSizeSwitch(state);
@@ -475,7 +484,7 @@ function renderVoiceLane(state) {
   voiceLaneEl.hidden = mode === "disabled";
   voiceLaneEl.dataset.mode = mode;
   if (voiceLaneEl.hidden) {
-    disposeLocalVoiceTransport();
+    cancelLocalVoiceTransport();
     return;
   }
 
@@ -487,15 +496,13 @@ function renderVoiceLane(state) {
 }
 
 function createVoiceMicrophoneButton(lane) {
-  const active = Boolean(lane.realtimeAttached || voiceTransport);
+  const active = Boolean(lane.realtimeAttached || voiceTransport || voiceTransportStarting);
   const microphone = voiceButton(
-    active ? t("voiceMicrophoneActive") : t("voiceStartMicrophone"),
-    active ? "●" : "◉",
-    () => { void startVoiceRealtime(); },
+    active ? t("voiceEndSession") : t("voiceStartMicrophone"),
+    active ? "■" : "◉",
+    () => { void (active ? endVoiceRealtime() : startVoiceRealtime()); },
   );
-  microphone.disabled = active
-    || lane.availability !== "ready"
-    || ["connecting", "requesting_permission", "negotiating", "stopping", "recovering"].includes(lane.sessionStatus);
+  microphone.disabled = (!active && lane.availability !== "ready") || lane.sessionStatus === "stopping";
   microphone.classList.add("hp-voice-microphone");
   return microphone;
 }
@@ -711,12 +718,17 @@ async function startVoiceRealtime(dependencies = {}) {
   const createAudio = dependencies.createAudio ?? (() => new Audio());
   const waitForIce = dependencies.waitForIce ?? waitForIceGatheringComplete;
   voiceTransportStarting = true;
+  const attempt = ++voiceStartAttempt;
+  const ensureCurrent = () => {
+    if (attempt !== voiceStartAttempt) throw Object.assign(new Error("voice_cancelled"), { voiceCancelled: true });
+  };
   let transport = null;
   let acquiredStream = null;
   let hostRealtimeRequestIssued = false;
   let mediaLease = null;
   try {
     const microphoneRequest = await requestBridge("voice.requestMicrophone");
+    ensureCurrent();
     if (microphoneRequest?.mediaLease != null) {
       if (typeof microphoneRequest.mediaLease !== "string"
         || !/^[0-9a-f]{32}$/.test(microphoneRequest.mediaLease)) {
@@ -738,6 +750,7 @@ async function startVoiceRealtime(dependencies = {}) {
       video: false,
     });
     acquiredStream = stream;
+    ensureCurrent();
     for (const track of stream.getAudioTracks()) {
       track.enabled = false;
     }
@@ -764,6 +777,9 @@ async function startVoiceRealtime(dependencies = {}) {
       remoteAudioPlaybackCurrent: false,
     };
     voiceTransport = transport;
+    transport.negotiationTimer = window.setTimeout(() => {
+      if (!transport.disposed && !transport.confirmed) void abortVoiceRealtime("webrtc_connection_failed", requestBridge);
+    }, 30_000);
     acquiredStream = null;
     dataChannel.addEventListener?.("message", (event) => {
       void handleVoiceRealtimeDataMessage(transport, event?.data);
@@ -800,17 +816,20 @@ async function startVoiceRealtime(dependencies = {}) {
       if (!transport.disposed && ["failed", "closed"].includes(peer.connectionState)) {
         void abortVoiceRealtime("webrtc_connection_failed", requestBridge);
       }
+      if (!transport.disposed && peer.connectionState === "connected") void confirmVoiceTransport(transport);
     });
 
     const offer = await peer.createOffer({ offerToReceiveAudio: true });
     await peer.setLocalDescription(offer);
     await waitForIce(peer, 8_000);
+    ensureCurrent();
     const localSdp = peer.localDescription?.sdp;
     if (!localSdp || peer.localDescription?.type !== "offer") {
       throw Object.assign(new Error("webrtc_offer_failed"), { voiceReason: "webrtc_offer_failed" });
     }
     hostRealtimeRequestIssued = true;
     const result = await requestBridge("voice.startRealtime", { sdp: localSdp });
+    ensureCurrent();
     if (!Number.isInteger(result?.generation)
       || typeof result?.threadId !== "string"
       || result.threadId.length === 0
@@ -828,18 +847,19 @@ async function startVoiceRealtime(dependencies = {}) {
     }
   } catch (error) {
     const reason = voiceStartFailureReason(error, hostRealtimeRequestIssued);
-    disposeLocalVoiceTransport();
+    if (attempt === voiceStartAttempt) disposeLocalVoiceTransport();
     if (acquiredStream) {
       stopVoiceMediaStream(acquiredStream);
       acquiredStream = null;
       void notifyVoiceMediaEvent({ requestBridge, mediaLease }, "microphoneStopped");
     }
+    if (attempt !== voiceStartAttempt) return;
     try {
       await requestBridge("voice.abortRealtime", { reason });
     } catch {
     }
   } finally {
-    voiceTransportStarting = false;
+    if (attempt === voiceStartAttempt) voiceTransportStarting = false;
   }
 }
 
@@ -918,28 +938,37 @@ async function applyVoiceTransportSignal(signal) {
   }
   try {
     await transport.peer.setRemoteDescription({ type: "answer", sdp: signal.sdp });
-    for (const track of transport.stream.getAudioTracks()) {
-      track.enabled = true;
-    }
-    transport.muted = false;
-    transport.audio.muted = false;
-    await playVoiceRemoteAudio(transport);
-    await transport.requestBridge("voice.confirmRealtime", {
-      generation: transport.generation,
-      threadId: transport.threadId,
-    });
+    if (transport.peer.connectionState === "connected") await confirmVoiceTransport(transport);
   } catch {
     await abortVoiceRealtime("webrtc_connection_failed", transport.requestBridge);
   }
 }
 
+async function confirmVoiceTransport(transport) {
+  if (transport.disposed || transport.confirming || transport.confirmed || !Number.isInteger(transport.generation)) return;
+  transport.confirming = true;
+  try {
+    await transport.requestBridge("voice.confirmRealtime", { generation: transport.generation, threadId: transport.threadId });
+    if (transport.disposed) return;
+    transport.confirmed = true;
+    window.clearTimeout(transport.negotiationTimer);
+    setVoiceTransportMuted(false);
+  } catch {
+    if (!transport.disposed) await abortVoiceRealtime("webrtc_connection_failed", transport.requestBridge);
+  }
+}
+
 async function endVoiceRealtime(requestBridge = request, renderState = render) {
+  voiceStartAttempt++;
+  voiceTransportStarting = false;
   disposeLocalVoiceTransport();
   const state = await requestBridge("voice.endSession");
   await renderState(state);
 }
 
 async function abortVoiceRealtime(reason, requestBridge = request) {
+  voiceStartAttempt++;
+  voiceTransportStarting = false;
   disposeLocalVoiceTransport();
   try {
     const state = await requestBridge("voice.abortRealtime", { reason });
@@ -952,12 +981,12 @@ async function abortVoiceRealtime(reason, requestBridge = request) {
 
 function synchronizeVoiceTransportMute(lane) {
   if (!lane || lane.availability === "disabled" || !lane.transportAttached) {
-    disposeLocalVoiceTransport();
+    cancelLocalVoiceTransport();
     return;
   }
   if (!lane.realtimeAttached
     && ["idle", "recoverable_failure", "blocked_failure"].includes(lane.sessionStatus)) {
-    disposeLocalVoiceTransport();
+    cancelLocalVoiceTransport();
     return;
   }
   setVoiceTransportMuted(Boolean(lane.muted));
@@ -1016,6 +1045,12 @@ async function notifyVoiceMediaEvent(transport, kind) {
   }
 }
 
+function cancelLocalVoiceTransport() {
+  voiceStartAttempt++;
+  voiceTransportStarting = false;
+  disposeLocalVoiceTransport();
+}
+
 function disposeLocalVoiceTransport() {
   pendingVoiceTransportSignal = null;
   const transport = voiceTransport;
@@ -1024,6 +1059,7 @@ function disposeLocalVoiceTransport() {
     return;
   }
   transport.disposed = true;
+  window.clearTimeout(transport.negotiationTimer);
   if (transport.microphoneCurrent) {
     transport.microphoneCurrent = false;
     void notifyVoiceMediaEvent(transport, "microphoneStopped");
@@ -1068,7 +1104,7 @@ function waitForIceGatheringComplete(peer, timeoutMs) {
   return new Promise((resolve, reject) => {
     const timeout = window.setTimeout(() => {
       peer.removeEventListener("icegatheringstatechange", onStateChanged);
-      reject(Object.assign(new Error("webrtc_offer_failed"), { voiceReason: "webrtc_offer_failed" }));
+      resolve();
     }, timeoutMs);
     function onStateChanged() {
       if (peer.iceGatheringState === "complete") {
@@ -1138,7 +1174,7 @@ async function verifyVoiceTransportHarness() {
     removeEventListener(name) { this.listeners.delete(name); }
     createOffer() { return Promise.resolve({ type: "offer", sdp: "v=0\r\no=fake-offer\r\n" }); }
     setLocalDescription(description) { this.localDescription = description; return Promise.resolve(); }
-    setRemoteDescription(description) { this.remoteDescription = description; return Promise.resolve(); }
+    setRemoteDescription(description) { this.remoteDescription = description; this.connectionState = "connected"; return Promise.resolve(); }
     close() { this.closed = true; this.connectionState = "closed"; }
   }
   const requestBridge = async (method) => {
@@ -1255,10 +1291,26 @@ async function verifyVoiceTransportHarness() {
     PeerConnection: FakePeerConnection,
     createAudio: () => audio,
   });
+  const pendingTrack = { stopped: false, stop() { this.stopped = true; } };
+  let resolvePermission;
+  const permissionPending = new Promise(resolve => { resolvePermission = resolve; });
+  const pendingCalls = [];
+  const startPending = startVoiceRealtime({
+    requestBridge: async method => { pendingCalls.push(method); return {}; },
+    mediaDevices: { getUserMedia: () => permissionPending },
+    PeerConnection: FakePeerConnection,
+    createAudio: () => audio,
+  });
+  await Promise.resolve();
+  synchronizeVoiceTransportMute({ availability: "disabled" });
+  resolvePermission({ getTracks: () => [pendingTrack], getAudioTracks: () => [pendingTrack] });
+  await startPending;
+  const pendingPermissionCancelled = pendingTrack.stopped && !pendingCalls.includes("voice.startRealtime") && !voiceTransportStarting;
   return connected
     && cleaned
     && endStoppedBeforeNative
     && failedInitializationCleaned
+    && pendingPermissionCancelled
     && !mediaRequestedWithoutPermission
     && calls.includes("voice.abortRealtime")
     && voiceTransport === null;

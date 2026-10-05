@@ -118,6 +118,7 @@ internal sealed class OpenAIRealtimeCapabilityRuntime : IOpenAIRealtimeCapabilit
     private readonly Func<bool> _calendarAccessGranted;
     private readonly Func<string> _timeZoneId;
     private readonly Func<DateTimeOffset> _now;
+    private readonly CapabilityOrigin _origin;
     private readonly object _callSync = new();
     private readonly Dictionary<string, RememberedCall> _calls = new(StringComparer.Ordinal);
     private readonly Queue<string> _completedCalls = new();
@@ -128,7 +129,8 @@ internal sealed class OpenAIRealtimeCapabilityRuntime : IOpenAIRealtimeCapabilit
         Func<VoiceCalendarCreateApprovalRequest, CancellationToken, Task<bool>> requestCalendarCreateApproval,
         Func<bool> calendarAccessGranted,
         Func<string> timeZoneId,
-        Func<DateTimeOffset>? now = null)
+        Func<DateTimeOffset>? now = null,
+        CapabilityOrigin origin = CapabilityOrigin.Voice)
     {
         _authority = authority;
         _requestTimerApproval = requestTimerApproval;
@@ -136,6 +138,7 @@ internal sealed class OpenAIRealtimeCapabilityRuntime : IOpenAIRealtimeCapabilit
         _calendarAccessGranted = calendarAccessGranted;
         _timeZoneId = timeZoneId;
         _now = now ?? (() => DateTimeOffset.Now);
+        _origin = origin;
         ValidateExactRegistrySurface();
     }
 
@@ -291,7 +294,7 @@ internal sealed class OpenAIRealtimeCapabilityRuntime : IOpenAIRealtimeCapabilit
         var plan = new CapabilityExecutionPlan(
             $"voice-openai-calendar-list:{correlation}",
             now,
-            CapabilityOrigin.Voice,
+            _origin,
             principal,
             null,
             [
@@ -370,7 +373,7 @@ internal sealed class OpenAIRealtimeCapabilityRuntime : IOpenAIRealtimeCapabilit
         var plan = new CapabilityExecutionPlan(
             $"voice-openai-calendar-create:{correlation}",
             now,
-            CapabilityOrigin.Voice,
+            _origin,
             principal,
             null,
             [
@@ -465,7 +468,7 @@ internal sealed class OpenAIRealtimeCapabilityRuntime : IOpenAIRealtimeCapabilit
         var plan = new CapabilityExecutionPlan(
             $"voice-openai-timer-start:{correlation}",
             now,
-            CapabilityOrigin.Voice,
+            _origin,
             principal,
             null,
             [

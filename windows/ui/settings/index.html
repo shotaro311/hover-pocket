@@ -118,6 +118,12 @@
         <button type="button" data-voice-openai-key-delete>APIキーを削除</button>
       </div>
       <div class="segmented settings-spaced-row" data-voice-layout></div>
+      <div class="settings-button-row settings-spaced-row" data-voice-codex-row hidden>
+        <span class="settings-status" role="status" data-voice-codex-status></span>
+        <button type="button" data-voice-codex-login>ChatGPTにログイン</button>
+        <button type="button" data-voice-codex-retry>再接続</button>
+        <button type="button" data-voice-codex-cancel hidden>ログインをキャンセル</button>
+      </div>
       <label class="toggle-row settings-spaced-row">
         <span data-voice-calendar-label>今日の予定名と時刻をCodexへ共有</span>
         <input type="checkbox" data-voice-calendar-access>

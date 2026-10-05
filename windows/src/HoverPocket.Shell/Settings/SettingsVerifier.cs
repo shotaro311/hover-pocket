@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using HoverPocket.CodexSandboxSetup.Contracts;
 using HoverPocket.Shell.Bridge;
 using HoverPocket.Shell.Capabilities;
@@ -22,6 +23,7 @@ internal sealed class SettingsVerifier
         try
         {
             await VerifyAsync();
+            await VerifyVoiceSettingsUiAsync();
         }
         catch (Exception ex)
         {
@@ -41,6 +43,58 @@ internal sealed class SettingsVerifier
         }
 
         return 1;
+    }
+
+    private async Task VerifyVoiceSettingsUiAsync()
+    {
+        var providers = ProviderRegistry.CreateDefault();
+        var store = UserSettingsStore.CreateTemporary("VoiceSettingsUiVerify");
+        using var controller = new PanelBridgeController(providers, store, store.Load(providers.ProviderIds),
+            externalIntegrationsEnabled: false);
+        var window = new SettingsWindow(controller, false, Path.Combine(store.RootDirectory, "WebView"), false)
+        { Left = -20000, Top = -20000, Width = 520, WindowStartupLocation = System.Windows.WindowStartupLocation.Manual, ShowActivated = false };
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        try
+        {
+            window.Show();
+            while (window.WebViewForVerify?.CoreWebView2 is null
+                || await window.WebViewForVerify.ExecuteScriptAsync("document.querySelector('[data-voice-heading]')?.textContent === 'リアルタイム会話'") != "true")
+                await Task.Delay(100, timeout.Token);
+            var web = window.WebViewForVerify;
+            var state = JsonSerializer.SerializeToNode(controller.BuildState(BridgeSurface.Settings))!;
+            state["settings"]!["voiceProviderId"] = VoiceProviderIds.CodexAppServer;
+            state["settings"]!["voiceEnabled"] = true;
+            foreach (var (availability, login, expected) in new[] {
+                ("ready", "idle", "利用可能"), ("signedOut", "idle", "ログイン"), ("disabled", "waiting", "ブラウザ") })
+            {
+                state["settings"]!["voiceAvailability"] = availability;
+                state["settings"]!["voiceLoginStatus"] = login;
+                web.CoreWebView2.PostWebMessageAsJson(new JsonObject { ["event"] = "voice.stateChanged", ["payload"] = state.DeepClone() }.ToJsonString());
+                var check = "document.querySelector('[data-voice-codex-status]').textContent.includes(" + JsonSerializer.Serialize(expected) + ")";
+                while (await web.ExecuteScriptAsync(check) != "true") await Task.Delay(50, timeout.Token);
+                var waiting = login == "waiting" ? "true" : "false";
+                if (await web.ExecuteScriptAsync($"!document.querySelector('[data-voice-codex-row]').hidden && document.querySelector('[data-voice-codex-login]').disabled === {waiting} && document.querySelector('[data-voice-codex-cancel]').hidden !== {waiting}") != "true")
+                    _failures.Add("voice Settings sign-in/ready controls failed");
+            }
+            state["settings"]!["voiceAvailability"] = "ready";
+            state["settings"]!["voiceLoginStatus"] = "idle";
+            web.CoreWebView2.PostWebMessageAsJson(new JsonObject { ["event"] = "voice.stateChanged", ["payload"] = state.DeepClone() }.ToJsonString());
+            await web.ExecuteScriptAsync("document.querySelector('[data-voice-heading]').scrollIntoView({block:'start'})");
+            await Task.Delay(100, timeout.Token);
+            if (await web.ExecuteScriptAsync("document.documentElement.scrollWidth <= document.documentElement.clientWidth") != "true")
+                _failures.Add("voice Settings horizontal overflow");
+            if (await web.ExecuteScriptAsync("getComputedStyle(document.querySelector('[data-voice-openai-key-row]')).display === 'none' && getComputedStyle(document.querySelector('[data-voice-codex-cancel]')).display === 'none'") != "true")
+                _failures.Add("unselected API provider or inactive sign-in controls remained visible");
+            var screenshot = Environment.GetEnvironmentVariable("HOVERPOCKET_VOICE_SETTINGS_SNAPSHOT");
+            if (!string.IsNullOrEmpty(screenshot))
+            {
+                await using var output = File.Create(screenshot);
+                await web.CoreWebView2.CapturePreviewAsync(Microsoft.Web.WebView2.Core.CoreWebView2CapturePreviewImageFormat.Png, output);
+            }
+            if (store.ReloadOrDefault(providers.ProviderIds).VoiceEnabled) _failures.Add("voice UI fixture modified persisted settings");
+            VerifyConsole.WriteLine("PASS voice Settings UI: ready, signed-out, sign-in pending/cancel, narrow layout, isolated fixture");
+        }
+        finally { window.Close(); window.WebViewForVerify?.Dispose(); }
     }
 
     private async Task VerifyAsync()

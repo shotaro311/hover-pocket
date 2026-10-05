@@ -235,15 +235,17 @@ internal static class CaptureVerifier
             }
             var videoStage = captureFiles.CreateStage(); var videoPath = Path.Combine(videoStage, "recorded.mp4"); using (File.Create(videoPath)) { }
             using var tone = new WasapiPlayerBuilder().Build(); tone.Init(new SignalGenerator(48000, 2) { Gain = .03, Frequency = 660, Type = SignalGeneratorType.Sin }.ToWaveProvider());
-            using var recorder = await ScreenRecorder.StartAsync(item, videoPath, true, true);
-            tone.Play(); await Task.Delay(2200); recorder.Stop(); await recorder.Completion.WaitAsync(TimeSpan.FromSeconds(20)); tone.Stop();
+            var hardwareAudio = Environment.GetEnvironmentVariable("HOVERPOCKET_CAPTURE_VERIFY_NO_AUDIO") != "1";
+            using var recorder = await ScreenRecorder.StartAsync(item, videoPath, hardwareAudio, hardwareAudio);
+            if (hardwareAudio) tone.Play(); await Task.Delay(2200); recorder.Stop(); await recorder.Completion.WaitAsync(TimeSpan.FromSeconds(20)); if (hardwareAudio) tone.Stop();
             var file = await StorageFile.GetFileFromPathAsync(videoPath); var properties = await file.Properties.GetVideoPropertiesAsync();
             if (recorder.VideoFrames < 2 || properties.Duration.TotalSeconds < .5 || properties.Width == 0) failures.Add("recorded video empty");
-            if (recorder.MicrophonePackets == 0) failures.Add("microphone packets missing");
+            if (hardwareAudio && recorder.MicrophonePackets == 0) failures.Add("microphone packets missing");
             await VerifyVideoOrientationAsync(videoPath, "audio", failures);
             var soundEnergy = 0d;
-            using (var audio = new NAudio.Wave.MediaFoundationReader(videoPath))
+            if (hardwareAudio) using (var audio = new NAudio.Wave.MediaFoundationReader(videoPath))
             { var samples = audio.ToSampleProvider(); var data = new float[48000 * 2]; var count = samples.Read(data.AsSpan()); soundEnergy = data.Take(count).Select(value => (double)value * value).Sum(); if (count == 0 || soundEnergy < .00001) failures.Add("loopback AAC audio missing"); }
+            else VerifyConsole.WriteLine("SKIP hardware microphone/system audio: generated-window recording only");
             CaptureFiles.MarkComplete(videoStage, [videoPath], folder); await captureFiles.ImportCompletedAsync(videoStage);
             page = await store.QueryAsync(new(FolderId: folder)); if (page.Total != 3 || page.Items.Count(asset => asset.Kind == "image") != 2 || page.Items.Count(asset => asset.Kind == "video") != 1) failures.Add("recording library classification");
             VerifyConsole.WriteLine($"PASS recording: frames={recorder.VideoFrames}, duration_ms={properties.Duration.TotalMilliseconds:0}, dimensions={properties.Width}x{properties.Height}, audio_track_nonzero={soundEnergy > .00001}, microphone_packets={recorder.MicrophonePackets}, automatic_import=true");

@@ -9,6 +9,7 @@ var source = Path.Combine(root, "ＡＢＣ_猫 image.PNG");
 await File.WriteAllBytesAsync(source, Enumerable.Range(0, 100000).Select(i => (byte)(i % 251)).ToArray());
 var sourceHash = Hash(source); var tests = 0;
 void Check(bool condition, string name) { if (!condition) throw new Exception("FAILED: " + name); tests++; }
+tests += await OrganizationChecks.RunAsync(root);
 Check(AssetFormat.Normalize("Straße Σςσ ＡＢＣ") == AssetFormat.Normalize("STRASSE σσσ abc"), "full case fold expansions and sigma");
 Check(AssetFormat.Normalize("İ") == "i\u0307" && AssetFormat.Normalize("ı") != AssetFormat.Normalize("I"), "locale independent dotted and dotless I");
 async Task Reject(Func<Task> action, string name) { try { await action(); } catch (Exception ex) when (ex is InvalidDataException or InvalidOperationException or ArgumentException or IOException) { tests++; return; } throw new Exception("FAILED: " + name); }
@@ -49,6 +50,22 @@ using (var rangeStore = new AssetStore(Path.Combine(root, "selection-ranges")))
     await Reject(() => rangeStore.QueryAsync(new(Version: 2, SortBy: "name;DROP TABLE assets")), "unknown sort cannot enter SQL");
     await Reject(() => rangeStore.QueryAsync(new(Version: 2, Extension: "' OR 1=1")), "invalid extension rejected");
     await Reject(() => rangeStore.QueryAsync(new(Extension: "txt")), "new filter requires its explicit version");
+    await Reject(() => rangeStore.QueryAsync(new(Text: "\uD800")), "query failure inside the reader gate is propagated");
+    Check((await rangeStore.GetAsync(ordered[0]).WaitAsync(TimeSpan.FromSeconds(5)))?.Id == ordered[0], "failed query releases the reader gate for item lookup");
+    using (var cancelled = new CancellationTokenSource())
+    {
+        cancelled.Cancel();
+        try { await rangeStore.SelectionRangeAsync(new(), ordered[0], ordered[1], cancelled.Token); throw new Exception("FAILED: cancelled selection completed"); }
+        catch (OperationCanceledException) { tests++; }
+    }
+    var concurrentReads = await Task.WhenAll(Enumerable.Range(0, 12).Select(async index =>
+    {
+        var page = await rangeStore.QueryAsync(new(Offset: index % 6, Limit: 1));
+        var selected = await rangeStore.GetAsync(ordered[index % 6]);
+        var ids = await rangeStore.SelectionRangeAsync(new(), ordered[1], ordered[4]);
+        return page.Items.Single().Id == selected?.Id && ids.SequenceEqual(ordered[1..5]);
+    })).WaitAsync(TimeSpan.FromSeconds(10));
+    Check(concurrentReads.All(value => value), "query, lookup and range readers remain usable after cancellation and concurrent requests");
     var range = await rangeStore.SelectionRangeAsync(new(Offset: 4, Limit: 1), ordered[1], ordered[4]);
     Check(range.SequenceEqual(ordered[1..5]), "selection range includes both endpoints beyond the visible page");
     Check((await rangeStore.SelectionRangeAsync(new(), ordered[4], ordered[1])).SequenceEqual(range), "reverse selection uses displayed order");
@@ -93,6 +110,10 @@ await Reject(() => store.SaveSearchAsync("unknown", new(Version:99)), "unknown s
 Check((await store.QueryAsync(new(Text: "' OR 1=1 --"))).Total == 0, "SQL metacharacters remain literals");
 Check((await store.QueryAsync(new(View: "uncategorized"))).Total == 0, "uncategorized is folder membership");
 await store.UpdateAsync([id], "favorite"); Check((await store.QueryAsync(new(View: "favorites"))).Total == 1, "favorite filter");
+await store.UpdateAsync([id], "favoriteSet", "True"); await store.UpdateAsync([id], "favoriteSet", "True");
+Check((await store.GetAsync(id))!.Favorite, "repeated favorite set does not toggle");
+await store.UpdateAsync([id], "favoriteSet", "False"); Check(!(await store.GetAsync(id))!.Favorite, "favorite unset");
+await store.UpdateAsync([id], "favoriteSet", "True");
 await store.UpdateAsync([id], "rename", "改名済み.pdf"); Check(Hash(store.OriginalPath(saved)) == sourceHash && (await store.GetAsync(id))!.Extension == "png", "rename preserves ID, path, extension, bytes");
 await store.SaveSearchAsync("画像", new(Kind: "image", Version: 2, Extension: "png", SortBy: "name", Descending: false));
 var copy = await store.CopyOutAsync(id); await File.WriteAllTextAsync(copy, "external edit");

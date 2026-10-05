@@ -1,0 +1,4 @@
+UI verify: WebView2 host + bridge + provider registry + settings
+PASS cold top-edge open: panel_visible_before_webview_ready=true, dispatch_ms=42.1
+PASS voice-library: 19-tool exact Codex route; real fixture PNG/MP4; target/denial/root/bounds/stale/busy/cancel guards; metadata readback; native preview; duplicate start/stop; automatic save on target close; no microphone/system audio or production-data writes
+VOICE_LIBRARY_EVIDENCE C:\Users\shotaro\AppData\Local\Temp\HoverPocket\Shell\4fabdedb8c3442889f70d87e244d2172\VoiceLibraryVerify

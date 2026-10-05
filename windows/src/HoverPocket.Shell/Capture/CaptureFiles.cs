@@ -22,7 +22,7 @@ internal sealed class CaptureFiles(AssetStore store)
     public async Task<string[]> ImportCompletedAsync(string stage)
     {
         var pending = JsonSerializer.Deserialize<CapturePending>(await File.ReadAllTextAsync(Path.Combine(stage, "complete.json"))) ?? throw new InvalidDataException("保存待ちの記録が不正です。");
-        if (pending.Files is not { Length: >= 1 and <= 2 } || pending.Files.Any(name => string.IsNullOrEmpty(name) || Path.GetFileName(name) != name || Path.GetExtension(name) is not (".png" or ".mp4"))) throw new InvalidDataException("保存待ちファイルが不正です。");
+        if (pending.Files is not { Length: >= 1 and <= 2 } || pending.Files.Any(name => string.IsNullOrEmpty(name) || Path.GetFileName(name) != name || Path.GetExtension(name) is not (".png" or ".mp4" or ".m4a"))) throw new InvalidDataException("保存待ちファイルが不正です。");
         var folder = pending.FolderId;
         if (folder is not null && !(await store.QueryAsync(new(Limit: 1))).Folders.Any(item => item.Id == folder)) folder = null;
         var ids = new List<string>();

@@ -150,29 +150,56 @@ internal static class AssetLibraryUiVerifier
             var videoId = (await store.ImportAsync(videoPath)).AssetId!; var video = (await store.GetAsync(videoId))!;
             var poster = await media.FrameAsync(video, 1, false, CancellationToken.None);
             if (poster.DataUrl is null || poster.Width != 640) failures.Add("assets: native H.264 poster failed: " + poster.FailureCode);
-            await web.ExecuteScriptAsync($$"""
-                window.__videoProbe={done:false};
-                import('/js/bridge.js').then(async ({request})=>{
-                  try {
-                    const result=await request('assets.preview',{id:'{{videoId}}'});
-                    const video=document.createElement('video');video.muted=true;video.src=result.videoUrl;document.body.append(video);
-                    await video.play();video.currentTime=.5;video.volume=.3;
-                    await request('assets.layout',{fullscreen:true});await request('assets.layout',{fullscreen:false});
-                    const same=video.volume===.3&&!video.paused;
-                    const response=await fetch(result.videoUrl,{headers:{Range:'bytes=0-127'} });
-                    const bytes=await response.arrayBuffer();
-                    video.pause();video.removeAttribute('src');video.load();video.remove();
-                    await request('assets.endPreview');
-                    const revoked=await fetch(result.videoUrl);
-                    window.__videoProbe={done:true,ok:same&&response.status===206&&bytes.byteLength===128&&revoked.status===403};
-                  }catch(error){window.__videoProbe={done:true,ok:false,error:error.message};}
-                });
-                """);
-            deadline = DateTime.UtcNow.AddSeconds(15);
-            while (DateTime.UtcNow < deadline && await web.ExecuteScriptAsync("window.__videoProbe.done") != "true") await Task.Delay(50);
-            var videoResult = await web.ExecuteScriptAsync("window.__videoProbe");
-            using var parsed = JsonDocument.Parse(videoResult);
-            if (!parsed.RootElement.TryGetProperty("ok", out var success) || !success.GetBoolean()) failures.Add("assets: H.264 playback/range/fullscreen/revocation failed: " + videoResult);
+            var rejectedPastEnd = false;
+            void ObserveRange(object? sender, Microsoft.Web.WebView2.Core.CoreWebView2WebResourceRequestedEventArgs args)
+            {
+                if (args.Request.Uri.EndsWith("/" + videoId, StringComparison.Ordinal)
+                    && args.Request.Headers.Contains("Range")
+                    && args.Request.Headers.GetHeader("Range") == $"bytes={video.SizeBytes}-")
+                    rejectedPastEnd = args.Response?.StatusCode == 416;
+            }
+            // The existing 416 response has no CORS header, so verify its status on the native side.
+            web.CoreWebView2.WebResourceRequested += ObserveRange;
+            try
+            {
+                await web.ExecuteScriptAsync($$"""
+                    window.__videoProbe={done:false};
+                    import('/js/bridge.js').then(async ({request})=>{
+                      try {
+                        const result=await request('assets.preview',{id:'{{videoId}}'});
+                        const video=document.createElement('video');video.muted=true;video.src=result.videoUrl;document.body.append(video);
+                        await video.play();video.currentTime=.5;video.volume=.3;
+                        await request('assets.layout',{fullscreen:true});await request('assets.layout',{fullscreen:false});
+                        const same=video.volume===.3&&!video.paused;
+                        const response=await fetch(result.videoUrl,{headers:{Range:'bytes=0-127'} });
+                        const bytes=await response.arrayBuffer();
+                        const full=await fetch(result.videoUrl);const fullBytes=new Uint8Array(await full.arrayBuffer());
+                        const offset=await fetch(result.videoUrl,{headers:{Range:'bytes=1-127'} });const offsetBytes=new Uint8Array(await offset.arrayBuffer());
+                        const tail=await fetch(result.videoUrl,{headers:{Range:`bytes=${fullBytes.length-10}-${fullBytes.length+100}`} });const tailBytes=new Uint8Array(await tail.arrayBuffer());
+                        try { await fetch(result.videoUrl,{headers:{Range:`bytes=${fullBytes.length}-`} }); } catch { /* Native observer checks the 416 response. */ }
+                        const digest=[...new Uint8Array(await crypto.subtle.digest('SHA-256',fullBytes))].map(b=>b.toString(16).padStart(2,'0')).join('');
+                        const ranges=full.status===200&&fullBytes.length==={{video.SizeBytes}}&&digest==='{{video.Sha256}}'
+                          &&offset.status===206&&offsetBytes.length===127&&offsetBytes.every((b,i)=>b===fullBytes[i+1])
+                          &&tail.status===206&&tailBytes.length===10&&tailBytes.every((b,i)=>b===fullBytes[fullBytes.length-10+i]);
+                        video.pause();video.removeAttribute('src');video.load();video.remove();
+                        const next=await request('assets.preview',{id:'{{videoId}}'});
+                        const previous=await fetch(result.videoUrl);
+                        const current=await fetch(next.videoUrl,{headers:{Range:'bytes=0-127'} });await current.arrayBuffer();
+                        await request('assets.endPreview');
+                        const revoked=await fetch(next.videoUrl);
+                        window.__videoProbe={done:true,ok:same&&response.status===206&&bytes.byteLength===128&&ranges&&previous.status===403&&current.status===206&&revoked.status===403,
+                          ranges,previous:previous.status,current:current.status,revoked:revoked.status};
+                      }catch(error){window.__videoProbe={done:true,ok:false,error:error.message};}
+                    });
+                    """);
+                deadline = DateTime.UtcNow.AddSeconds(15);
+                while (DateTime.UtcNow < deadline && await web.ExecuteScriptAsync("window.__videoProbe.done") != "true") await Task.Delay(50);
+                var videoResult = await web.ExecuteScriptAsync("window.__videoProbe");
+                using var parsed = JsonDocument.Parse(videoResult);
+                if (!parsed.RootElement.TryGetProperty("ok", out var success) || !success.GetBoolean()) failures.Add("assets: H.264 playback/range/fullscreen/revocation failed: " + videoResult);
+                if (!rejectedPastEnd) failures.Add("assets: video range past EOF did not return native HTTP 416");
+            }
+            finally { web.CoreWebView2.WebResourceRequested -= ObserveRange; }
         }
         var bridge = controller.PanelBridgeController;
         var dropFolder=Path.Combine(fixtureRoot,"取り込み階層"); Directory.CreateDirectory(Path.Combine(dropFolder,"空フォルダ")); await File.WriteAllTextAsync(Path.Combine(dropFolder,"任意形式.dat"),"Generated folder drop content");
