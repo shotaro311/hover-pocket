@@ -38,3 +38,13 @@
 - Windows担当は音声基盤、通常chat、nativeライブラリ拡張と共有UIを統合。実装 `a5fedee`、記録後の最終 `6db2a23db40e897e383efbacd1db630f5c436655`。[Draft PR #47](https://github.com/shotaro311/hover-pocket/pull/47)。Mac側からfetchとGitHub headRefOid一致、日別ログを読み戻した。
 - Release/Debug warnings0/errors0、保存120、実folder移動/Undo/trash復元、OLEファイル/複数仮想ファイル/上端パネル、音声preview、無音fixture撮影/収録、19tools、通常chatが通過。実ChatGPTでの手入力・隔離folder作成・保存readback・応答stream・履歴再開もWindows担当が確認。
 - カメラ0台のため物理撮影、実マイク・デバイス切断・混在DPIは未検証。外部パネルは上端の入口へdragして表示。保存先ピン留めは今回未実装。通常版PID72424を維持し、検証用画面は終了。公開・main統合は実施していない。
+
+## 統合・実接続・起動の最終確認
+
+- Mac実装 `7ccede8` とWindows最終 `6db2a23` を `48ec83e` へ統合し、PR #44を両OSのレビュー入口にした。競合は共通仕様書末尾の追加だけで、追記を保持した。mainは変更しない。
+- 統合検査で旧Windowsのファイル配置と廃止されたdynamicToolsOnlyを参照する静的検査が失敗。`b3fa3e5` で現在のThreadParameters、read-only/never、空のworkspace roots、認証なしloopbackでの実ツール件数/全inputSchema照合を検査するよう更新し、42 PASS。Windows側へ `9164e19` として反映され、PR #47のCI成功をMac側からも読み戻した。
+- `b3fa3e5` のPR #44ではMac/Windows CIと3 OSの契約比較がすべて成功。その後のMac撮影メニュー保持修正はUI70項目と実画面で確認し、同じPRへ追加する。
+- Mac統合ビルド666で保存54・UI68・再開2・chat9・AI Library53・既存機能と100回開閉が通過。その後、撮影の選択メニューを開いたときにテキスト欄のfocusが外れてパネルが閉じるケースを修正し、保持/閉じた後の解除を加えたUI70項目が通過。
+- 実Macのヘッダーからchatを開き、明示送信「2+2」→応答4、履歴ファイルの保存を読み戻し、アプリを再起動して文脈を使う追加質問→応答7を確認。既存認証を使い、新しい認証ファイルのコピーやログイン操作は行っていない。終了後は新しい会話へ戻した。
+- 最終開発版666を起動。実メニューからカメラ設定画面が開き、カメラと保存先の選択欄を表示することを確認した。準備/録画/録音は開始せず、ユーザーが確認できる画面を残した。署名の再検証は成功。
+- [保存した検証結果](../evidence/2026-10-05-macos-library-extensions/summary.json)。検査素材は隔離フォルダにあり、通常ライブラリを試験素材で増減させていない。依頼済みのcommit/push・開発版起動まで追加確認なしで実施。公開配信は未実施。

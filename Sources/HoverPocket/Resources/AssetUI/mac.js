@@ -2,12 +2,17 @@ import { renderAssetsProvider } from './providers/assets/assets.js';
 import { request } from './js/bridge.js';
 window.assetPane = renderAssetsProvider({container: document.getElementById('assets'), request,
   state: {settings: {language: window.assetConfiguration.language}, organizer: window.assetConfiguration.organizer, platform:'mac'}});
-document.addEventListener('focusin', event => {
-  if (event.target.matches('input,textarea,[contenteditable="true"]')) void request('panel.beginTextInput', {editing:true});
-});
-document.addEventListener('focusout', () => {
-  setTimeout(() => { if (!document.activeElement?.matches('input,textarea,[contenteditable="true"]')) void request('panel.endTextInput'); }, 0);
-});
+let interactionHeld = false;
+function syncInteractionHold() {
+  const editing = !!document.querySelector('dialog[open]') || !!document.activeElement?.matches('input,textarea,[contenteditable="true"]');
+  if (editing === interactionHeld) return;
+  interactionHeld = editing;
+  void request(editing ? 'panel.beginTextInput' : 'panel.endTextInput', {editing});
+}
+document.addEventListener('focusin', syncInteractionHold);
+document.addEventListener('focusout', () => setTimeout(syncInteractionHold, 0));
+// A modal must keep the hover panel open after its launcher loses text focus.
+new MutationObserver(syncInteractionHold).observe(document.body, {subtree:true,childList:true,attributes:true,attributeFilter:['open']});
 document.addEventListener('keydown', event => {
   if (event.isComposing || event.repeat) return;
   if (event.metaKey && event.ctrlKey && event.key.toLowerCase() === 'f') {

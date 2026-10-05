@@ -2,12 +2,14 @@
 project_slug: hover-menu-preview
 updated: 2026-10-05
 updated_by: codex
-status: windows-0.2.10-installed; public-windows-0.2.10; reported-freeze-incident-unconfirmed-reproduced-preview-races-fixed; published-macos-644; macos-asset-library-local-665; macos-physical-acceptance-partial
+status: windows-0.2.10-installed; public-windows-0.2.10; reported-freeze-incident-unconfirmed-reproduced-preview-races-fixed; published-macos-644; macos-library-chat-local-666; macos-physical-acceptance-partial
 ---
 
-## 2026-10-05 ライブラリ操作・撮影・チャットの拡張（進行中）
+## 2026-10-05 ライブラリ操作・撮影・チャットの拡張
 
-共有画面へフォルダ/ゴミ箱等のdrag移動とカメラ・録音メニューを追加。Mac nativeとWindows各担当を並行実装中。通常chatを追加し、専用dictationのChatGPTログイン制約は別途記録する。[仕様・検証・担当](2026-10/2026-10-05_hover-pocket-library-extensions.md)。公開版は未更新。
+- Mac/Windowsにフォルダ・ゴミ箱へのドラッグ整理/復元/Undo、外部取り込みパネル、カメラ写真/動画/録音、音声プレビュー、通常Codex chatを実装し、[統合Draft PR #44](https://github.com/shotaro311/hover-pocket/pull/44)へcommit/push。Windows担当の[PR #47](https://github.com/shotaro311/hover-pocket/pull/47)も含む。
+- Mac開発版666を起動。保存54・UI70・chat9・AI Library53と既存検査、実Codex応答と再起動後の会話再開を確認。Windowsは保存120、実drag移動/Undo/復元・外部取り込み・chat実接続を担当端末で確認。統合検査の旧参照を修正し、Mac/Windows CIと3 OS契約比較が成功した。
+- 音声入力専用は検証したChatGPTログイン経路で未対応のため理由付き無効。Macの人の実ドラッグ、物理camera/mic収録等は未受入。Windows通常版を維持し、公開版・mainは更新していない。[仕様・検証・残る受入](2026-10/2026-10-05_hover-pocket-library-extensions.md)。
 
 ## 2026-10-05 MacにAIの素材ライブラリ操作を追加
 

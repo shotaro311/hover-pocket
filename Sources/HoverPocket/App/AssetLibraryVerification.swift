@@ -44,6 +44,14 @@ enum AssetLibraryVerification {
             try JSONSerialization.data(withJSONObject: result ?? [:], options: [.prettyPrinted, .sortedKeys]).write(to: evidence.appendingPathComponent("web-interactions.json"))
             try check(result?["ok"] as? Bool == true, "Windows interaction suite in WKWebView: \(String(describing: result?["error"]))")
             if let names = result?["checks"] as? [String] { checks += names }
+            pane.organizer = false
+            _ = try await web.evaluateJavaScript("document.querySelector('[data-action=captureMenu]').click()")
+            try await Task.sleep(for: .milliseconds(150))
+            try check(AssetLibraryRuntime.shared.textInput, "capture dialog keeps hover panel open")
+            _ = try await web.evaluateJavaScript("document.querySelector('dialog[open]').close()")
+            try await Task.sleep(for: .milliseconds(150))
+            try check(!AssetLibraryRuntime.shared.textInput, "closing capture dialog releases hover panel hold")
+            pane.organizer = true
             _ = try await web.evaluateJavaScript("window.assetEvent('assets.changed')")
             try await Task.sleep(for: .seconds(1))
             let nativeText = try await web.evaluateJavaScript("document.body.innerText") as? String ?? ""
