@@ -26,3 +26,7 @@ Windowsの作業版 `0.2.11-local.2` を読み取り、同じ11操作をMacへ�
 Windows `C:/Users/shotaro/Downloads/hover-pocket-windows-liquid-20261002` の実ファイルをPC Operator経由で読み取った。`VoiceLibraryCapabilities.cs` の取得後SHA-256は `6c4dccf45984c978fd524b209efdb2189bad8239763e3b8317fa2cd05f10324a`、`CaptureVoiceOperations.cs` は `d12978ae9e30a200cca0b9daf06d83a17fd73b3b80a7fd417246b25f5f522e28`。Windowsのローカル変更を共通Gitへ統合済みとは扱わない。
 
 [操作仕様](../../docs/requirement/asset-library-voice.md) / [使い方](../../docs/usage/macos-asset-library.md)。Windowsとの継続開発には、依頼窓口を一つにし、機能ごとの共通仕様・受入条件を先に共有してOS別ブランチで実装する進め方を提案した。共通UI・契約ファイルの編集者を一人に決め、PRとcommit SHAで受け渡し、各OSの実機結果を別々に確認する。新たな自動化や他タスクへの依頼はこの作業では設定していない。
+
+## コミット・CIの確認
+
+実装を `a9a6bb786d0f748f59b35d3f57716d00887b889b` へコミットし、既存ブランチへpushした。`git ls-remote` とPR #44のheadRefOidが一致。Mac CI [37261639188](https://github.com/shotaro311/hover-pocket/actions/runs/37261639188) とWindows CI [37261639108](https://github.com/shotaro311/hover-pocket/actions/runs/37261639108) はいずれもsuccess。共通契約のMac/Windows/Linux検証も成功。PRはDraftを維持している。この追記は検証結果だけを記録し、ビルド665のソースを変えない。

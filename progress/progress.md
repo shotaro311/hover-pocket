@@ -8,6 +8,7 @@ status: windows-0.2.10-installed; public-windows-0.2.10; reported-freeze-inciden
 ## 2026-10-05 MacにAIの素材ライブラリ操作を追加
 
 - Windows作業版の11操作に対応する検索・プレビュー・名前変更・お気に入り・分類・フォルダ作成・撮影・収録をMac開発版665へ追加。承認前の撮影対象固定、音声確認、再送と古い停止依頼の防止、保存結果の読み戻しを実装した。
+- 実装 `a9a6bb7` をpushし、remote/PRのSHA一致とMac・Windows CI成功を確認。PR #44はDraft。
 - AI操作52項目、素材保存40・UI58・再開2、既存AI操作・Broker、レイアウト128と100回開閉が通過。665を開発アプリへ起動し直した。現在の音声Providerはオフ。実マイク・外部Realtime接続による今回の機能の発話確認、Windows実機、公開・main統合は未実施。[検証と引き継ぎ](2026-10/2026-10-05_hover-pocket-mac-library-voice.md) / [共通操作仕様](../docs/requirement/asset-library-voice.md)。
 
 ## 2026-10-05 Macのノッチ接合部の段差を修正
