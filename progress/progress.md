@@ -5,6 +5,10 @@ updated_by: codex
 status: windows-0.2.10-installed; public-windows-0.2.10; reported-freeze-incident-unconfirmed-reproduced-preview-races-fixed; published-macos-644; macos-asset-library-local-665; macos-physical-acceptance-partial
 ---
 
+## 2026-10-05 ライブラリ操作・撮影・チャットの拡張（進行中）
+
+共有画面へフォルダ/ゴミ箱等のdrag移動とカメラ・録音メニューを追加。Mac nativeとWindows各担当を並行実装中。通常chatを追加し、専用dictationのChatGPTログイン制約は別途記録する。[仕様・検証・担当](2026-10/2026-10-05_hover-pocket-library-extensions.md)。公開版は未更新。
+
 ## 2026-10-05 MacにAIの素材ライブラリ操作を追加
 
 - Windows作業版の11操作に対応する検索・プレビュー・名前変更・お気に入り・分類・フォルダ作成・撮影・収録をMac開発版665へ追加。承認前の撮影対象固定、音声確認、再送と古い停止依頼の防止、保存結果の読み戻しを実装した。
