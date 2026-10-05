@@ -73,7 +73,8 @@ public partial class App : System.Windows.Application
             VerifyConsole.AttachParent();
             var foundationResult = new VoiceFoundationVerifier().Run();
             var realtimeResult = new OpenAIRealtimeVoiceVerifier().Run();
-            Environment.ExitCode = foundationResult == 0 && realtimeResult == 0 ? 0 : 1;
+            var nativeResult = VoiceNativeVerifier.Run();
+            Environment.ExitCode = foundationResult == 0 && realtimeResult == 0 && nativeResult == 0 ? 0 : 1;
             Shutdown();
             return;
         }
@@ -259,6 +260,8 @@ public partial class App : System.Windows.Application
             _captureController = new Capture.CaptureController(shellController.PanelBridgeController.AssetLibrary, effectiveApplicationData.RootDirectory,
                 shellController.HideForCaptureAsync, shellController.RestoreAfterCapture, shellController.OpenAssetLibraryFromUser);
             shellController.PanelBridgeController.AssetCaptureRequested = _captureController.FromLibraryAsync;
+            shellController.PanelBridgeController.VoiceCapture = _captureController;
+            shellController.PanelBridgeController.VoiceLibraryRequested = shellController.OpenAssetLibraryForVoiceAsync;
             updaterService.BeforeRestart = _captureController.StopRecordingAsync;
             _trayIconService = new TrayIconService(shellController, updaterService, _captureController);
             if (shellController.PanelBridgeController.CurrentSettings.AutoCheckForUpdates)

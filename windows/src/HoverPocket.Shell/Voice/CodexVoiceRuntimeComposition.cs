@@ -166,6 +166,13 @@ internal static class CodexExecutableResolver
                 yield return candidate;
             }
         }
+        var desktopRoot = Path.Combine(local, "OpenAI", "Codex", "bin");
+        if (Directory.Exists(desktopRoot))
+            foreach (var directory in Directory.EnumerateDirectories(desktopRoot).OrderByDescending(Directory.GetLastWriteTimeUtc))
+            {
+                var candidate = Path.Combine(directory, ExpectedFileName);
+                if (seen.Add(candidate)) yield return candidate;
+            }
     }
 }
 
@@ -175,6 +182,17 @@ internal sealed class InstalledCodexVoiceRuntime : ICodexVoiceCompatibilityProbe
     private static readonly TimeSpan RequestTimeout = TimeSpan.FromSeconds(20);
     private readonly object _sync = new();
     private CodexExecutableIdentity? _identity;
+    private readonly string _profileRoot;
+    private readonly bool _reuseExistingLogin;
+    private readonly Func<JsonElement> _tools;
+    private string? _verifiedTools;
+
+    public InstalledCodexVoiceRuntime(string profileRoot, Func<JsonElement> tools, bool reuseExistingLogin)
+    {
+        _profileRoot = profileRoot;
+        _tools = tools;
+        _reuseExistingLogin = reuseExistingLogin;
+    }
 
     public async Task<CodexVoiceGate> ProbeAsync(CancellationToken cancellationToken)
     {
@@ -185,7 +203,7 @@ internal sealed class InstalledCodexVoiceRuntime : ICodexVoiceCompatibilityProbe
         }
         lock (_sync)
         {
-            if (Equals(_identity, identity))
+            if (Equals(_identity, identity) && _verifiedTools == _tools().GetRawText())
             {
                 return CodexVoiceGate.Ready;
             }
@@ -198,9 +216,13 @@ internal sealed class InstalledCodexVoiceRuntime : ICodexVoiceCompatibilityProbe
             {
                 return new CodexVoiceGate(false, true, false, schemaError);
             }
+            var tools = _tools();
+            await CodexVoiceToolRouteProbe.VerifyAsync(identity, tools,
+                Path.Combine(_profileRoot, "RouteChecks"), cancellationToken).ConfigureAwait(false);
             lock (_sync)
             {
                 _identity = identity;
+                _verifiedTools = tools.GetRawText();
             }
             return CodexVoiceGate.Ready;
         }
@@ -208,13 +230,19 @@ internal sealed class InstalledCodexVoiceRuntime : ICodexVoiceCompatibilityProbe
         {
             throw;
         }
+        catch (OperationCanceledException)
+        {
+            return new CodexVoiceGate(false, true, false, "voice_tool_route_timeout");
+        }
         catch (Exception exception) when (exception is IOException
             or UnauthorizedAccessException
             or JsonException
             or CodexAppServerProtocolException
+            or System.Net.Sockets.SocketException
             or System.ComponentModel.Win32Exception)
         {
-            return new CodexVoiceGate(false, true, false, "installed_schema_probe_failed");
+            return new CodexVoiceGate(false, true, false,
+                exception is CodexAppServerProtocolException protocol ? protocol.Code : "installed_schema_probe_failed");
         }
     }
 
@@ -225,18 +253,20 @@ internal sealed class InstalledCodexVoiceRuntime : ICodexVoiceCompatibilityProbe
         {
             identity = _identity;
         }
-        identity ??= CodexExecutableResolver.Resolve();
-        if (identity is null)
+        if (identity is null || _verifiedTools != _tools().GetRawText())
         {
-            throw new CodexAppServerProtocolException("codex_executable_missing");
+            throw new CodexAppServerProtocolException("voice_tool_route_unverified");
         }
 
         using var executableLease = identity.OpenValidated();
+        var profile = CodexVoiceProfile.Prepare(_profileRoot, _reuseExistingLogin);
         return CodexAppServerClient.StartProcessAsync(
             identity.Path,
             ["app-server", "--stdio"],
             RequestTimeout,
-            cancellationToken);
+            cancellationToken,
+            profile.Environment,
+            profile.Root);
     }
 
     private static async Task<string?> ProbeSchemaAsync(
@@ -334,10 +364,6 @@ internal sealed class InstalledCodexVoiceRuntime : ICodexVoiceCompatibilityProbe
 
 internal static class CodexVoiceSchemaContract
 {
-    // Keep production activation closed until an official positive tool policy has been
-    // independently verified against the delegated Realtime tool router on Windows.
-    internal const bool BrokerOnlyToolPolicyProductionApproved = false;
-
     public static bool IsCompatible(string schemaRoot) => CompatibilityError(schemaRoot) is null;
 
     public static string? CompatibilityError(string schemaRoot)
@@ -378,13 +404,11 @@ internal static class CodexVoiceSchemaContract
             {
                 return "installed_schema_mismatch";
             }
-            if (!HasBooleanProperty(threadStart.RootElement, "properties", "dynamicToolsOnly"))
-            {
-                return "installed_broker_only_tool_policy_missing";
-            }
-            return BrokerOnlyToolPolicyProductionApproved
-                ? null
-                : "installed_broker_only_tool_policy_not_approved";
+            // Schema support is necessary but insufficient: InstalledCodexVoiceRuntime
+            // also proves the exact tool list through a credential-free loopback turn.
+            return HasProperty(threadStart.RootElement, "runtimeWorkspaceRoots")
+                && HasProperty(threadStart.RootElement, "selectedCapabilityRoots")
+                && ContainsString(start.RootElement, "v3") ? null : "installed_schema_mismatch";
         }
         catch (Exception exception) when (exception is IOException
             or UnauthorizedAccessException
@@ -476,13 +500,18 @@ internal static class CodexVoiceRuntimeComposition
 {
     public static CodexVoiceCoordinator Create(
         bool featureEnabled,
-        ICodexVoiceDynamicToolRuntime? dynamicToolRuntime = null)
+        ICodexVoiceDynamicToolRuntime? dynamicToolRuntime = null,
+        string? profileRoot = null,
+        bool reuseExistingLogin = true,
+        Func<bool>? useEnglish = null)
     {
-        var runtime = new InstalledCodexVoiceRuntime();
+        var runtime = new InstalledCodexVoiceRuntime(profileRoot ?? Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "HoverPocket", "CodexVoice"),
+            () => dynamicToolRuntime?.Definitions ?? JsonSerializer.SerializeToElement(Array.Empty<object>()), reuseExistingLogin);
         return new CodexVoiceCoordinator(
             featureEnabled,
             runtime.StartClientAsync,
             runtime,
-            dynamicToolRuntime: dynamicToolRuntime);
+            dynamicToolRuntime: dynamicToolRuntime, useEnglish: useEnglish);
     }
 }
