@@ -108,7 +108,11 @@ internal sealed class CodexAppServerClient : IAsyncDisposable
             CreateNoWindow = true,
             RedirectStandardInput = true,
             RedirectStandardOutput = true,
-            RedirectStandardError = true
+            RedirectStandardError = true,
+            // JSON-RPC is UTF-8 even when the Windows GUI process uses the system code page.
+            StandardInputEncoding = new UTF8Encoding(false),
+            StandardOutputEncoding = new UTF8Encoding(false),
+            StandardErrorEncoding = new UTF8Encoding(false)
         };
         foreach (var argument in arguments)
         {
@@ -392,17 +396,21 @@ internal sealed class CodexAppServerClient : IAsyncDisposable
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
         }
-        catch (JsonException)
+        catch (JsonException exception)
         {
+            HoverPocket.Shell.Services.AppDiagnostics.Record("codex.transport.invalid_json", exception);
         }
-        catch (IOException)
+        catch (IOException exception)
         {
+            HoverPocket.Shell.Services.AppDiagnostics.Record("codex.transport.io_failed", exception);
         }
-        catch (InvalidOperationException)
+        catch (InvalidOperationException exception)
         {
+            HoverPocket.Shell.Services.AppDiagnostics.Record("codex.transport.invalid_operation", exception);
         }
-        catch (CodexAppServerProtocolException)
+        catch (CodexAppServerProtocolException exception)
         {
+            HoverPocket.Shell.Services.AppDiagnostics.Record("codex.transport." + VoiceTextSafety.SanitizeErrorCode(exception.Code), exception);
         }
         finally
         {
