@@ -56,6 +56,9 @@ public sealed partial class AssetStore
             switch (operation)
             {
                 case "favorite": Execute(db, "UPDATE assets SET favorite=NOT favorite WHERE id=$id", ("id", id)); break;
+                case "favoriteSet":
+                    if (!bool.TryParse(value, out var favorite)) throw new ArgumentException("Invalid favorite value.");
+                    Execute(db, "UPDATE assets SET favorite=$value WHERE id=$id", ("value", favorite ? 1 : 0), ("id", id)); break;
                 case "trash": case "restore": Execute(db, "UPDATE assets SET trashed=$trash WHERE id=$id", ("trash", operation == "trash"), ("id", id)); break;
                 case "rename": if (string.IsNullOrWhiteSpace(value)) throw new ArgumentException("名前を入力してください。"); Execute(db, "UPDATE assets SET name=$name,normalized=$normal WHERE id=$id", ("name", value), ("normal", AssetFormat.Normalize(value)), ("id", id)); break;
                 case "classify": Execute(db, "INSERT OR IGNORE INTO memberships VALUES($id,$category)", ("id", id), ("category", value)); break;

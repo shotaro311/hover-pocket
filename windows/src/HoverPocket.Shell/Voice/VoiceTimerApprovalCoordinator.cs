@@ -63,11 +63,22 @@ internal sealed class VoiceTimerApprovalCoordinator
 
 internal static class VoiceTimerApprovalDialog
 {
-    public static async Task<bool> ShowAsync(
+    public static Task<bool> ShowAsync(
         Wpf.Window owner,
         VoiceTimerApprovalRequest request,
         bool english,
         CancellationToken cancellationToken)
+    {
+        var duration = request.DurationSeconds % 60 == 0
+            ? english ? $"{request.DurationSeconds / 60} minutes" : $"{request.DurationSeconds / 60}分"
+            : english ? $"{request.DurationSeconds} seconds" : $"{request.DurationSeconds}秒";
+        return ShowContentAsync(owner, english ? "Approve Timer" : "Timerを承認",
+            english ? $"Timer: {request.Title}\nDuration: {duration}\n\nStart this timer?"
+                : $"Timer: {request.Title}\n時間: {duration}\n\nこのタイマーを開始しますか？", english, cancellationToken);
+    }
+
+    public static async Task<bool> ShowContentAsync(
+        Wpf.Window owner, string title, string text, bool english, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
         var dispatcher = owner.Dispatcher;
@@ -84,7 +95,7 @@ internal static class VoiceTimerApprovalDialog
             {
                 return false;
             }
-            dialog = Build(owner, request, english);
+            dialog = Build(owner, title, text, english);
             return dialog.ShowDialog() == true;
         });
         try
@@ -113,20 +124,14 @@ internal static class VoiceTimerApprovalDialog
 
     private static Wpf.Window Build(
         Wpf.Window owner,
-        VoiceTimerApprovalRequest request,
+        string title,
+        string text,
         bool english)
     {
-        var duration = request.DurationSeconds % 60 == 0
-            ? english
-                ? $"{request.DurationSeconds / 60} minutes"
-                : $"{request.DurationSeconds / 60}分"
-            : english
-                ? $"{request.DurationSeconds} seconds"
-                : $"{request.DurationSeconds}秒";
         var dialog = new Wpf.Window
         {
             Owner = owner,
-            Title = english ? "Approve Timer" : "Timerを承認",
+            Title = title,
             WindowStartupLocation = Wpf.WindowStartupLocation.CenterOwner,
             WindowStyle = Wpf.WindowStyle.ToolWindow,
             ResizeMode = Wpf.ResizeMode.NoResize,
@@ -142,15 +147,13 @@ internal static class VoiceTimerApprovalDialog
             Margin = new Wpf.Thickness(24),
             Orientation = WpfControls.Orientation.Vertical
         };
-        content.Children.Add(new WpfControls.TextBlock
+        content.Children.Add(new WpfControls.ScrollViewer { MaxHeight = 420, VerticalScrollBarVisibility = WpfControls.ScrollBarVisibility.Auto, Content = new WpfControls.TextBlock
         {
-            Text = english
-                ? $"Timer: {request.Title}\nDuration: {duration}\n\nStart this timer?"
-                : $"Timer: {request.Title}\n時間: {duration}\n\nこのタイマーを開始しますか？",
+            Text = text,
             TextWrapping = Wpf.TextWrapping.Wrap,
             FontSize = 16,
             MaxWidth = 500
-        });
+        }});
         var actions = new WpfControls.StackPanel
         {
             Margin = new Wpf.Thickness(0, 20, 0, 0),
@@ -165,15 +168,15 @@ internal static class VoiceTimerApprovalDialog
             MinWidth = 104,
             Padding = new Wpf.Thickness(14, 8, 14, 8)
         };
-        WpfAutomationProperties.SetName(reject, english ? "Reject timer" : "Timerを拒否");
+        WpfAutomationProperties.SetName(reject, english ? "Cancel operation" : "操作をキャンセル");
         var approve = new WpfControls.Button
         {
-            Content = english ? "Start" : "開始",
+            Content = english ? "Confirm" : "実行する",
             MinWidth = 104,
             Margin = new Wpf.Thickness(12, 0, 0, 0),
             Padding = new Wpf.Thickness(14, 8, 14, 8)
         };
-        WpfAutomationProperties.SetName(approve, english ? "Approve timer" : "Timerを承認");
+        WpfAutomationProperties.SetName(approve, english ? "Confirm operation" : "操作を確認して実行");
         approve.Click += (_, _) => dialog.DialogResult = true;
         reject.Click += (_, _) => dialog.DialogResult = false;
         actions.Children.Add(reject);

@@ -61,6 +61,31 @@ internal sealed class AssetOrganizerWindow : Window
         PreviewDragLeave += (_, _) => _pane?.ClearDragHover();
         PreviewDrop += async (_, args) => { if (_pane?.HandleInternalDrag(args, drop: true) == true) return; if (_pane is not null) { args.Handled = true; await _pane.ImportDropAsync(args.Data); } };
     }
+    internal async Task<bool> ShowForVoiceAsync(string? assetId, CancellationToken token)
+    {
+        var deadline = DateTime.UtcNow.AddSeconds(20);
+        while (!_closed && DateTime.UtcNow < deadline)
+        {
+            token.ThrowIfCancellationRequested();
+            if (_web.CoreWebView2 is { } web && await web.ExecuteScriptAsync("!!window.hpLibrary") == "true")
+            {
+                if (assetId is null) return IsVisible;
+                var nonce = System.Text.Json.JsonSerializer.Serialize(Guid.NewGuid().ToString("N"));
+                var id = System.Text.Json.JsonSerializer.Serialize(assetId);
+                await web.ExecuteScriptAsync($"window.hpVoicePreview=null; window.hpLibrary.showAsset({id}).then(ok=>window.hpVoicePreview={{nonce:{nonce},ok}},()=>window.hpVoicePreview={{nonce:{nonce},ok:false}})");
+                while (!_closed && DateTime.UtcNow < deadline)
+                {
+                    token.ThrowIfCancellationRequested();
+                    var status = await web.ExecuteScriptAsync($"window.hpVoicePreview?.nonce==={nonce} ? window.hpVoicePreview.ok : null");
+                    if (status is "true" or "false") return status == "true" && IsVisible;
+                    await Task.Delay(50, token);
+                }
+                return false;
+            }
+            await Task.Delay(50, token);
+        }
+        return false;
+    }
     private void ApplyLayout(AssetPreviewLayout layout)
     {
         if (_fullscreen == layout.Fullscreen) return;

@@ -91,7 +91,9 @@ internal sealed class CodexAppServerClient : IAsyncDisposable
         string executablePath,
         IReadOnlyList<string> arguments,
         TimeSpan requestTimeout,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        IReadOnlyDictionary<string, string>? environment = null,
+        string? workingDirectory = null)
     {
         cancellationToken.ThrowIfCancellationRequested();
         if (string.IsNullOrWhiteSpace(executablePath))
@@ -112,6 +114,12 @@ internal sealed class CodexAppServerClient : IAsyncDisposable
         {
             startInfo.ArgumentList.Add(argument);
         }
+        if (environment is not null)
+        {
+            startInfo.Environment.Clear();
+            foreach (var (key, value) in environment) startInfo.Environment[key] = value;
+        }
+        if (workingDirectory is not null) startInfo.WorkingDirectory = workingDirectory;
 
         var process = new Process
         {
@@ -205,8 +213,13 @@ internal sealed class CodexAppServerClient : IAsyncDisposable
         }
     }
 
-    public Task<JsonElement> InitializeAsync(JsonElement parameters, CancellationToken cancellationToken) =>
-        SendRequestAsync("initialize", parameters, cancellationToken);
+    public async Task<JsonElement> InitializeAsync(JsonElement parameters, CancellationToken cancellationToken)
+    {
+        var result = await SendRequestAsync("initialize", parameters, cancellationToken).ConfigureAwait(false);
+        // app-server does not deliver realtime notifications until this handshake is complete.
+        await WriteLineAsync("{\"method\":\"initialized\"}", cancellationToken).ConfigureAwait(false);
+        return result;
+    }
 
     public async Task<JsonElement> SendRequestAsync(
         string method,

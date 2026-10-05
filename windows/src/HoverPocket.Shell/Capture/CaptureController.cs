@@ -19,7 +19,7 @@ namespace HoverPocket.Shell.Capture;
 
 internal sealed record CapturePreferences(string ScreenshotKey = "Ctrl+Alt+S", string RecordingKey = "Ctrl+Alt+R", bool SystemAudio = true, bool Microphone = true, string? FolderId = null, bool OpenEditorAfterScreenshot = true, int ScreenshotToastSeconds = 5);
 
-internal sealed class CaptureController : IDisposable
+internal sealed partial class CaptureController : IDisposable
 {
     private readonly AssetStore _store;
     private readonly CaptureFiles _files;
@@ -35,7 +35,7 @@ internal sealed class CaptureController : IDisposable
     internal ScreenshotToastWindow? ToastForVerify => _toast;
     private ScreenRecorder? _recorder;
     private DeviceCaptureController? _deviceCapture;
-    private Task? _finishRecording;
+    private Task<CaptureSaveResult>? _finishRecording;
     private string? _recordingStage;
     private bool _busy, _disposed;
     private string _status = "撮影と収録の準備ができています。";
@@ -47,9 +47,10 @@ internal sealed class CaptureController : IDisposable
     internal nint RecordingOwnerForVerify { get; private set; }
     public event Action? StateChanged;
     public event Action<string>? RecordingError;
-    public CaptureController(AssetStore store, string settingsRoot, Func<Task> hideShell, Action restoreShell, Action openLibrary)
+    public CaptureController(AssetStore store, string settingsRoot, Func<Task> hideShell, Action restoreShell, Action openLibrary, bool allowOwnWindowsForVerify = false)
     {
         _store = store; _files = new(store); _hideShell = hideShell; _restoreShell = restoreShell; _openLibrary = openLibrary;
+        VoiceTargets = new VoiceCaptureTargets(allowOwnWindowsForVerify);
         _preferencesPath = Path.Combine(settingsRoot, "capture-settings.json");
         try { if (File.Exists(_preferencesPath)) _preferences = JsonSerializer.Deserialize<CapturePreferences>(File.ReadAllText(_preferencesPath)) ?? new(); }
         catch (Exception ex) when (ex is IOException or JsonException or UnauthorizedAccessException) { _status = "撮影設定を読めませんでした。既定値で開始します。"; }
@@ -168,7 +169,6 @@ internal sealed class CaptureController : IDisposable
         if (_disposed) return;
         if (Recording) { await StopRecordingAsync(); return; }
         if (Busy) return; CloseToast(); _busy = true; Report("収録対象の画面またはウィンドウを選択してください。");
-        string? stage = null;
         try
         {
             var options = useCurrentFolder ? _preferences with { FolderId = folderId } : _preferences;
@@ -191,18 +191,12 @@ internal sealed class CaptureController : IDisposable
             }
             finally { owner.Close(); RecordingOwnerForVerify = 0; _restoreShell(); }
             if (item is null) { Report("画面収録をキャンセルしました。"); return; }
-            stage = _files.CreateStage(); var path = Path.Combine(stage, $"画面収録 {DateTime.Now:yyyy-MM-dd HH-mm-ss}.mp4");
-            using (File.Create(path)) { }
-            _recorder = await ScreenRecorder.StartAsync(item, path, options.SystemAudio, options.Microphone);
-            _clock.Start();
-            _recordingStage = stage;
-            _finishRecording = FinishRecordingAsync(_recorder, stage, path, options.FolderId);
-            Report("● 収録中。もう一度ショートカットを押すか「停止して保存」を押してください。");
+            await BeginRecordingAsync(item, options, null, CancellationToken.None);
         }
-        catch (Exception ex) { if (stage is not null) await AssetRecycle.MoveAsync(stage); Report("収録を開始できません: " + ex.Message); RecordingError?.Invoke(_status); }
+        catch (Exception ex) { Report("収録を開始できません: " + ex.Message); RecordingError?.Invoke(_status); }
         finally { _busy = false; Report(_status); }
     }
-    private async Task FinishRecordingAsync(ScreenRecorder recorder, string stage, string path, string? folder)
+    private async Task<CaptureSaveResult> FinishRecordingAsync(ScreenRecorder recorder, string stage, string path, string? folder, string? name = null, CaptureWindowExclusion? exclusion = null)
     {
         await Task.Yield();
         try
@@ -211,10 +205,12 @@ internal sealed class CaptureController : IDisposable
             recorder.Dispose();
             if (recorder.VideoFrames == 0) throw new IOException("収録できた映像がありません。");
             CaptureFiles.MarkComplete(stage, [path], folder); var saved = await _files.ImportCompletedAsync(stage);
+            if (name is not null) await _store.UpdateAsync(saved, "rename", name);
             Report((recorder.StopReason is null ? "" : recorder.StopReason + " ") + $"画面収録をライブラリへ保存しました（{saved.Length}件）。");
+            return new(saved, null);
         }
-        catch (Exception ex) { Report("収録の完了・保存に失敗しました: " + ex.Message + " 保存待ちファイルを保持しています。"); RecordingError?.Invoke(_status); }
-        finally { recorder.Dispose(); if (ReferenceEquals(_recorder, recorder)) _recorder = null; _clock.Stop(); _recordingStage = null; _busy = false; Report(_status); }
+        catch (Exception ex) { Report("収録の完了・保存に失敗しました: " + ex.Message + " 保存待ちファイルを保持しています。"); RecordingError?.Invoke(_status); return new([], "recording_save_failed"); }
+        finally { exclusion?.Dispose(); if (ReferenceEquals(_voiceCaptureExclusion, exclusion)) _voiceCaptureExclusion = null; recorder.Dispose(); if (ReferenceEquals(_recorder, recorder)) _recorder = null; _clock.Stop(); _recordingStage = null; _busy = false; Report(_status); }
     }
     public async Task StopRecordingAsync()
     { if (_deviceCapture is not null) await _deviceCapture.StopAsync(); if (_recorder is null) return; _busy = true; _recorder.Stop(); Report("収録を終了し、ライブラリへ保存しています…"); if (_finishRecording is not null) await _finishRecording; }
@@ -241,7 +237,7 @@ internal sealed class CaptureController : IDisposable
         try { if (_recordingStage is not null && new DriveInfo(Path.GetPathRoot(_recordingStage)!).AvailableFreeSpace < 512L * 1024 * 1024) recorder.Stop("空き容量が少なくなったため収録を終了しました。"); }
         catch (IOException) { recorder.Stop("保存先への接続が失われました。"); }
     }
-    public void Dispose() { if (_disposed) return; _disposed = true; CloseToast(); _clock.Stop(); _hotkeys.Dispose(); _recorder?.Stop(); _deviceCapture?.Dispose(); _window?.CloseForShutdown(); }
+    public void Dispose() { if (_disposed) return; _disposed = true; CloseToast(); _clock.Stop(); _hotkeys.Dispose(); _recorder?.Stop(); _deviceCapture?.Dispose(); VoiceTargets.Dispose(); _voiceCaptureExclusion?.Dispose(); _window?.CloseForShutdown(); }
     internal static void ExcludeFromCapture(nint handle) { if (OperatingSystem.IsWindowsVersionAtLeast(10, 0, 19041)) SetWindowDisplayAffinity(handle, 0x11); }
     [System.Runtime.InteropServices.DllImport("user32.dll")] private static extern bool SetWindowDisplayAffinity(nint hwnd, uint affinity);
 }

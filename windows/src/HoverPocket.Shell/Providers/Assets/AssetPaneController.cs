@@ -59,6 +59,7 @@ internal sealed class AssetPaneController : IDisposable
         _store = store; _media = AssetMedia.For(store); _owner = owner; _bridge = bridge; _web = web; _layout = layout; _provider = provider; _playback = playback;
         _store.Changed += OnChanged;
         Register("assets.query", async p => await _store.QueryAsync(Parse<AssetQuery>(p)));
+        Register("assets.get", async p => { var asset = await _store.GetAsync(Text(p, "id")); return asset is { Trashed: false } ? asset : null; });
         Register("assets.matches", async p => new { matches = await _store.MatchesAsync(Parse<AssetQuery>(p!.Value.GetProperty("query")), Text(p, "id")) });
         Register("assets.selectionRange", async p => new { ids = await _store.SelectionRangeAsync(Parse<AssetQuery>(p!.Value.GetProperty("query")), Text(p, "anchorId"), Text(p, "targetId")) });
         Register("assets.update", UpdateAsync);

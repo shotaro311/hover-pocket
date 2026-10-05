@@ -82,6 +82,7 @@ const generationTarget = createGenerationTargetState();
 const weatherSettings = createWeatherSettings(document.querySelector("[data-weather-settings]"), request, render);
 
 on("state.changed", (state) => render(state));
+on("voice.stateChanged", (state) => render(state));
 
 bootstrap();
 
@@ -138,15 +139,15 @@ function render(state) {
   const voiceProviderId = state.settings.voiceProviderId ?? "off";
   const voiceEnabled = Boolean(state.settings.voiceEnabled);
   const englishVoice = state.settings.language === "en";
-  voiceHeadingEl.textContent = "Voice Lane";
+  voiceHeadingEl.textContent = englishVoice ? "Realtime conversation" : "リアルタイム会話";
   renderSegment(voiceProviderEl, [
     { id: "off", label: englishVoice ? "Off" : "オフ" },
-    { id: "openai_realtime_byok", label: "OpenAI Realtime BYOK" },
-    { id: "codex_app_server", label: "Codex app-server" },
+    { id: "codex_app_server", label: englishVoice ? "Codex (ChatGPT account)" : "Codex（ChatGPTアカウント）" },
+    { id: "openai_realtime_byok", label: englishVoice ? "OpenAI API (usage billed)" : "OpenAI API（従量課金）" },
   ], voiceProviderId, (providerId) => update("settings.setVoiceProvider", { providerId }));
   voiceEnabledEl.checked = voiceEnabled;
   voiceEnabledEl.disabled = voiceProviderId === "off";
-  voiceEnabledLabelEl.textContent = englishVoice ? "Enable Voice Lane" : "Voice Laneを有効化";
+  voiceEnabledLabelEl.textContent = englishVoice ? "Enable realtime conversation" : "リアルタイム会話を有効にする";
   voiceOpenAIKeyRowEl.hidden = voiceProviderId !== "openai_realtime_byok";
   voiceOpenAIKeyStatusEl.textContent = state.settings.voiceOpenAIKeyConfigured
     ? (englishVoice ? "API key saved securely" : "APIキーは安全に保存済み")
@@ -156,20 +157,21 @@ function render(state) {
   voiceOpenAIKeyDeleteEl.disabled = !state.settings.voiceOpenAIKeyConfigured;
   voiceNoteEl.textContent = voiceProviderId === "codex_app_server"
     ? (englishVoice
-      ? "Codex app-server remains fail-closed until its installed version can positively prove Broker-only tools. There is no fallback to OpenAI Realtime."
-      : "Codex app-serverは、導入済み版がBroker限定ツールを正に証明できるまでfail-closedのままです。OpenAI Realtimeへの自動fallbackはありません。")
+      ? "Use your existing Codex login, or sign in with ChatGPT. Start with the conversation button at the bottom of the panel. Microphone access begins only when you press it."
+      : "既存のCodexログインを利用できます。未ログインなら「ChatGPTにログイン」を押してください。パネル下部の会話ボタンを押すと、マイクを使った会話が始まります。")
     : voiceProviderId === "openai_realtime_byok"
       ? (englishVoice
-        ? "The API key stays Host-only. Windows exchanges SDP with /v1/realtime/calls and exposes only Registry-derived Calendar/Timer functions through CapabilityBroker."
-        : "APIキーはHostだけが保持します。Windowsは/v1/realtime/callsでSDPを交換し、CapabilityBroker経由のRegistry由来Calendar/Timer関数だけを公開します。")
-      : (englishVoice ? "Provider is explicitly Off. No credential, network, or transport work occurs." : "Providerは明示的にオフです。credential・network・transport処理は行いません。");
+        ? "Uses your own OpenAI API key and incurs API usage charges. Keys are stored securely on this PC."
+        : "自分のOpenAI APIキーを使用する方式です。APIの利用料金が発生します。キーはこのPCに安全に保存します。")
+      : (englishVoice ? "Choose Codex to use realtime conversation with your ChatGPT account." : "ChatGPTアカウントで会話するには「Codex」を選んでください。");
+  renderVoiceConnection(state.settings, englishVoice);
   voiceCalendarAccessEl.checked = Boolean(state.settings.voiceCalendarAccessGranted);
   voiceCalendarLabelEl.textContent = englishVoice
-    ? "Allow Voice Lane to use today's Calendar and create approved events"
-    : "Voice Laneに今日のCalendar参照と承認済み予定作成を許可";
+    ? "Allow today's calendar and event creation during conversation"
+    : "会話中に今日の予定を確認・新しい予定を追加できるようにする";
   voiceCalendarNoteEl.textContent = englishVoice
-    ? "Separate from Google sign-in and microphone access. Calendar create requires native per-call approval and Broker readback."
-    : "Googleログインやマイク権限とは別の許可です。Calendar作成は毎回ネイティブ承認とBroker readbackを要求します。";
+    ? "Connect Google Calendar separately. You confirm event details before each new event is created."
+    : "Google Calendarへの接続も必要です。予定を追加するときは、日時と内容を確認してから作成します。";
   renderSegment(voiceLayoutEl, [
     { id: "compact", label: state.settings.language === "en" ? "Compact" : "コンパクト" },
     { id: "expanded", label: state.settings.language === "en" ? "Expanded" : "展開" },
@@ -206,6 +208,39 @@ function render(state) {
   autoUpdatesEl.checked = state.settings.autoCheckForUpdates !== false;
   updateStatusEl.textContent = state.updater?.message ?? "";
 }
+
+function renderVoiceConnection(settings, english) {
+  const row = document.querySelector("[data-voice-codex-row]");
+  row.hidden = settings.voiceProviderId !== "codex_app_server";
+  const status = document.querySelector("[data-voice-codex-status]");
+  const login = document.querySelector("[data-voice-codex-login]");
+  const retry = document.querySelector("[data-voice-codex-retry]");
+  const cancel = document.querySelector("[data-voice-codex-cancel]");
+  const waiting = settings.voiceLoginStatus === "waiting";
+  const messages = english ? {
+    ready: "Ready — start a conversation from the panel", signedOut: "Sign in with ChatGPT to continue",
+    schemaMismatch: "Codex could not be verified. Update Codex, then reconnect.",
+    capabilityBlocked: "Realtime conversation is unavailable for this account", unavailable: "Connecting, or waiting to reconnect…",
+    disabled: "Enable realtime conversation first",
+  } : {
+    ready: "利用可能です。パネルから会話を開始できます。", signedOut: "ChatGPTへのログインが必要です。",
+    schemaMismatch: "Codexの動作を確認できませんでした。Codexを更新して再接続してください。",
+    capabilityBlocked: "このアカウントでリアルタイム会話を利用できません。", unavailable: "接続を確認しています。失敗した場合は再接続してください。",
+    disabled: "先にリアルタイム会話を有効にしてください。",
+  };
+  status.textContent = waiting ? (english ? "Complete sign-in in your browser" : "ブラウザでログインを完了してください。")
+    : settings.voiceErrorCode === "codex_executable_missing" ? (english ? "Install Codex, then reconnect" : "Codexをインストールして再接続してください。")
+    : messages[settings.voiceAvailability] ?? messages.unavailable;
+  login.textContent = english ? "Sign in with ChatGPT" : "ChatGPTにログイン";
+  retry.textContent = english ? "Reconnect" : "再接続";
+  cancel.textContent = english ? "Cancel sign-in" : "ログインをキャンセル";
+  login.disabled = retry.disabled = !settings.voiceEnabled || waiting;
+  cancel.hidden = !waiting;
+}
+
+document.querySelector("[data-voice-codex-login]").addEventListener("click", () => update("settings.loginVoice"));
+document.querySelector("[data-voice-codex-retry]").addEventListener("click", () => update("settings.retryVoice"));
+document.querySelector("[data-voice-codex-cancel]").addEventListener("click", () => update("settings.cancelVoiceLogin"));
 
 function renderCodexSandbox(sandbox, language) {
   const english = language === "en";

@@ -89,6 +89,16 @@ internal sealed class HoverShellController : IDisposable
         _assetOrganizer.Closed += (_, _) => _assetOrganizer = null;
         _assetOrganizer.Show(); _assetOrganizer.Activate();
     }
+    internal async Task<bool> OpenAssetLibraryForVoiceAsync(string? assetId, CancellationToken token)
+    {
+        if (_assetOrganizer is null)
+        {
+            _assetOrganizer = new AssetOrganizerWindow(_panelBridgeController, _applicationData.RootDirectory) { ShowActivated = false };
+            _assetOrganizer.Closed += (_, _) => _assetOrganizer = null;
+            _assetOrganizer.Show();
+        }
+        return await _assetOrganizer.ShowForVoiceAsync(assetId, token);
+    }
     private bool _captureOrganizerVisible;
     private bool _captureSuppressed;
     internal async Task HideForCaptureAsync()
@@ -170,7 +180,7 @@ internal sealed class HoverShellController : IDisposable
             var pointer = GetPointerPosition();
             var inside = IsPointerInHoverRegion(pointer, out var hoveredLayout);
             TraceHover("close-delay", pointer, inside, hoveredLayout, inside ? "keep-open" : "close");
-            if (!_timerAlertActive && !_panel.AssetLayout.PinOnly && !_assetDragActive && !inside)
+            if (!_timerAlertActive && !KeepPanelForVoice && !_panel.AssetLayout.PinOnly && !_assetDragActive && !inside)
             {
                 _ = HidePanelAsync();
             }
@@ -475,10 +485,12 @@ internal sealed class HoverShellController : IDisposable
         _settingsWindow.Activate();
     }
 
+    private bool KeepPanelForVoice => _panelBridgeController.VoiceSnapshot.RealtimeAttached
+        || _panel.OwnedWindows.OfType<Window>().Any(window => window.IsVisible);
     private void PollPointer()
     {
         if (_captureSuppressed || _assetDropOverlay?.IsVisible == true) return;
-        if (_panel.AssetLayout.PinOnly || _assetDragActive) { _closeDelayTimer.Stop(); return; }
+        if (_panel.AssetLayout.PinOnly || _assetDragActive || KeepPanelForVoice) { _closeDelayTimer.Stop(); return; }
         var pointer = GetPointerPosition();
         if (_previewFocusDismissed)
         {
