@@ -12,9 +12,9 @@ struct AssetLibrarySyncSettings: View {
                     Label(localized("ライブラリ同期", "Library sync"), systemImage: "arrow.triangle.2.circlepath")
                         .font(.headline)
                     Spacer()
-                    Label(statusTitle, systemImage: sync.status.enabled ? "checkmark.circle.fill" : "pause.circle")
+                    Label(statusTitle, systemImage: statusSymbol)
                         .font(.callout.weight(.medium))
-                        .foregroundStyle(sync.status.enabled ? Color.green : Color.secondary)
+                        .foregroundStyle(statusColor)
                 }
                 Text(localized("素材・フォルダ・タグ・ゴミ箱を共有します。", "Share assets, folders, tags, and trash."))
                     .font(.callout).foregroundStyle(.secondary)
@@ -79,6 +79,17 @@ struct AssetLibrarySyncSettings: View {
             }
         }
         .task { if HoverPocketRuntimeEnvironment.shared.externalIntegrationsEnabled { sync.start() } }
+    }
+
+    private var statusSymbol: String {
+        if sync.issue != nil || !sync.status.conflicts.isEmpty { return "exclamationmark.triangle.fill" }
+        return sync.status.enabled ? "checkmark.circle.fill" : "pause.circle"
+    }
+
+    private var statusColor: Color {
+        if sync.issue != nil { return .red }
+        if !sync.status.conflicts.isEmpty { return .orange }
+        return sync.status.enabled ? .green : .secondary
     }
 
     private var statusTitle: String {
