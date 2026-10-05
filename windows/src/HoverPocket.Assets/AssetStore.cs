@@ -169,6 +169,16 @@ public sealed partial class AssetStore : IDisposable
         try
         {
             using var db = Open(); var removed = 0;
+            if (Scalar(db, "SELECT name FROM sqlite_master WHERE type='table' AND name='sync_meta'") is not null
+                && SyncMeta(db, "groupId") is not null)
+            {
+                // Keep originals recoverable for the other device before removing the last local copy.
+                if (SyncMeta(db, "enabled") != "1") throw new InvalidOperationException("同期を再開し、送信が完了してからゴミ箱を空にしてください。");
+                var transport = RequireSyncRoot(db); CaptureSyncChanges(db);
+                await ExportSyncEventsAsync(db, transport, CancellationToken.None);
+                if (Convert.ToInt32(Scalar(db, "SELECT count(*) FROM sync_events WHERE exported=0")) > 0)
+                    throw new InvalidOperationException("未送信の変更があります。同期が完了してからゴミ箱を空にしてください。");
+            }
             foreach (var asset in ReadAssets(db, "SELECT * FROM assets WHERE trashed=1"))
             {
                 var path = OriginalPath(asset); if (!File.Exists(path)) continue;

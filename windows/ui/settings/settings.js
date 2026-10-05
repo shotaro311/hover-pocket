@@ -1,3 +1,4 @@
+import { createAssetSyncSettings } from "./asset-sync-settings.js";
 import { on, request } from "../js/bridge.js";
 import { labelForSize, setLanguage, t } from "../js/i18n.js";
 import { createGenerationTargetState } from "./generation-target-state.mjs";
@@ -75,6 +76,7 @@ const resetEl = document.querySelector("[data-reset]");
 const resetBindingEl = document.querySelector("[data-reset-binding]");
 const openDataFolderEl = document.querySelector("[data-open-data-folder]");
 
+const assetSyncSettings = createAssetSyncSettings(document.querySelector("[data-asset-sync-settings]"), request);
 let currentState = null;
 let stickyState = null;
 let generationState = null;
@@ -97,6 +99,7 @@ function render(state) {
   currentState = state;
   setLanguage(state.settings.language);
   weatherSettings.render(state);
+  assetSyncSettings.render(state);
   document.querySelectorAll("[data-i18n]").forEach((node) => {
     node.textContent = t(node.getAttribute("data-i18n"));
   });

@@ -36,7 +36,7 @@ public sealed partial class AssetStore
         await Ready; Writable(); await _writer.WaitAsync(token);
         try
         {
-            using var db = Open();
+            using var db = Open(); RejectSyncRestore(db);
             if (Convert.ToInt64(Scalar(db, "SELECT (SELECT count(*) FROM assets)+(SELECT count(*) FROM imports)+(SELECT count(*) FROM categories)+(SELECT count(*) FROM searches)")) != 0) throw new InvalidOperationException("復元は空のライブラリへ行ってください。現在の素材は変更されません。");
             var manifest = JsonSerializer.Deserialize<AssetManifest>(await File.ReadAllTextAsync(Path.Combine(source, "manifest.json"), token), AssetFormat.Json) ?? throw new InvalidDataException();
             if (manifest.Assets is null || manifest.Folders is null || manifest.Tags is null || manifest.Searches is null
@@ -79,6 +79,7 @@ public sealed partial class AssetStore
         var archive = Root + ".archive-" + DateTime.UtcNow.ToString("yyyyMMdd-HHmmss") + "-" + Guid.NewGuid().ToString("N")[..8];
         try
         {
+            using (var db = Open()) RejectSyncRestore(db);
             _hostLock?.Dispose(); _hostLock = null;
             Directory.Move(Root, archive);
             try { Directory.Move(staged, Root); Initialize(); }
@@ -110,6 +111,7 @@ public sealed partial class AssetStore
         try
         {
             var candidate = _database + ".restored-" + Guid.NewGuid().ToString("N"); await CopyFileAsync(path, candidate, CancellationToken.None);
+            using (var db = Open()) CopySyncStateForRestore(db, candidate);
             var archive = _database + ".preserved-" + DateTime.UtcNow.ToString("yyyyMMdd-HHmmss") + "-" + Guid.NewGuid().ToString("N")[..8];
             var moved = new List<string>(); var activated = false;
             try
