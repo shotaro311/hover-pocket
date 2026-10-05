@@ -2,13 +2,14 @@
 project_slug: hover-menu-preview
 updated: 2026-10-05
 updated_by: codex
-status: windows-0.2.10-installed; public-windows-0.2.10; reported-freeze-incident-unconfirmed-reproduced-preview-races-fixed; published-macos-644; macos-library-sync-local-668; macos-physical-acceptance-partial
+status: windows-0.2.10-installed; public-windows-0.2.10; reported-freeze-incident-unconfirmed-reproduced-preview-races-fixed; published-macos-644; macos-library-sync-local-670; macos-physical-acceptance-partial
 ---
 
 ## 2026-10-05 設定画面と端末連携の改善（作業中）
 
 - Mac開発版670で「一般・表示・素材と同期・撮影・AI・詳細」に整理し、説明の折りたたみと状態表示を追加。既存の確認設定を保持して6カテゴリの実画面と既存検査を確認。
-- Windows担当が共通のコード連携helperとWindows UIを担当し、MacはローカルAPI処理と模擬API23項目の検査まで完了。UI `455c6fe` と接続準備 `6a29de2` をpush/readback済み。実ライブラリ19件とEagle共有を保持。Windows側の共通コード送信の承認待ちで、コードUIの接続と両OS往復受入は未完。[記録](2026-10/2026-10-05_hover-pocket-settings-pairing.md)。
+- Windows担当は6カテゴリ/検索/折りたたみ、コード連携UIと設定処理を実装。素材120・同期102・共有API/状態33、暗号化接続5ケース、実WebView UIの検査が成功との報告。Windows内の隔離Syncthing 2プロセスによる実転送と専用共有の解除もログで確認。実19件・全原本SHA・保留/競合0、Eagle/global device保持のreadbackを確認。
+- MacはローカルAPI処理と模擬API23項目まで完了。UI/接続準備の最終 `93bc3ef` をpush/readback済み。共通helper `f2e410b` はWindowsローカルで、GitHubへのpush許可待ち。MacコードUIへの組込み・Mac/Windows間のコード接続は未完。Windows候補の常駐切替、公開配信、main統合も未実施。[記録](2026-10/2026-10-05_hover-pocket-settings-pairing.md)。
 
 ## 2026-10-05 Eagle方式のMac・Windows素材同期
 

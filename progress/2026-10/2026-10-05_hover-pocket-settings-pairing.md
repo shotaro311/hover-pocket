@@ -41,3 +41,13 @@ Windows側のユーザー依頼を確認し、Macは設定UI・ネイティブ�
 - エラー時は赤、同時編集の重複時は橙の状態表示へ修正。670をビルド・署名し、梱包後も模擬API23項目が成功。
 - 開発アプリを670へ起動し直し、6カテゴリと「素材と同期」の同期オン/操作欄を実UIで確認。共有コードの受け取りとコードUIの接続は引き続き未完。
 - 接続準備 `6a29de2` もpushし、remote SHA一致とclean状態を確認済み。元のdirty checkoutは変更しない。
+
+## Windows担当からの検証結果（2026-10-05）
+
+- 担当チャット「スクリーンショット時のクラッシュ修正」（`01a0ff46-72f0-7582-afea-1f910bf1abb6`）の報告と実行ログを読み戻した。Windowsの6カテゴリ/検索/折りたたみ、コードUIとネイティブ連携処理は実装済み。
+- 素材保存120・同期102、共有API/状態33、Rust入力検査5、PAKEの正常/誤コード/拒否/古い承認/グループ不一致5ケース、実WebView UIと設定回帰が成功との報告。共有API/状態33の成功出力を確認。
+- Windows内に隔離したSyncthingを2プロセス起動し、承認前の共有0、実RESTでの登録/readback、生成ファイルの原本とmetadataの転送、専用共有だけの解除/global device保持まで成功した実行ログ（exit 0）を確認。これはWindows内の隔離試験で、Mac/Windows間のコード接続受入ではない。
+- 実データの独立readback出力：素材19件（通常14/ゴミ箱5）、原本19件がDBのSHAと一致、以前の原本を保持、保留/未送信/競合0、quick_check=ok。Eagleを含む既存共有とglobal deviceは一致。同期対象metadataのdigestは既存の `c1627f9a06bf2a66b52f0c780d786bac897a552750c362be2d29be3c08794b92` と一致。
+- 共通helperは `f2e410b` に集約済み。Rust 1.87互換の固定依存、Windows/Mac向け依存ライセンスを含む。GitHub送信は自動承認レビューによる明示確認待ちで、Macにはまだ取り込んでいない。別経路のコード転送を行わない。
+- Windows側の詳細記録は、担当端末の `progress/2026-10/2026-10-05_hover-pocket-windows-settings-pairing.md`。送信待ちのためMacのcheckoutにはまだ存在しない。
+- 残り：共通helperのpush許可→Macでhelper/ライセンスの同梱とコードUIへの接続→Mac/Windows間の隔離接続試験。既存の実接続を解除して再接続する受入、Windows候補の常駐切替、公開配信、main統合は未実施。
