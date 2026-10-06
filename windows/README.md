@@ -276,6 +276,6 @@ AI command lane の audit log は `%APPDATA%\HoverPocket\auditlog\ailane-YYYYMMD
 
 両端末でSyncthingを起動してください。短いコードの交換にはTLS仲介サービスとSPAKE2を使います。メディアは仲介サービスへ送りません。コードは5分・1回限りで、承認後に専用共有を登録します。解除はそのライブラリの共有だけを停止し、受信済みのコピーは残します。Eagleの共有や既存端末設定は変更しません。
 
-WindowsビルドにはCargo/Rust 1.87以降が必要です。MSBuildが `shared/pairing-helper` の固定依存をビルドし、単独EXEとライセンスを同梱します。共通プロトコルは同ディレクトリのREADMEを参照してください。
+WindowsビルドにはCargo/Rust 1.92以降が必要です。MSBuildが `shared/pairing-helper` の固定依存をビルドし、単独EXEとライセンスを同梱します。共通プロトコルは同ディレクトリのREADMEを参照してください。
 
 検証: `dotnet run --project windows/tests/Pairing`（隔離API/パス検査）、`cargo test --locked --manifest-path shared/pairing-helper/Cargo.toml`、`windows/script/verify_asset_sync.ps1 -IncludeUi`。公開仲介への隔離接続試験は、架空の端末IDだけを使って `python shared/pairing-helper/verify_pairing.py <helper.exe>` を実行できます。

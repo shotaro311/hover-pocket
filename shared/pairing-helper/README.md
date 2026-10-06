@@ -1,6 +1,6 @@
 # HoverPocket device pairing v1
 
-Separate EUPL-1.2 executable using magic-wormhole 0.8.1 (SPAKE2 + authenticated encrypted messages). No homemade cryptography. Requires Rust 1.87 or later. Build: `cargo build --release --locked --manifest-path shared/pairing-helper/Cargo.toml`.
+Separate EUPL-1.2 executable using magic-wormhole 0.8.1 (SPAKE2 + authenticated encrypted messages). No homemade cryptography. Requires Rust 1.92 or later. Build: `cargo build --release --locked --manifest-path shared/pairing-helper/Cargo.toml`.
 
 The public TLS rendezvous is `wss://mailbox.mw.leastauthority.com/v1`. It sees network addresses and timing, but not decrypted device metadata or media. This helper transfers no library files. Syncthing subsequently transfers files using its certificate-authenticated encrypted connections. Availability depends on Syncthing and the rendezvous service; no insecure fallback. The host must explain this briefly under connection details.
 
