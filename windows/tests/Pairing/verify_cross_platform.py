@@ -97,6 +97,9 @@ try:
     else:raise RuntimeError('Generated originals did not transfer both ways')
     assert w['groupId']==m['groupId'] and w['enabled'] and m['enabled']
     assert w['validOriginals'] and m['validOriginals']
+    def metadata(event):
+        return sorted((a['Id'],a['Name'],a['Sha256'],a['Favorite']) for a in event['assets'])
+    assert metadata(w)==metadata(m),'Generated metadata differs between hosts'
     print('PASS cross-OS transfer: generated originals and metadata both ways, exact SHA matches',flush=True)
     time.sleep(3)
     mac.send(action='start',role='invite');code=mac.event('code')['code']
