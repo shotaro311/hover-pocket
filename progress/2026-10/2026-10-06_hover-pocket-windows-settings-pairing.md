@@ -18,3 +18,12 @@
 - Windows/Macの検証は、Mac担当が直接読み取ったSSHホスト公開鍵の指紋を照合した専用known_hostsと既存鍵を使用。通常のSSH設定を変更せず、コードをログ/ファイルへ保存しないstdio中継とループバックへのSSH転送を準備。
 - CrossPairing.cs と verify_cross_platform.py は専用marker rootと明示configを要求し、実ユーザー設定を発見しない。生成した素材だけのimport/sync/接続解除を実行する。
 - 最初のMac verifierは起動前の修正連絡と行き違い、ready前にEOFで中断（Windows証拠 HoverPocketPairingCross-3dio2m74）。次の試験はpeer待ちでtimeout（同 y2miizvd）。Windowsはfixture1、共有0、同期未設定。親のfinallyで隔離verifier/Syncthingを終了した。Mac側のstdio読み取り停滞を修正中で、両OSの成功受入として扱っていない。
+
+## 両OSのコード接続・実転送の受入
+
+- Mac側の外部仲介試験を自動承認レビューが止めたため保留し、ユーザーが宛先 mailbox.mw.leastauthority.com、暗号化した検証用端末情報、IP/時刻の観測、素材を仲介へ送らない条件を確認したうえで「許可して接続試験を続ける」と明示承認。Macのstdio入力修正後に再開した。
+- Windows親verify_cross_platform.pyがexit0。Windows招待→Mac参加、相手情報一致→明示承認→双方完了が成功。生成したテキスト素材2件を実Syncthingで両方向へ配送し、原本SHA・group・enabled状態が一致。
+- Mac招待→Windows参加の逆向きでも、既存groupを維持して双方完了。最後に両端末で専用共有だけを解除し、global deviceを保持した。
+- 独立したSQLite read-only照合で、両OSの素材ID・名前・SHA・お気に入り・ゴミ箱状態が一致。親スクリプトにもID/名前/SHA/お気に入りの比較を追加。保存されたコード/承認IDはない。証跡は windows/verification/pairing-20261006/cross-platform.json。
+- 配送はSSHでMacの隔離Syncthingループバックへ転送して検証した。公開ネットワーク越しのメディア配送/自動発見そのものを受入済みとする試験ではない。コード接続は実TLS仲介を使用。
+- Windows証拠は %TEMP%/HoverPocketPairingCross-ao5kjxp1、Mac証拠は /private/tmp/HoverPocket-PairingCross-87yxh0ke。検証専用プロセスを閉じ、Windows Syncthingは従来の2プロセスだけ、helperの残留なしを確認した。
