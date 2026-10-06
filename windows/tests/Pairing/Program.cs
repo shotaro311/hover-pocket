@@ -3,6 +3,7 @@ using System.Text.Json.Nodes;
 using HoverPocket.Shell.Sync;
 using HoverPocket.Assets;
 
+if(args.Length>0 && args[0]=="--cross") { await CrossPairing.Run(args[1]); return; }
 if(args.Length>0 && args[0]=="--real") { await RealPairing.Run(args); return; }
 int assertions=0;
 void Check(bool value, string message) { if(!value) throw new Exception(message); assertions++; }
@@ -45,20 +46,33 @@ Console.WriteLine($"PASS pairing configuration: {assertions} assertions; isolate
 
 if (args.Length > 0) {
     var helper=Path.GetFullPath(args[0]);
-    foreach(var mode in args.Contains("--cancel-only") ? new[]{"cancel"} : new[]{"success","failure","cancel"}) {
-        var fail=mode=="failure";
+    foreach(var mode in args.Contains("--paused-only") ? new[]{"paused-failure"} : args.Contains("--cancel-only") ? new[]{"cancel"} : new[]{"success","failure","cancel","paused-failure"}) {
+        var existingPaused=mode=="paused-failure";
+        var fail=mode is "failure" or "paused-failure";
         var aApi=new FakeApi { MyId=string.Join('-',Enumerable.Repeat("AAAAAAA",8)) };
         var bApi=new FakeApi { MyId=string.Join('-',Enumerable.Repeat("BBBBBBB",8)), FailAddFolder=fail };
         using var aStore=new AssetStore(Path.Combine(target,Guid.NewGuid().ToString("N"),"library"));
         using var bStore=new AssetStore(Path.Combine(target,Guid.NewGuid().ToString("N"),"library"));
+        if(existingPaused) {
+            var pausedPlan=new LinkPlan(aApi.MyId,Guid.NewGuid().ToString("D"),"paused-pairing-test",Path.Combine(target,"paused-transport"));
+            SyncthingLibraryLink.PrepareMarker(pausedPlan);
+            await aStore.ConfigureSyncAsync(pausedPlan.Path!);
+            using var apiA=new SyncthingLibraryLink(new HttpClient(aApi,false){BaseAddress=new Uri("http://127.0.0.1/rest/")});
+            await apiA.Add(pausedPlan,bApi.MyId,"Existing peer",default);
+            bApi.BeforeFolderFailure=async()=> {
+                for(int i=0;i<600;i++) { if((await aStore.GetSyncStatusAsync()).Enabled) return; await Task.Delay(50); }
+                throw new TimeoutException("Pairing did not temporarily enable paused library");
+            };
+        }
+        var writesBeforeA=aApi.Writes;var writesBeforeB=bApi.Writes;
         using var a=new DevicePairingService(aStore,()=>new(new HttpClient(aApi,false){BaseAddress=new Uri("http://127.0.0.1/rest/")}),helper,"Fictional Windows");
         using var b=new DevicePairingService(bStore,()=>new(new HttpClient(bApi,false){BaseAddress=new Uri("http://127.0.0.1/rest/")}),helper,"Fictional Mac");
         await a.Start("invite",null,default); await Until(()=>a.State.Code is not null);
         await b.Start("join",a.State.Code,default); await Until(()=>a.State.Phase=="peer"&&b.State.Phase=="peer");
-        Check(aApi.Writes==0 && bApi.Writes==0,"no Syncthing writes before approval");
-        Check(!(await aStore.GetSyncStatusAsync()).Configured && !(await bStore.GetSyncStatusAsync()).Configured,"no library configuration before approval");
+        Check(aApi.Writes==writesBeforeA && bApi.Writes==writesBeforeB,"no Syncthing writes before approval");
+        Check((await aStore.GetSyncStatusAsync()).Configured==existingPaused && !(await bStore.GetSyncStatusAsync()).Configured,"no library configuration before approval");
         try { await a.Approve("stale",default); throw new Exception("stale approval accepted"); } catch(IOException) { assertions++; }
-        Check(aApi.Writes==0,"stale approval writes nothing");
+        Check(aApi.Writes==writesBeforeA,"stale approval writes nothing");
         if(mode=="cancel") {
             await a.Cancel(default);await b.Cancel(default);
             Check(a.State.Phase=="idle"&&b.State.Phase=="idle","active cancellation returns idle");
@@ -73,11 +87,11 @@ if (args.Length > 0) {
             Check(aApi.Folders[0]!.ToJsonString()==eagle && bApi.Folders[0]!.ToJsonString()==eagle,"pairing preserves Eagle on both endpoints");
         } else {
             await Until(()=>a.State.Phase=="error"&&b.State.Phase=="error");
-            Check(!aApi.Folders.Any(f=>f?["id"]?.GetValue<string>()!="eagle"&&f?["devices"]?.AsArray().Any(d=>d?["deviceID"]?.GetValue<string>()==bApi.MyId)==true),"peer setup failure removes newly shared peer");
+            Check(existingPaused==aApi.Folders.Any(f=>f?["id"]?.GetValue<string>()!="eagle"&&f?["devices"]?.AsArray().Any(d=>d?["deviceID"]?.GetValue<string>()==bApi.MyId)==true),"peer setup failure preserves prior membership and removes only new membership");
             Check(!(await aStore.GetSyncStatusAsync()).Enabled,"failed pair does not leave sync enabled");
         }
         await a.Cancel(default);await b.Cancel(default);
-        Console.WriteLine("PASS native pairing lifecycle: "+(fail?"peer failure rollback":"approval and complete"));
+        Console.WriteLine("PASS native pairing lifecycle: "+mode);
     }
 }
 Console.WriteLine($"PASS total pairing assertions: {assertions}");
@@ -92,6 +106,7 @@ sealed class FakeApi : HttpMessageHandler
  internal int Writes;
  internal string MyId="SELF";
  internal bool FailAddFolder;
+ internal Func<Task>? BeforeFolderFailure;
  protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request,CancellationToken token)
  {
   var path=request.RequestUri!.AbsolutePath[6..]; JsonNode? result=null;
@@ -104,7 +119,10 @@ sealed class FakeApi : HttpMessageHandler
    _ when path.StartsWith("config/folders/") => Folders.FirstOrDefault(f=>f?["id"]?.GetValue<string>()==Uri.UnescapeDataString(path[15..])),
    _ => null };
   else {
-   if(FailAddFolder && request.Method==HttpMethod.Post && path=="config/folders") return new(HttpStatusCode.ServiceUnavailable){Content=new StringContent("{}")};
+   if(FailAddFolder && request.Method==HttpMethod.Post && path=="config/folders") {
+    if(BeforeFolderFailure is not null) await BeforeFolderFailure();
+    return new(HttpStatusCode.ServiceUnavailable){Content=new StringContent("{}")} ;
+   }
    var node=JsonNode.Parse(await request.Content!.ReadAsStringAsync(token))!;Writes++;
    var collection=path.StartsWith("config/folders")?Folders:Devices;var key=collection==Folders?"id":"deviceID";
    var prior=collection.FirstOrDefault(n=>n?[key]?.GetValue<string>()==node[key]?.GetValue<string>());

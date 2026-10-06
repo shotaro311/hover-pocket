@@ -77,7 +77,7 @@ internal sealed class DevicePairingService(AssetStore store, Func<SyncthingLibra
     }
     private async Task Run(LinkPlan plan, string role, string? code, CancellationToken token)
     {
-        string? peerId = null; bool rollback = false, completed = false; PairingState? failure = null;
+        string? peerId = null; bool rollback = false, completed = false, enabledForPairing = false; PairingState? failure = null;
         AssetSyncStatus? before = null;
         try
         {
@@ -117,6 +117,7 @@ internal sealed class DevicePairingService(AssetStore store, Func<SyncthingLibra
                             await api.Add(plan, peerId, State.PeerName!, token);
                         }
                         await store.ConfigureSyncAsync(plan.Path, false, token);
+                        enabledForPairing = before.Enabled != true;
                         await store.SetSyncEnabledAsync(true, token);
                         await Send(new { action = "applied", approvalId = State.ApprovalId });
                         break;
@@ -144,15 +145,25 @@ internal sealed class DevicePairingService(AssetStore store, Func<SyncthingLibra
         }
         finally
         {
-            if (!completed && rollback && peerId is not null)
+            if (!completed && (rollback || enabledForPairing))
             {
-                try
+                var cleanupFailed = false;
+                // Restore pause independently of membership cleanup: either may fail.
+                if (enabledForPairing)
                 {
-                    using var api = OpenApi();
-                    await api.Remove(plan, peerId, CancellationToken.None);
-                    if (before?.Enabled != true) await store.SetSyncEnabledAsync(false);
+                    try { await store.SetSyncEnabledAsync(false); }
+                    catch { cleanupFailed = true; }
                 }
-                catch { failure = new("error", Error: "接続の復旧を確認できません。同期を一時停止し、接続端末を確認してください。"); }
+                if (rollback && peerId is not null)
+                {
+                    try
+                    {
+                        using var api = OpenApi();
+                        await api.Remove(plan, peerId, CancellationToken.None);
+                    }
+                    catch { cleanupFailed = true; }
+                }
+                if (cleanupFailed) failure = new("error", Error: "接続の復旧を確認できません。同期を一時停止し、接続端末を確認してください。");
             }
             var process = _process; _process = null;
             try { if (process is not null && !process.HasExited) process.Kill(entireProcessTree: true); } catch { }
