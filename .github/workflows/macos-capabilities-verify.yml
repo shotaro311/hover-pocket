@@ -8,6 +8,12 @@ on:
       - "Sources/HoverPocket/App/AssetLibrarySyncVerification.swift"
       - "Sources/HoverPocket/App/LibraryPairingVerification.swift"
       - "shared/asset-library/**"
+      - "shared/pairing-helper/**"
+      - "Sources/HoverPocket/App/LibraryPairingSessionVerification.swift"
+      - "Sources/HoverPocket/App/LibraryPairingCrossVerification.swift"
+      - "Sources/HoverPocket/Views/LibraryDevicePairingSettings.swift"
+      - "Sources/HoverPocket/Views/AssetLibrarySyncSettings.swift"
+      - "Sources/HoverPocket/Windowing/SettingsWindowController.swift"
       - "Sources/HoverPocket/Capabilities/**"
       - "Sources/HoverPocket/PocketApps/**"
       - "Sources/HoverPocket/App/CapabilityVerificationCommand.swift"
@@ -64,6 +70,12 @@ on:
       - "Sources/HoverPocket/App/AssetLibrarySyncVerification.swift"
       - "Sources/HoverPocket/App/LibraryPairingVerification.swift"
       - "shared/asset-library/**"
+      - "shared/pairing-helper/**"
+      - "Sources/HoverPocket/App/LibraryPairingSessionVerification.swift"
+      - "Sources/HoverPocket/App/LibraryPairingCrossVerification.swift"
+      - "Sources/HoverPocket/Views/LibraryDevicePairingSettings.swift"
+      - "Sources/HoverPocket/Views/AssetLibrarySyncSettings.swift"
+      - "Sources/HoverPocket/Windowing/SettingsWindowController.swift"
       - "Sources/HoverPocket/Capabilities/**"
       - "Sources/HoverPocket/PocketApps/**"
       - "Sources/HoverPocket/App/CapabilityVerificationCommand.swift"
@@ -125,10 +137,16 @@ jobs:
     timeout-minutes: 15
     env:
       DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
+      RUSTUP_TOOLCHAIN: 1.92.0
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      - name: Build pairing helper
+        run: |
+          rustup toolchain install 1.92.0 --profile minimal --no-self-update
+          cargo +1.92.0 build --release --locked --manifest-path shared/pairing-helper/Cargo.toml --target-dir .build/pairing
+          cargo +1.92.0 test --locked --manifest-path shared/pairing-helper/Cargo.toml --target-dir .build/pairing
       - name: Build
         run: |
           swift --version

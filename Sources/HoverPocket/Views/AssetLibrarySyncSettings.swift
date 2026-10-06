@@ -4,6 +4,7 @@ import SwiftUI
 struct AssetLibrarySyncSettings: View {
     let language: AppLanguage
     @ObservedObject private var sync = AssetLibrarySyncController.shared
+    @ObservedObject private var pairing = LibraryDevicePairingController.shared
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -23,7 +24,7 @@ struct AssetLibrarySyncSettings: View {
                         Button(localized(sync.status.enabled ? "同期を一時停止" : "同期を再開", sync.status.enabled ? "Pause sync" : "Resume sync")) { sync.toggle() }
                         Button(localized("今すぐ確認", "Check now")) { Task { await sync.refresh() } }
                         if sync.busy { ProgressView().controlSize(.small) }
-                    }.disabled(sync.busy)
+                    }.disabled(sync.busy || pairing.busy)
                     if sync.status.pending > 0 {
                         Label(localized("到着待ち：\(sync.status.pending)件", "Waiting for \(sync.status.pending) items"), systemImage: "clock")
                             .font(.callout)
@@ -34,6 +35,8 @@ struct AssetLibrarySyncSettings: View {
                         .foregroundStyle(.red).font(.callout).textSelection(.enabled)
                 }
             }
+
+            LibraryDevicePairingSettings(language: language)
 
             if !sync.status.conflicts.isEmpty {
                 SettingsCard {
@@ -51,7 +54,7 @@ struct AssetLibrarySyncSettings: View {
                             ViewThatFits(in: .horizontal) {
                                 HStack { conflictButtons(conflict) }
                                 VStack(alignment: .leading) { conflictButtons(conflict) }
-                            }.disabled(sync.busy)
+                            }.disabled(sync.busy || pairing.busy)
                         }
                         if conflict.id != sync.status.conflicts.last?.id { Divider() }
                     }
@@ -60,6 +63,10 @@ struct AssetLibrarySyncSettings: View {
 
             SettingsCard {
                 SettingsDetails(title: localized("接続の詳細", "Connection details")) {
+                    Text(localized("両方のPCでSyncthingのインストールと起動が必要です。", "Syncthing must be installed and running on both computers."))
+                        .font(.callout).foregroundStyle(.secondary)
+                    Text(localized("コード接続には外部の仲介サービスを使います。端末情報は暗号化され、素材は仲介サービスに送られません。仲介側には接続元と接続時刻が分かります。", "Code pairing uses an external rendezvous service. Device information is encrypted and library files are not sent to it. The service can see network addresses and connection times."))
+                        .font(.callout).foregroundStyle(.secondary)
                     if !sync.status.folder.isEmpty {
                         Text(sync.status.folder).font(.callout).foregroundStyle(.secondary)
                             .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
@@ -70,7 +77,7 @@ struct AssetLibrarySyncSettings: View {
                     ViewThatFits(in: .horizontal) {
                         HStack { folderButtons }
                         VStack(alignment: .leading) { folderButtons }
-                    }.disabled(sync.busy)
+                    }.disabled(sync.busy || pairing.busy)
                     Text(localized("Syncthingで共有した専用フォルダを指定します。転送状況はSyncthingで確認できます。", "Choose a dedicated folder shared with Syncthing. Check transfer progress in Syncthing."))
                         .font(.callout).foregroundStyle(.secondary)
                     Text(localized("オフライン中の変更は保持され、再接続後に反映されます。同期オンの表示は、相手への転送完了を意味しません。", "Offline changes are kept and applied after reconnection. Sync being on does not mean transfer to the other device is complete."))
@@ -78,7 +85,10 @@ struct AssetLibrarySyncSettings: View {
                 }
             }
         }
-        .task { if HoverPocketRuntimeEnvironment.shared.externalIntegrationsEnabled { sync.start() } }
+        .task { if HoverPocketRuntimeEnvironment.shared.externalIntegrationsEnabled { sync.start(); await pairing.refreshDevices() } }
+        .onChange(of: pairing.busy) { _, busy in
+            if !busy { Task { await sync.refresh(); await pairing.refreshDevices() } }
+        }
     }
 
     private var statusSymbol: String {

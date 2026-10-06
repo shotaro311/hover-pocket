@@ -5,6 +5,15 @@ import Foundation
 _ = signal(SIGPIPE, SIG_IGN)
 _ = HoverPocketRuntimeEnvironment.shared
 
+if CommandLine.arguments.contains("--verify-library-pairing-cross") {
+    let app = NSApplication.shared
+    Task { @MainActor in
+        do { try await LibraryPairingCrossVerification.run(); exit(0) }
+        catch { LibraryPairingCrossVerification.emit(["event": "error", "reason": "verification_failed"]); exit(1) }
+    }
+    app.run(); exit(1)
+}
+
 if CommandLine.arguments.contains("--verify-library-pairing") {
     let app = NSApplication.shared
     Task { @MainActor in

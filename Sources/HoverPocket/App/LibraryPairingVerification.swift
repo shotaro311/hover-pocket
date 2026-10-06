@@ -50,6 +50,12 @@ enum LibraryPairingVerification {
         catch { rejected = true }
         try check(rejected && state.snapshot().folder == original.folder, "ignored_write_detected")
         state.dropWrites = false
+        state.changeOnFolderRead = true
+        rejected = false
+        do { _ = try await client.addPeer(peer, name: "Concurrent edit", folderID: "hoverpocket-test", directory: root) }
+        catch { rejected = true }
+        try check(rejected && (state.snapshot().folder["devices"] as? [[String: Any]])?.count == 2, "concurrent_membership_is_not_rolled_back")
+        state.reset(directory: root.path)
         let newPeer = Array(repeating: "CCCCCCC", count: 8).joined(separator: "-")
         _ = try await client.addPeer(newPeer, name: "New peer", folderID: "hoverpocket-new-test", directory: root.appendingPathComponent("new"))
         let created = state.snapshot()
@@ -57,11 +63,12 @@ enum LibraryPairingVerification {
         try check(newDevice?["introducer"] as? Bool == false && newDevice?["autoAcceptFolders"] as? Bool == false, "no_automatic_trust_or_sharing")
         try check(created.eagle == original.eagle, "new_share_preserves_eagle")
         try check(state.authenticatedRequestsOnly, "local_api_header")
+        try await LibraryPairingSessionVerification.run()
         print("library_pairing_verification=ok checks=\(checks) (mock local API; real configuration untouched)")
     }
 }
 
-private final class PairingVerificationState: @unchecked Sendable {
+final class PairingVerificationState: @unchecked Sendable {
     static let me = Array(repeating: "AAAAAAA", count: 8).joined(separator: "-")
     static let peer = Array(repeating: "BBBBBBB", count: 8).joined(separator: "-")
     private let lock = NSLock()
@@ -69,11 +76,13 @@ private final class PairingVerificationState: @unchecked Sendable {
     private var devices: [String: [String: Any]] = [:]
     private var ignoreWrites = false
     private var authenticated = true
+    private var editOnRead = false
+    var changeOnFolderRead: Bool { get { lock.withLock { editOnRead } } set { lock.withLock { editOnRead = newValue } } }
     var dropWrites: Bool { get { lock.withLock { ignoreWrites } } set { lock.withLock { ignoreWrites = newValue } } }
     var authenticatedRequestsOnly: Bool { lock.withLock { authenticated } }
     func reset(directory: String) {
         lock.withLock {
-            folders = ["hoverpocket-test": ["id": "hoverpocket-test", "path": directory, "devices": [["deviceID": Self.me, "encryptionPassword": ""]], "customField": "preserve", "versioning": ["type": "simple"]],
+            folders = ["hoverpocket-test": ["id": "hoverpocket-test", "type": "sendreceive", "path": directory, "devices": [["deviceID": Self.me, "encryptionPassword": ""]], "customField": "preserve", "versioning": ["type": "simple"]],
                        "eagle": ["id": "eagle", "path": "/fictional/eagle", "devices": [["deviceID": Self.me], ["deviceID": Self.peer]]]]
             devices = [Self.me: ["deviceID": Self.me, "name": "This Mac"], Self.peer: ["deviceID": Self.peer, "name": "Existing peer", "unknown": "keep"]]
         }
@@ -102,7 +111,15 @@ private final class PairingVerificationState: @unchecked Sendable {
                 case "config/devices": result = Array(devices.values)
                 case "config/defaults/device", "config/defaults/folder": result = ["unknownDefault": "preserve"]
                 default:
-                    if route.hasPrefix("config/folders/"), let folder = folders[String(route.dropFirst("config/folders/".count))] { result = folder }
+                    if route.hasPrefix("config/folders/"), var folder = folders[String(route.dropFirst("config/folders/".count))] {
+                        if editOnRead {
+                            editOnRead = false
+                            var members = folder["devices"] as? [[String: Any]] ?? []
+                            members.append(["deviceID": Self.peer]); folder["devices"] = members
+                            folders[String(route.dropFirst("config/folders/".count))] = folder
+                        }
+                        result = folder
+                    }
                     else { return (Data(), 404) }
                 }
             } else if !ignoreWrites {
@@ -118,7 +135,7 @@ private final class PairingVerificationState: @unchecked Sendable {
     }
 }
 
-private final class PairingVerificationProtocol: URLProtocol, @unchecked Sendable {
+final class PairingVerificationProtocol: URLProtocol, @unchecked Sendable {
     static let state = PairingVerificationState()
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }

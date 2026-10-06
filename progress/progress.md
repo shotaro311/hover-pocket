@@ -1,15 +1,15 @@
 ---
 project_slug: hover-menu-preview
-updated: 2026-10-05
+updated: 2026-10-06
 updated_by: codex
-status: windows-0.2.10-installed; public-windows-0.2.10; reported-freeze-incident-unconfirmed-reproduced-preview-races-fixed; published-macos-644; macos-library-sync-local-670; macos-physical-acceptance-partial
+status: windows-0.2.10-installed; public-windows-0.2.10; reported-freeze-incident-unconfirmed-reproduced-preview-races-fixed; published-macos-644; macos-library-sync-local-671; macos-physical-acceptance-partial
 ---
 
-## 2026-10-05 設定画面と端末連携の改善（作業中）
+## 2026-10-06 設定画面と端末のコード接続
 
-- Mac開発版670で「一般・表示・素材と同期・撮影・AI・詳細」に整理し、説明の折りたたみと状態表示を追加。既存の確認設定を保持して6カテゴリの実画面と既存検査を確認。
-- Windows担当は6カテゴリ/検索/折りたたみ、コード連携UIと設定処理を実装。素材120・同期102・共有API/状態33、暗号化接続5ケース、実WebView UIの検査が成功との報告。Windows内の隔離Syncthing 2プロセスによる実転送と専用共有の解除もログで確認。実19件・全原本SHA・保留/競合0、Eagle/global device保持のreadbackを確認。
-- MacはローカルAPI処理と模擬API23項目まで完了。UI/接続準備の最終 `93bc3ef` をpush/readback済み。共通helper `f2e410b` はWindowsローカルで、GitHubへのpush許可待ち。MacコードUIへの組込み・Mac/Windows間のコード接続は未完。Windows候補の常駐切替、公開配信、main統合も未実施。[記録](2026-10/2026-10-05_hover-pocket-settings-pairing.md)。
+- Mac開発版671とWindows候補に、6カテゴリの設定、短期コードの表示/入力、相手の明示承認、端末一覧/解除を実装。両OSの共通helperとWindowsの停止状態復旧修正を開発ブランチへ統合した。
+- 模擬API・接続状態・取消と既存機能の検査に加え、公開TLS仲介で両方向のコード接続が成功。隔離SyncthingとSSH転送で生成素材2件の往復・原本SHA一致・専用共有だけの解除を両端末で確認。Mac実画面の日本語/英語、署名とライセンス同梱を確認した。
+- 実19素材の原本・DB内容とEagle共有を保持。既存同期は39ファイル・need0・errors0。Mac/Windows候補は開発版で、main統合・公開配信は未実施。大量素材の速度・長期運用は別受入。[Macの記録](2026-10/2026-10-06_hover-pocket-mac-pairing.md) / [Windowsの記録](2026-10/2026-10-06_hover-pocket-windows-settings-pairing.md)。
 
 ## 2026-10-05 Eagle方式のMac・Windows素材同期
 

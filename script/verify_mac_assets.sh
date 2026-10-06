@@ -14,7 +14,7 @@ for phase in library ui reopen; do
 done
 "$APP" --verify-library-sync --asset-source-root "$ROOT_DIR" --sync-evidence "$EVIDENCE_DIR/HoverPocketSyncVerify-native" > "$EVIDENCE_DIR/sync.log" 2>&1 || { cat "$EVIDENCE_DIR/sync.log"; exit 1; }
 tail -1 "$EVIDENCE_DIR/sync.log"
-"$APP" --verify-library-pairing > "$EVIDENCE_DIR/pairing.log" 2>&1 || { cat "$EVIDENCE_DIR/pairing.log"; exit 1; }
+"$APP" --verify-library-pairing --asset-source-root "$ROOT_DIR" > "$EVIDENCE_DIR/pairing.log" 2>&1 || { cat "$EVIDENCE_DIR/pairing.log"; exit 1; }
 cat "$EVIDENCE_DIR/pairing.log"
 for phase in chat library-voice personal-tools voice-only-confirmation capabilities broker panel-layout clipboard timer panel-soak; do
   "$APP" "--verify-$phase" --asset-evidence "$EVIDENCE_DIR" > "$EVIDENCE_DIR/$phase.log" 2>&1 || { cat "$EVIDENCE_DIR/$phase.log"; exit 1; }

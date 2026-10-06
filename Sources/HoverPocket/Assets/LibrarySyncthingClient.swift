@@ -60,7 +60,7 @@ final class LibrarySyncthingClient {
         try AssetLibraryStore.noLinks(directory)
         let folders = try await array("config/folders")
         let matches = folders.filter { ($0["path"] as? String).map { Self.normalizedPath($0) == directory.standardizedFileURL.path } == true }
-        guard matches.count == 1, let id = matches.first?["id"] as? String, Self.validFolderID(id) else {
+        guard matches.count == 1, matches.first?["type"] as? String == "sendreceive", let id = matches.first?["id"] as? String, Self.validFolderID(id) else {
             throw LibraryError.message("このライブラリの専用共有を確認できませんでした。接続の詳細を確認してください。")
         }
         return id
@@ -96,7 +96,7 @@ final class LibrarySyncthingClient {
         let folders = try await array("config/folders")
         let existing = folders.first { $0["id"] as? String == folderID }
         if let existing {
-            guard let path = existing["path"] as? String, Self.normalizedPath(path) == directory.standardizedFileURL.path else {
+            guard existing["type"] as? String == "sendreceive", let path = existing["path"] as? String, Self.normalizedPath(path) == directory.standardizedFileURL.path else {
                 throw LibraryError.message("別の共有と識別子が重なるため、接続を中止しました。")
             }
         } else if folders.contains(where: { ($0["path"] as? String).map { Self.normalizedPath($0) == directory.standardizedFileURL.path } == true }) {
@@ -117,12 +117,16 @@ final class LibrarySyncthingClient {
         let added = !members.contains { $0["deviceID"] as? String == peerID }
         let change = ShareChange(folderID: folderID, directory: directory, peerID: peerID, addedPeer: added)
         if added { members.append(["deviceID": peerID]) }
+        var writeAttempted = false
         do {
             if let existing {
                 // Detect edits made since preflight before replacing the member array.
                 let fresh = try await object("config/folders/" + folderID)
                 guard NSDictionary(dictionary: fresh).isEqual(to: existing) else { throw LibraryError.message("共有設定が変更されました。もう一度接続してください。") }
-                if added { try await write("config/folders/" + folderID, method: "PATCH", value: ["devices": members]) }
+                if added {
+                    writeAttempted = true
+                    try await write("config/folders/" + folderID, method: "PATCH", value: ["devices": members])
+                }
             } else {
                 var folder = try await object("config/defaults/folder")
                 folder["id"] = folderID
@@ -134,6 +138,7 @@ final class LibrarySyncthingClient {
                 folder["fsWatcherEnabled"] = true
                 folder["fsWatcherDelayS"] = 0.5
                 folder["rescanIntervalS"] = 60
+                writeAttempted = true
                 try await write("config/folders", method: "POST", value: folder)
             }
             let readback = try await object("config/folders/" + folderID)
@@ -141,7 +146,9 @@ final class LibrarySyncthingClient {
                   (readback["devices"] as? [[String: Any]] ?? []).contains(where: { $0["deviceID"] as? String == peerID }) else { throw invalidResponse }
             return change
         } catch {
-            try await rollback(change)
+            if writeAttempted {
+                do { try await rollback(change) } catch { throw LibraryPairingFailure(reason: "rollback_failed") }
+            }
             throw error
         }
     }
@@ -162,6 +169,17 @@ final class LibrarySyncthingClient {
         try await write("config/folders/" + folderID, method: "PATCH", value: ["devices": members])
         let readback = try await object("config/folders/" + folderID)
         guard !(readback["devices"] as? [[String: Any]] ?? []).contains(where: { $0["deviceID"] as? String == peerID }) else { throw invalidResponse }
+    }
+
+    func scan(folderID: String) async throws {
+        guard Self.validFolderID(folderID) else { throw invalidResponse }
+        var components = URLComponents(url: endpoint.appendingPathComponent("rest/db/scan"), resolvingAgainstBaseURL: false)!
+        components.queryItems = [URLQueryItem(name: "folder", value: folderID)]
+        var request = URLRequest(url: components.url!)
+        request.httpMethod = "POST"
+        request.setValue(apiKey, forHTTPHeaderField: "X-API-Key")
+        let (_, response) = try await session.data(for: request)
+        guard let response = response as? HTTPURLResponse, (200..<300).contains(response.statusCode) else { throw invalidResponse }
     }
 
     static func validDeviceID(_ id: String) -> Bool {

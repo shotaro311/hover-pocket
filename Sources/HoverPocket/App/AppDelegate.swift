@@ -313,6 +313,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard voiceTerminationTask == nil else { return .terminateLater }
         for editor in AssetLibraryRuntime.shared.editorSessions where !editor.cancel() { return .terminateCancel }
         voiceTerminationTask = Task { @MainActor [weak self] in
+            await LibraryDevicePairingController.shared.shutdown()
             if AssetCaptureController.shared.recording { await AssetCaptureController.shared.stopRecording() }
             await self?.voiceConfigurationTask?.value
             await CodexVoiceAccountLoginController.shared.shutdown()
