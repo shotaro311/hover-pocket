@@ -53,6 +53,16 @@ enum LibraryPairingSessionVerification {
                 try check(after.folder == before.folder, mode + "_rollback_membership")
             }
         }
+        // Keep stdin open: this catches a pipe reader that waits for 4096 bytes or EOF.
+        let echo = try LibraryPairingHelperProcess(executable: URL(fileURLWithPath: "/bin/cat"), start: ["probe": "live"])
+        let stopEcho = Task { try? await Task.sleep(for: .seconds(2)); echo.stop() }
+        var receivedWhileOpen = false
+        for try await line in echo.events {
+            receivedWhileOpen = (try JSONSerialization.jsonObject(with: line) as? [String: String])?["probe"] == "live"
+            break
+        }
+        stopEcho.cancel(); echo.stop()
+        try check(receivedWhileOpen, "short_pipe_message_arrives_before_eof")
         let foreign = root.appendingPathComponent("foreign")
         try LibraryDevicePairingController.prepareMarker(foreign, group: UUID().uuidString.lowercased(), write: true)
         try check((try? LibraryDevicePairingController.prepareMarker(foreign, group: UUID().uuidString.lowercased(), write: false)) == nil, "foreign_marker_rejected")

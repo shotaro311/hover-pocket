@@ -12,8 +12,8 @@
 
 - Swift warnings-as-errors、開発版671のbuildとcodesign検査が成功。
 - Rust単体5項目、実TLS仲介を使う架空IDの正常接続/誤コード/拒否/古い承認/別groupの5ケースが成功。
-- Macの模擬API検査と63項目の接続状態検査が成功。承認前の無変更、二重承認、先行/古い/異なる承認、EOF、期限、取消、終了、peer設定失敗、既存peer+pausedからの復旧、symlink/別marker拒否を確認。
-- Mac側stdioは最初の実両OS試験で短い入力を待ち続けた。`read(upToCount:)` から `availableData` に修正し、stdinを開いたままのfixture→imported即応と実helperのコード発行→取消→正常終了を確認。初回の失敗を成功に含めない。
+- Macの模擬API24項目と64項目の接続状態検査が成功。承認前の無変更、二重承認、先行/古い/異なる承認、EOF、期限、取消、終了、peer設定失敗、既存peer+pausedからの復旧、symlink/別marker拒否を確認。
+- Mac側stdioは最初の実両OS試験で短い入力を待ち続けた。`read(upToCount:)` から `availableData` に修正し、stdinを開いたままのfixture→imported即応と実helperのコード発行→取消→正常終了を確認。stdinを開いたまま短いメッセージを受信する回帰ケースを通常のMac検査にも追加。初回の失敗を成功に含めない。
 - 外部仲介 `mailbox.mw.leastauthority.com` への検証用ID/名前/groupの暗号化送信、IP/時刻の可視性をユーザーへ説明し、本人の「許可して接続試験を続ける」を受けて実機試験を再開。素材を仲介へ送らない。
 - Windows親controllerと固定SSHホスト鍵を使い、Windows invite→Mac join→明示承認→双方complete、Mac invite→Windows join→既存group保持を実機で確認。公開TLS仲介でコード接続し、素材転送は隔離SyncthingのSSHポート転送を使用した。LAN直接接続/素材用の外部relay経路の新たな受入とは区別する。
 - 双方の空ライブラリへ生成したtext素材を1件ずつ入れ、両端末が2件になり、原本SHA・group・同期有効状態が一致。双方の専用membership解除、global device保持と受信素材保持を確認。Mac側も独立したSQLite/ファイル/API readbackで2件・全SHA・quick_check=ok・membership1（自分のみ）を確認。
