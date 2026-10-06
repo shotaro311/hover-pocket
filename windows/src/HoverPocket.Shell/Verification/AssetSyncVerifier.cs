@@ -21,7 +21,7 @@ internal static class AssetSyncVerifier
             for(var i=0;i<200 && settings.WebViewForVerify?.CoreWebView2 is null;i++) await Task.Delay(50);
             var web=settings.WebViewForVerify ?? throw new Exception("settings unavailable");
             await Wait(web.CoreWebView2,"document.querySelector('[data-sync-create]') && !document.querySelector('[data-sync-create]').disabled");
-            await web.ExecuteScriptAsync("document.querySelector('[data-asset-sync-settings]').scrollIntoView(); document.querySelector('[data-sync-create]').click()");
+            await web.ExecuteScriptAsync("document.querySelector('[data-category=library]').click(); document.querySelector('[data-sync-advanced]').open=true; document.querySelector('[data-sync-create]').click()");
             await Wait(web.CoreWebView2,"document.querySelector('[data-sync-enabled]').checked && !document.querySelector('[data-sync-enabled]').disabled");
             if(!(await store.GetSyncStatusAsync()).Enabled) throw new Exception("create/enable bridge failed");
             await web.ExecuteScriptAsync("document.querySelector('[data-sync-enabled]').click()");
@@ -57,17 +57,71 @@ internal static class AssetSyncVerifier
             await controller.Panel.WebView!.ExecuteScriptAsync("""
                 window.__syncPanelDenied=null;
                 import('/js/bridge.js').then(async ({request}) => {
-                    try { await request('assetSync.enable',{enabled:false}); window.__syncPanelDenied=false; }
-                    catch { window.__syncPanelDenied=true; }
+                    let denied=true;
+                    for (const [method,params] of [['assetSync.enable',{enabled:false}],['pairing.invite',{}],['pairing.approve',{approvalId:'fake'}]]) {
+                        try { await request(method,params); denied=false; } catch { }
+                    }
+                    window.__syncPanelDenied=denied;
                 });
                 """);
             await Wait(controller.Panel.WebView.CoreWebView2,"window.__syncPanelDenied === true");
+            await web.ExecuteScriptAsync("document.querySelector('[data-sync-advanced]').open=false; document.querySelector('[data-category=general]').click()");
+            await Wait(web.CoreWebView2,"document.querySelector('[data-category-title]').textContent==='General' && document.querySelector('[data-asset-sync-settings]').hidden");
+            await web.ExecuteScriptAsync("document.querySelector('[data-settings-search]').value='Library'; document.querySelector('[data-settings-search]').dispatchEvent(new Event('input'))");
+            await Wait(web.CoreWebView2,"!document.querySelector('[data-asset-sync-settings]').hidden && document.querySelector('[data-category-title]').textContent==='Search results'");
+            await web.ExecuteScriptAsync("document.querySelector('[data-category=library]').click()");
+            await Wait(web.CoreWebView2,"document.querySelector('[data-settings-search]').value==='' && !document.querySelector('[data-asset-sync-settings]').hidden");
+            settings.Width=620; await Task.Delay(300);
+            if(await web.ExecuteScriptAsync("document.documentElement.scrollWidth<=window.innerWidth")!="true") throw new Exception("narrow settings overflow");
+            await using(var image=File.Create(Path.Combine(root,"settings-library-narrow.png")))
+                await web.CoreWebView2.CapturePreviewAsync(Microsoft.Web.WebView2.Core.CoreWebView2CapturePreviewImageFormat.Png,image);
+            settings.Width=940; await Task.Delay(300);
+            await using(var image=File.Create(Path.Combine(root,"settings-library.png")))
+                await web.CoreWebView2.CapturePreviewAsync(Microsoft.Web.WebView2.Core.CoreWebView2CapturePreviewImageFormat.Png,image);
+            var fakeSession = new Sync.PairingState();
+            var approvals=0; var fakeRole="invite";
+            bridge.PairingForVerify = (method, parameters, _) => {
+                switch(method) {
+                    case "invite": fakeRole="invite"; fakeSession=new("waiting", Code:"123-12345678", ExpiresAt:DateTimeOffset.UtcNow.AddMinutes(5)); return Task.FromResult<object?>(fakeSession);
+                    case "join": fakeRole="join"; fakeSession=new("peer", ApprovalId:"fictional",PeerName:"Test Mac",Platform:"macos",Verification:"ABCD1234",ExpiresAt:DateTimeOffset.UtcNow.AddMinutes(5)); return Task.FromResult<object?>(fakeSession);
+                    case "approve":
+                        if(parameters?.GetProperty("approvalId").GetString()!="fictional") throw new Exception("wrong approval ID");
+                        approvals++; fakeSession=new("complete"); return Task.FromResult<object?>(fakeSession);
+                    case "cancel": fakeSession=new(); return Task.FromResult<object?>(fakeSession);
+                    default: return Task.FromResult<object?>(new {available=true,devices=Array.Empty<object>(),session=fakeSession,role=fakeRole,error=(string?)null});
+                }
+            };
+            await Wait(web.CoreWebView2,"!document.querySelector('[data-sync-invite]').disabled");
+            await web.ExecuteScriptAsync("document.querySelector('[data-sync-invite]').click()");
+            await Wait(web.CoreWebView2,"document.querySelector('[data-sync-code]').textContent==='123-12345678'");
+            if(approvals!=0) throw new Exception("unprompted pairing approval");
+            fakeSession=new("peer",ApprovalId:"fictional",PeerName:"<img src=x onerror=alert(1)>",Platform:"macos",Verification:"ABCD1234",ExpiresAt:DateTimeOffset.UtcNow.AddMinutes(5));
+            await Wait(web.CoreWebView2,"!document.querySelector('[data-sync-approve]').hidden && !document.querySelector('[data-sync-approve]').disabled");
+            if(await web.ExecuteScriptAsync("document.querySelector('[data-sync-peer] img')===null && document.querySelector('[data-sync-peer]').textContent.includes('<img')")!="true") throw new Exception("peer name was treated as HTML");
+            await web.ExecuteScriptAsync("document.querySelector('[data-sync-approve]').click()");
+            await Wait(web.CoreWebView2,"document.querySelector('[data-sync-connection-status]').textContent.includes('Connected')");
+            if(approvals!=1) throw new Exception("approval not exact-once");
+            await web.ExecuteScriptAsync("document.querySelector('[data-sync-enter]').click(); document.querySelector('[data-sync-code-input]').value='123-12345678'; document.querySelector('[data-sync-code-input]').dispatchEvent(new Event('input')); document.querySelector('[data-sync-connect]').click()");
+            await Wait(web.CoreWebView2,"document.querySelector('[data-sync-session-label]').textContent.includes('Approve the connection on your other device')");
+            if(await web.ExecuteScriptAsync("document.querySelector('[data-sync-approve]').hidden")!="true") throw new Exception("joiner may approve itself");
+            await web.ExecuteScriptAsync("document.querySelector('[data-sync-cancel]').click()");
+            await Wait(web.CoreWebView2,"document.querySelector('[data-sync-session]').hidden");
+            VerifyConsole.WriteLine("PASS pairing UI: invite/code, explicit bound approval, untrusted name rendered as text, join waiting, cancellation");
+            await web.ExecuteScriptAsync("import('/js/bridge.js').then(({request})=>request('settings.setLanguage',{language:'ja'}))");
+            await Wait(web.CoreWebView2,"document.querySelector('[data-sync-title]').textContent==='ライブラリの同期'");
+            foreach(var category in new[]{"general","appearance","library","ai"}) {
+                await web.ExecuteScriptAsync("document.querySelector('[data-category="+category+"]').click()"); await Task.Delay(100);
+                await using var preview=File.Create(Path.Combine(root,"settings-"+category+"-ja.png"));
+                await web.CoreWebView2.CapturePreviewAsync(Microsoft.Web.WebView2.Core.CoreWebView2CapturePreviewImageFormat.Png,preview);
+            }
+
+            VerifyConsole.WriteLine("PASS settings navigation: six categories, search, clear search on navigation, narrow window without horizontal overflow");
             VerifyConsole.WriteLine("PASS sync settings: English labels and settings-only bridge boundary");
             VerifyConsole.WriteLine("PASS sync UI evidence: "+root);
             return 0;
         }
         catch(Exception ex) { VerifyConsole.WriteLine("FAIL sync UI: "+ex); return 1; }
-        finally { bridge.AssetSyncFolderPickerForVerify=null; settings.Close(); }
+        finally { bridge.PairingForVerify=null; bridge.AssetSyncFolderPickerForVerify=null; settings.Close(); }
     }
     private static async Task Wait(Microsoft.Web.WebView2.Core.CoreWebView2 web,string expression)
     {

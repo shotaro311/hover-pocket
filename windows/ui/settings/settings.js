@@ -1,3 +1,4 @@
+import { createSettingsNavigation } from "./settings-navigation.js";
 import { createAssetSyncSettings } from "./asset-sync-settings.js";
 import { on, request } from "../js/bridge.js";
 import { labelForSize, setLanguage, t } from "../js/i18n.js";
@@ -76,6 +77,7 @@ const resetEl = document.querySelector("[data-reset]");
 const resetBindingEl = document.querySelector("[data-reset-binding]");
 const openDataFolderEl = document.querySelector("[data-open-data-folder]");
 
+const navigation = createSettingsNavigation(request);
 const assetSyncSettings = createAssetSyncSettings(document.querySelector("[data-asset-sync-settings]"), request);
 let currentState = null;
 let stickyState = null;
@@ -135,14 +137,14 @@ function render(state) {
   renderProviders(state);
   renderProviderSelection(state);
   aiNativeEl.checked = Boolean(state.settings.aiNativeEnabled);
-  aiNativeLabelEl.textContent = state.settings.language === "en" ? "AI-native features" : "AIネイティブ機能";
+  aiNativeLabelEl.textContent = state.settings.language === "en" ? "Enable personal tools" : "自作ツールを使う";
   aiNativeNoteEl.textContent = state.settings.language === "en"
     ? "Off by default. Disabling cancels generation immediately; enabling after an OFF startup requires a HoverPocket restart and never hot-starts Codex."
-    : "既定ではオフです。OFFは生成を即時停止します。OFFで起動した後のONはHoverPocket再起動後に有効となり、Codexをhot-startしません。";
+    : "オフにすると生成を停止します。有効にした後はHoverPocketを再起動してください。";
   const voiceProviderId = state.settings.voiceProviderId ?? "off";
   const voiceEnabled = Boolean(state.settings.voiceEnabled);
   const englishVoice = state.settings.language === "en";
-  voiceHeadingEl.textContent = englishVoice ? "Realtime conversation" : "リアルタイム会話";
+  voiceHeadingEl.textContent = englishVoice ? "Chat & voice" : "チャットと音声";
   renderSegment(voiceProviderEl, [
     { id: "off", label: englishVoice ? "Off" : "オフ" },
     { id: "codex_app_server", label: englishVoice ? "Codex (ChatGPT account)" : "Codex（ChatGPTアカウント）" },
@@ -150,7 +152,7 @@ function render(state) {
   ], voiceProviderId, (providerId) => update("settings.setVoiceProvider", { providerId }));
   voiceEnabledEl.checked = voiceEnabled;
   voiceEnabledEl.disabled = voiceProviderId === "off";
-  voiceEnabledLabelEl.textContent = englishVoice ? "Enable realtime conversation" : "リアルタイム会話を有効にする";
+  voiceEnabledLabelEl.textContent = englishVoice ? "Enable voice conversation" : "音声対話を使う";
   voiceOpenAIKeyRowEl.hidden = voiceProviderId !== "openai_realtime_byok";
   voiceOpenAIKeyStatusEl.textContent = state.settings.voiceOpenAIKeyConfigured
     ? (englishVoice ? "API key saved securely" : "APIキーは安全に保存済み")
@@ -171,7 +173,7 @@ function render(state) {
   voiceCalendarAccessEl.checked = Boolean(state.settings.voiceCalendarAccessGranted);
   voiceCalendarLabelEl.textContent = englishVoice
     ? "Allow today's calendar and event creation during conversation"
-    : "会話中に今日の予定を確認・新しい予定を追加できるようにする";
+    : "会話中に予定を読み取り・追加する";
   voiceCalendarNoteEl.textContent = englishVoice
     ? "Connect Google Calendar separately. You confirm event details before each new event is created."
     : "Google Calendarへの接続も必要です。予定を追加するときは、日時と内容を確認してから作成します。";
@@ -210,6 +212,7 @@ function render(state) {
   startupStatusEl.textContent = state.settings.startWithWindowsRegistered ? t("registered") : t("off");
   autoUpdatesEl.checked = state.settings.autoCheckForUpdates !== false;
   updateStatusEl.textContent = state.updater?.message ?? "";
+  navigation.render(state.settings.language);
 }
 
 function renderVoiceConnection(settings, english) {
@@ -319,8 +322,8 @@ function renderPocketApps(state) {
     const empty = document.createElement("p");
     empty.className = "settings-note";
     empty.textContent = state.settings.language === "en"
-      ? "No Pocket App is active. AI-native features are off by default."
-      : "有効なPocket Appはありません。AIネイティブ機能は既定でオフです。";
+      ? "No personal tools yet."
+      : "自作ツールはまだありません。";
     pocketAppListEl.append(empty);
     return;
   }

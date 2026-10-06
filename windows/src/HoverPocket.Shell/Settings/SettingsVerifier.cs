@@ -58,7 +58,7 @@ internal sealed class SettingsVerifier
         {
             window.Show();
             while (window.WebViewForVerify?.CoreWebView2 is null
-                || await window.WebViewForVerify.ExecuteScriptAsync("document.querySelector('[data-voice-heading]')?.textContent === 'リアルタイム会話'") != "true")
+                || await window.WebViewForVerify.ExecuteScriptAsync("document.querySelector('[data-voice-heading]')?.textContent === 'チャットと音声'") != "true")
                 await Task.Delay(100, timeout.Token);
             var web = window.WebViewForVerify;
             var state = JsonSerializer.SerializeToNode(controller.BuildState(BridgeSurface.Settings))!;
@@ -79,7 +79,7 @@ internal sealed class SettingsVerifier
             state["settings"]!["voiceAvailability"] = "ready";
             state["settings"]!["voiceLoginStatus"] = "idle";
             web.CoreWebView2.PostWebMessageAsJson(new JsonObject { ["event"] = "voice.stateChanged", ["payload"] = state.DeepClone() }.ToJsonString());
-            await web.ExecuteScriptAsync("document.querySelector('[data-voice-heading]').scrollIntoView({block:'start'})");
+            await web.ExecuteScriptAsync("document.querySelector('[data-category=ai]').click(); document.querySelector('[data-voice-heading]').scrollIntoView({block:'start'})");
             await Task.Delay(100, timeout.Token);
             if (await web.ExecuteScriptAsync("document.documentElement.scrollWidth <= document.documentElement.clientWidth") != "true")
                 _failures.Add("voice Settings horizontal overflow");

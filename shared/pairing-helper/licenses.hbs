@@ -1,0 +1,4 @@
+<!doctype html><meta charset="utf-8"><title>HoverPocket pairing licenses</title>
+<h1>HoverPocket pairing — third-party licenses</h1>
+<p>Source: https://github.com/shotaro311/hover-pocket/tree/main/shared/pairing-helper</p>
+{{#each licenses}}<h2>{{name}}</h2><ul>{{#each used_by}}<li>{{crate.name}} {{crate.version}} — {{crate.repository}}</li>{{/each}}</ul><pre style="white-space:pre-wrap">{{text}}</pre>{{/each}}
