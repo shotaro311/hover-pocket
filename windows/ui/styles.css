@@ -246,13 +246,34 @@ input {
 }
 
 .hp-voice-lane {
-  flex: 0 0 var(--hp-voice-height);
+  flex: 0 0 calc(var(--hp-voice-height) + var(--hp-chat-height, 82px));
   min-height: 0;
-  height: var(--hp-voice-height);
+  height: calc(var(--hp-voice-height) + var(--hp-chat-height, 82px));
   overflow: hidden;
   border-top: 1px solid var(--hp-line);
   background: var(--hp-surface-2);
 }
+
+.hp-voice-content { height: var(--hp-voice-height); min-height: 0; }
+.hp-voice-content[hidden] { display: none; }
+.hp-chat-lane { height: var(--hp-chat-height, 82px); display: flex; flex-direction: column; gap: 5px; padding: 7px 12px; min-width: 0; }
+.hp-chat-compose { display: flex; gap: 7px; flex: 0 0 36px; min-height: 0; }
+.hp-chat-compose textarea { flex: 1; min-width: 0; height: 36px; resize: none; padding: 7px 10px; border: 1px solid var(--hp-line); border-radius: 8px; background: #171a20; color: var(--hp-text); font: inherit; font-size: 12px; line-height: 20px; outline: none; overflow-y: auto; }
+.hp-chat-compose textarea:focus { border-color: var(--hp-accent); }
+.hp-chat-lane button, .hp-chat-lane select { color-scheme: dark; border: 1px solid var(--hp-line); border-radius: 6px; background: #1b1f26; color: var(--hp-text); cursor: pointer; font: inherit; }
+.hp-chat-lane button:hover, .hp-chat-lane select:hover { background: #29313e; }
+.hp-chat-lane button:disabled { opacity: .4; cursor: default; }
+.hp-chat-compose button { flex: 0 0 36px; font-size: 20px; background: #324f7d; }
+.hp-chat-tools { display: flex; align-items: center; gap: 5px; min-width: 0; flex: 0 0 22px; font-size: 10px; }
+.hp-chat-tools button { padding: 2px 7px; height: 22px; white-space: nowrap; }
+.hp-chat-tools select { height: 22px; width: 72px; max-width: 100px; min-width: 0; }
+.hp-chat-status { min-width: 0; flex: 1; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: var(--hp-muted); }
+.hp-chat-thread { flex: 1; min-height: 0; overflow: hidden; }
+.hp-chat-thread[hidden] { display: none; }
+.hp-chat-messages { height: 100%; overflow: auto; overscroll-behavior: contain; user-select: text; padding: 0 5px; }
+.hp-chat-message { margin: 4px 0 10px; font-size: 12px; line-height: 1.5; color: var(--hp-text); white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; }
+.hp-chat-message small { display: block; color: var(--hp-muted); font-size: 9px; margin-bottom: 3px; }
+.hp-chat-message[data-role=user] { background: #1d2635; border-radius: 7px; padding: 6px 9px; }
 
 .hp-voice-lane[hidden] {
   display: none;

@@ -15,6 +15,7 @@ final class ProviderStore: ObservableObject {
     private var settingsCancellables = Set<AnyCancellable>()
     private var generatedSurfaceCancellable: AnyCancellable?
     private var refreshTask: Task<Void, Never>?
+    private var temporaryPreviousID: PluginID?
 
     init(registry: ProviderRegistry = .empty, settings: AppSettings = AppSettings()) {
         self.registry = registry
@@ -74,9 +75,21 @@ final class ProviderStore: ObservableObject {
     func select(_ id: PluginID) {
         guard selectedPluginID != id else { return }
         guard visibleManifests.contains(where: { $0.id == id }) else { return }
+        if let editor = AssetLibraryRuntime.shared.editing, !editor.cancel() { return }
+        temporaryPreviousID = nil
         selectedPluginID = id
         settings.recordProviderSelection(id)
         refreshSelected(reason: .userRequested)
+    }
+
+    func selectTemporaryAssets() {
+        guard visibleManifests.contains(where: { $0.id == AssetsProvider.pluginID }) else { return }
+        if selectedPluginID != AssetsProvider.pluginID { temporaryPreviousID = selectedPluginID }
+        selectedPluginID = AssetsProvider.pluginID
+    }
+
+    func restoreTemporarySelection() {
+        if let previous = temporaryPreviousID { selectedPluginID = previous; temporaryPreviousID = nil }
     }
 
     func prepareForPanelOpen(isSecondaryDisplay: Bool = false) {
@@ -95,6 +108,7 @@ final class ProviderStore: ObservableObject {
     }
 
     func prepareForPanelClose() {
+        restoreTemporarySelection()
         guard isPanelOnSecondaryDisplay else { return }
         isPanelOnSecondaryDisplay = false
         settingsDidChange()

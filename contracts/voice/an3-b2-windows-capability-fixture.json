@@ -12,8 +12,8 @@
       "success"
     ],
     "environments": [],
-    "positiveToolPolicy": "dynamicToolsOnly",
-    "codex0145SupportsPositiveToolPolicy": false,
+    "positiveToolPolicy": "credentialFreeExactToolProbe",
+    "schemaOnlyIsSufficient": false,
     "productionActivationApproved": false,
     "sandbox": "read-only",
     "approvalPolicy": "never",

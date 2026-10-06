@@ -44,6 +44,9 @@ internal sealed class AssetPaneController : IDisposable
     private Rect _trashBounds;
     private bool _trashRequested, _trashHovered;
     private string? _dragToken;
+    private sealed record AssetDropTarget(AssetDestination Destination, Rect Bounds);
+    private AssetDropTarget[] _dropTargets = [];
+    private AssetDestination? _dropTarget, _hoverTarget;
     internal string DragTraceForVerify { get; private set; } = "none";
     internal string DragStateForVerify { get; private set; } = "idle";
     internal bool InternalDragForVerify => _dragToken is not null;
@@ -56,6 +59,7 @@ internal sealed class AssetPaneController : IDisposable
         _store = store; _media = AssetMedia.For(store); _owner = owner; _bridge = bridge; _web = web; _layout = layout; _provider = provider; _playback = playback;
         _store.Changed += OnChanged;
         Register("assets.query", async p => await _store.QueryAsync(Parse<AssetQuery>(p)));
+        Register("assets.get", async p => { var asset = await _store.GetAsync(Text(p, "id")); return asset is { Trashed: false } ? asset : null; });
         Register("assets.matches", async p => new { matches = await _store.MatchesAsync(Parse<AssetQuery>(p!.Value.GetProperty("query")), Text(p, "id")) });
         Register("assets.selectionRange", async p => new { ids = await _store.SelectionRangeAsync(Parse<AssetQuery>(p!.Value.GetProperty("query")), Text(p, "anchorId"), Text(p, "targetId")) });
         Register("assets.update", UpdateAsync);
@@ -83,12 +87,13 @@ internal sealed class AssetPaneController : IDisposable
         Register("assets.endPreview", _ => { EndPreview(); return Task.FromResult<object?>(new { ok = true }); });
         Register("assets.organizer", _ => { _previewLayout = new(true, Organizer: true); _layout(_previewLayout); return Task.FromResult<object?>(new { ok = true }); });
         Register("assets.openOrganizer", _ => { openOrganizer?.Invoke(); return Task.FromResult<object?>(new { ok = true }); });
-        Register("assets.capture", async p => { var kind = Optional(p, "kind") ?? "settings"; if (kind is not ("settings" or "screenshot" or "recording")) throw new ArgumentException("Unknown capture action."); if (capture is not null) await capture(kind, Optional(p, "folderId")); return new { ok = capture is not null }; });
+        Register("assets.capture", async p => { var kind = Optional(p, "kind") ?? "settings"; if (kind is not ("settings" or "screenshot" or "recording" or "cameraPhoto" or "cameraVideo" or "audio")) throw new ArgumentException("Unknown capture action."); if (capture is not null) await capture(kind, Optional(p, "folderId")); return new { ok = capture is not null }; });
         Register("assets.pick", PickAsync);
         Register("assets.cancelImport", _ => { _import?.Cancel(); return Task.FromResult<object?>(new { ok = true }); });
         Register("assets.importState", _ => Task.FromResult<object?>(Progress()));
         Register("assets.clipboard", ClipboardAsync);
         Register("assets.copy", CopyAsync);
+        Register("assets.dragTargets", p => { if (_dragToken is not null) ReadDropTargets(p!.Value); return Task.FromResult<object?>(new { ok = true }); });
         Register("assets.backup", BackupAsync);
         Register("assets.recover", async _ => { var items = await _store.OrphansAsync(); var recovered=0; foreach (var item in items) if(await _store.RecoverOrphanAsync(item)) recovered++; return new { recovered }; });
         Register("assets.databaseSnapshots", async _ => await _store.DatabaseSnapshotsAsync());
@@ -133,7 +138,10 @@ internal sealed class AssetPaneController : IDisposable
     private static string? Optional(JsonElement? p, string key) => p is { } value && value.TryGetProperty(key, out var field) && field.ValueKind == JsonValueKind.String ? field.GetString() : null;
     private async Task<object?> UpdateAsync(JsonElement? p)
     {
+        if (Text(p, "operation") == "undoOrganize") return new { ok = await _store.UndoOrganizeAsync(Text(p, "undoToken")) };
         var ids = p!.Value.GetProperty("ids").Deserialize<string[]>()!;
+        if (Text(p, "operation") == "organize")
+            return await _store.OrganizeAsync(ids, Optional(p, "sourceFolderId"), Parse<AssetDestination>(p.Value.GetProperty("destination")));
         var old = new List<Asset>(); foreach (var id in ids) if (await _store.GetAsync(id) is { } asset) old.Add(asset);
         await _store.UpdateAsync(ids, Text(p, "operation"), Optional(p, "value")); _undo = old.ToArray(); return new { ok = true };
     }
@@ -150,12 +158,14 @@ internal sealed class AssetPaneController : IDisposable
         _layout(_previewLayout with { Active = true, PinOnly = !_previewLayout.Active });
         _previewLayout = _previewLayout with { Active = true };
         var page = p!.Value.TryGetProperty("page", out var number) ? Math.Max(1, number.GetInt32()) : 1;
-        var frame = await _media.FrameAsync(asset, page, false, token);
+        var audio = AssetMediaServer.AudioMime(asset) is not null;
+        var frame = audio ? new AssetFrame(null, 640, 160) : await _media.FrameAsync(asset, page, false, token);
         if (generation != _generation || _disposed) return new { cancelled = true };
         _previewLayout = new(true, _previewLayout.Fullscreen, frame.Width, frame.Height, _previewLayout.Organizer);
         // The client presents this layout after the preview image has decoded.
         return new { id, generation, asset.Kind, frame.DataUrl, frame.Width, frame.Height, frame.Pages, frame.Error,
-            videoUrl = asset.Kind == "video" ? $"https://asset-media.hoverpocket.local/{_lease}/{asset.Id}" : null };
+            videoUrl = asset.Kind == "video" ? $"https://asset-media.hoverpocket.local/{_lease}/{asset.Id}" : null,
+            audioUrl = audio ? $"https://asset-media.hoverpocket.local/{_lease}/{asset.Id}" : null };
     }
     private bool _editingImage;
     private Capture.InlineImageEditor? _inlineEditor;
@@ -200,17 +210,20 @@ internal sealed class AssetPaneController : IDisposable
         else { var picker = new Microsoft.Win32.OpenFileDialog { Title = "素材を追加", Multiselect = true }; if (picker.ShowDialog(_owner) == true) paths = picker.FileNames; }
         if (paths.Length > 0) await ImportPathsAsync(paths); return new { ok = true };
     }
-    public async Task ImportPathsAsync(string[] paths)
+    public async Task<bool> ImportPathsAsync(string[] paths, string? folderId = null, bool waitForCompletion = false, bool internet = false)
     {
         using var pin = PinForDialog();
-        if (_import is not null) { await _bridge.PostEventAsync("assets.dropUnsupported",new {message="保存中です。処理が終わるか取り消してから追加してください。"}); return; }
+        if (_import is not null) { await _bridge.PostEventAsync("assets.dropUnsupported",new {message="保存中です。処理が終わるか取り消してから追加してください。"}); return false; }
         var capacity = await Task.Run(() => { long bytes = 0; var count = 0; foreach (var path in Enumerate(paths)) { try { bytes += new FileInfo(path).Length; count++; } catch (IOException) { } catch (UnauthorizedAccessException) { } } return (count, bytes); });
         if ((capacity.count >= 1000 || capacity.bytes >= 1024L * 1024 * 1024)
-            && MessageBox.Show(_owner, $"{capacity.count:N0}件、{capacity.bytes / (1024d * 1024):N1} MiBをコピーして保存します。続けますか？", "素材を追加", MessageBoxButton.OKCancel) != MessageBoxResult.OK) return;
+            && MessageBox.Show(_owner, $"{capacity.count:N0}件、{capacity.bytes / (1024d * 1024):N1} MiBをコピーして保存します。続けますか？", "素材を追加", MessageBoxButton.OKCancel) != MessageBoxResult.OK) return false;
+        if (_import is not null) return false;
         _import?.Dispose(); _import = new(); var cancellation = _import; _completed = _failed = _duplicates = _skipped = _restoreAvailable = 0; _skipReasons.Clear(); _lastImportError=null;
-        _ = RunImportAsync(paths, cancellation);
+        var import = RunImportAsync(paths, cancellation, folderId, internet);
+        if (waitForCompletion) await import;
+        return !cancellation.IsCancellationRequested;
     }
-    private async Task RunImportAsync(string[] paths, CancellationTokenSource cancellation)
+    private async Task RunImportAsync(string[] paths, CancellationTokenSource cancellation, string? folderId = null, bool internet = false)
     {
         try
         {
@@ -221,7 +234,7 @@ internal sealed class AssetPaneController : IDisposable
                 foreach (var file in Enumerate(paths, includeDirectories:true, skipped:reason=>{_skipped++;_skipReasons.AddOrUpdate(reason,1,(_,count)=>count+1);}))
                 {
                     cancellation.Token.ThrowIfCancellationRequested();
-                    string? category = null;
+                    string? category = folderId;
                     var isDirectory = Directory.Exists(file);
                     var root = paths.FirstOrDefault(p => Directory.Exists(p) && (string.Equals(Path.GetFullPath(file),Path.GetFullPath(p),StringComparison.OrdinalIgnoreCase) || file.StartsWith(Path.GetFullPath(p) + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)));
                     if (root is not null)
@@ -231,8 +244,10 @@ internal sealed class AssetPaneController : IDisposable
                         foreach (var part in parts) { current = Path.Combine(current, part); if (!folderMap.TryGetValue(current, out var found)) folderMap[current] = found = await _store.AddCategoryAsync("folder", part, category); category = found; }
                     }
                     if (isDirectory) continue;
-                    var origin = File.Exists(file + ":Zone.Identifier");
+                    var origin = internet || File.Exists(file + ":Zone.Identifier");
                     var result = await _store.ImportAsync(file, category, origin, cancellation.Token);
+                    if (result.Status == "duplicate" && result.AssetId is not null && category is not null)
+                        await _store.OrganizeAsync([result.AssetId], null, new AssetDestination("folder", category));
                     if (result.Status == "saved") _completed++; else if (result.Status is "duplicate" or "restoreAvailable") { _duplicates++; if(result.Status=="restoreAvailable") { _restoreAvailable++; restoreIds.Add(result.AssetId!); } } else if (result.Status == "failed") { _failed++; _lastImportError=result.Error; } else if(result.Status=="skipped") _skipped++;
                     await _bridge.PostEventAsync("assets.importChanged", Progress());
                 }
@@ -298,6 +313,36 @@ internal sealed class AssetPaneController : IDisposable
         if (drag) DragStateForVerify = "requested";
         if (drag && _dragPreparing) { DragStateForVerify = "busy"; return new { preparing = true }; }
         ids = ids.Distinct().Order(StringComparer.Ordinal).ToArray();
+        if (drag && p.Value.TryGetProperty("dropTargets", out _))
+        {
+            foreach (var value in ids) _store.ReadOriginalPath(await _store.GetAsync(value) ?? throw new FileNotFoundException());
+            if ((GetAsyncKeyState(0x01) & 0x8000) == 0) return new { prepared = true };
+            ReadDropTargets(p.Value);
+            _trashBounds = Rect.Empty;
+            if (p.Value.TryGetProperty("trashBounds", out var initialTrash) && initialTrash.ValueKind == JsonValueKind.Object)
+            {
+                var x = initialTrash.GetProperty("x").GetDouble(); var y = initialTrash.GetProperty("y").GetDouble(); var width = initialTrash.GetProperty("width").GetDouble(); var height = initialTrash.GetProperty("height").GetDouble();
+                if (double.IsFinite(x) && double.IsFinite(y) && double.IsFinite(width) && double.IsFinite(height) && width > 0 && height > 0) _trashBounds = new(x, y, width, height);
+            }
+            _dropTarget = null; _dragToken = Guid.NewGuid().ToString("N"); _trashRequested = false;
+            var data = new DataObject(new AssetDragDataObject(_store, ids, _dragToken));
+            var lastMove = DateTime.MinValue;
+            void Moved(object sender, System.Windows.QueryContinueDragEventArgs args)
+            {
+                if (_webSurface is null || DateTime.UtcNow - lastMove < TimeSpan.FromMilliseconds(35)) return;
+                lastMove = DateTime.UtcNow;
+                if (GetCursorPos(out var screenPoint))
+                {
+                    var point = _webSurface.PointFromScreen(new System.Windows.Point(screenPoint.X, screenPoint.Y));
+                    _ = _bridge.PostEventAsync("assets.dragMoved", new { x = point.X, y = point.Y });
+                }
+            }
+            _owner.QueryContinueDrag += Moved;
+            DragStateForVerify = "active";
+            try { DragStateForVerify = "ended-" + DragDrop.DoDragDrop(_owner, data, DragDropEffects.Copy | DragDropEffects.Move); }
+            finally { _owner.QueryContinueDrag -= Moved; _dragToken = null; SetDropHover(null); _dropTargets = []; }
+            return new { ok = true, dropTarget = _dropTarget, droppedInTrash = _dropTarget?.Kind == "trash" };
+        }
         var key = string.Join(',', ids);
         var prepared = _preparedDrag;
         var copies = new List<string>();
@@ -325,6 +370,7 @@ internal sealed class AssetPaneController : IDisposable
             // A handed-out copy is never reused: the receiving app can edit it immediately.
             _preparedDrag = null;
             _trashBounds = Rect.Empty;
+            _dropTargets = [];
             if (p.Value.TryGetProperty("trashBounds", out var bounds) && bounds.ValueKind == JsonValueKind.Object)
                 _trashBounds = new Rect(bounds.GetProperty("x").GetDouble(), bounds.GetProperty("y").GetDouble(), bounds.GetProperty("width").GetDouble(), bounds.GetProperty("height").GetDouble());
             DragTraceForVerify = "no native target events";
@@ -340,19 +386,45 @@ internal sealed class AssetPaneController : IDisposable
         return new { ok = true };
     }
     [System.Runtime.InteropServices.DllImport("user32.dll")] private static extern short GetAsyncKeyState(int key);
+    [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)] private struct NativePoint { public int X, Y; }
+    [System.Runtime.InteropServices.DllImport("user32.dll")] [return: System.Runtime.InteropServices.MarshalAs(System.Runtime.InteropServices.UnmanagedType.Bool)] private static extern bool GetCursorPos(out NativePoint point);
+    private void ReadDropTargets(JsonElement parameters)
+    {
+        if (!parameters.TryGetProperty("dropTargets", out var values) || values.ValueKind != JsonValueKind.Array || values.GetArrayLength() > 10000) throw new ArgumentException("Invalid drop targets.");
+        var targets = new List<AssetDropTarget>();
+        foreach (var item in values.EnumerateArray())
+        {
+            var target = Parse<AssetDestination>(item);
+            if (target.Kind is not ("folder" or "trash" or "favorite" or "unfiled") || (target.Kind == "folder" && string.IsNullOrWhiteSpace(target.FolderId))) continue;
+            var b = item.GetProperty("bounds"); var x = b.GetProperty("x").GetDouble(); var y = b.GetProperty("y").GetDouble(); var width = b.GetProperty("width").GetDouble(); var height = b.GetProperty("height").GetDouble();
+            if (!double.IsFinite(x) || !double.IsFinite(y) || !double.IsFinite(width) || !double.IsFinite(height) || width <= 0 || height <= 0 || width > 100000 || height > 100000) continue;
+            targets.Add(new(target, new Rect(x, y, width, height)));
+        }
+        _dropTargets = targets.ToArray();
+    }
     public bool HandleInternalDrag(System.Windows.DragEventArgs args, bool drop = false)
     {
-        if (_dragToken is null || !args.Data.GetDataPresent(InternalDragFormat, false) || args.Data.GetData(InternalDragFormat, false) as string != _dragToken) return false;
+        if (!args.Data.GetDataPresent(InternalDragFormat, false)) return false;
+        if (_dragToken is null || args.Data.GetData(InternalDragFormat, false) as string != _dragToken)
+        { args.Effects = DragDropEffects.None; args.Handled = true; return true; }
         // CompositionControl receives OLE through WPF; regular WebView receives DOM drops.
         // Both report intent to the same UI operation; only assets.update mutates metadata.
-        var over = _webSurface is not null && !_trashBounds.IsEmpty && _trashBounds.Contains(args.GetPosition(_webSurface));
+        var target = _webSurface is null ? null : _dropTargets.FirstOrDefault(item => item.Bounds.Contains(args.GetPosition(_webSurface)))?.Destination;
+        var over = target is not null || (_webSurface is not null && !_trashBounds.IsEmpty && _trashBounds.Contains(args.GetPosition(_webSurface)));
         DragTraceForVerify = $"drop={drop}, over={over}, point={args.GetPosition(_webSurface)}, target={_trashBounds}";
         args.Effects = over ? DragDropEffects.Move : DragDropEffects.None; args.Handled = true;
-        SetTrashHover(over);
-        if (drop) _trashRequested = over;
+        SetDropHover(target ?? (over ? new AssetDestination("trash") : null));
+        if (drop) { _trashRequested = over && (target is null || target.Kind == "trash"); _dropTarget = target ?? (over ? new AssetDestination("trash") : null); }
         return true;
     }
-    public void ClearDragHover() => SetTrashHover(false);
+    public void ClearDragHover() => SetDropHover(null);
+    private void SetDropHover(AssetDestination? target)
+    {
+        SetTrashHover(target?.Kind == "trash");
+        if (_hoverTarget == target) return;
+        _hoverTarget = target;
+        if (!_disposed) _ = _bridge.PostEventAsync("assets.dragTargetHover", new { dropTarget = target });
+    }
     private void SetTrashHover(bool hovered)
     {
         if (_trashHovered == hovered) return;
@@ -363,13 +435,22 @@ internal sealed class AssetPaneController : IDisposable
     {
         try
         {
-            if (data.GetDataPresent(DataFormats.FileDrop)) await ImportPathsAsync((string[])data.GetData(DataFormats.FileDrop));
-            else if (data.GetDataPresent(DataFormats.Bitmap) && data.GetData(DataFormats.Bitmap) is BitmapSource image) await ImportBitmapAsync(image);
-            else await _bridge.PostEventAsync("assets.dropUnsupported", new { message = "画像をダウンロードしてから追加してください。URLやHTMLは自動取得しません。" });
+            await ImportPayloadAsync(AssetDropPayload.Capture(data, _store.Root));
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
-        { await _bridge.PostEventAsync("assets.dropUnsupported", new { message = "取り込みを開始できません。ファイルへのアクセスと空き容量を確認してください。原本は変更していません。" }); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or HttpRequestException or OperationCanceledException or System.Runtime.InteropServices.COMException)
+        { await _bridge.PostEventAsync("assets.dropUnsupported", new { message = "取り込みを完了できませんでした。元ファイルと取り込み途中のファイルは保持されています。" }); }
     }
+    internal async Task<string> ImportPayloadAsync(AssetDropPayload payload, string? folderId = null)
+    {
+        if (_import is not null) throw new InvalidOperationException("保存中です。完了してから追加してください。");
+        payload = await payload.MaterializeAsync();
+        if (!await ImportPathsAsync(payload.Paths, folderId, waitForCompletion: true, internet: payload.Internet)) throw new OperationCanceledException("取り込みを中止しました。元データと保存待ちファイルは保持しています。");
+        if (_failed > 0 || _restoreAvailable > 0 || _skipped > 0)
+            throw new IOException($"保存 {_completed}件。取り込めなかった項目があります。元データと保存待ちファイルは保持しています。");
+        if (payload.Stage is not null) await AssetRecycle.MoveAsync(payload.Stage);
+        return $"保存 {_completed}件・重複 {_duplicates}件";
+    }
+    internal Task ShowDropErrorAsync() => _bridge.PostEventAsync("assets.dropUnsupported", new { message = "取り込みを完了できませんでした。元データと保存待ちファイルは保持しています。" });
     private async Task<object?> BackupAsync(JsonElement? p)
     {
         using var pin = PinForDialog();

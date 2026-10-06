@@ -7,7 +7,7 @@ export async function verifyAssetSelection() {
   const a = { id:"a", name:"visible.txt", extension:"txt", kind:"other", sizeBytes:5, createdAt:"2026-10-03T00:00:00Z", favorite:true, folderIds:["folder-a"], tagIds:[] };
   const rows = [a, { ...a, id:"b", name:"hidden.txt", favorite:false }, ...Array.from({length:218}, (_,i) => ({...a,id:`item-${i}`,favorite:false}))];
   const calls = [], checks = [];
-  let releaseMatch = null, delayMatch = false, failMatch = false, releaseDrag = null;
+  let releaseMatch = null, delayMatch = false, failMatch = false, releaseDrag = null, dragResult = {ok:true}, audioPreview = false;
   const matches = (row, query) => (query.view !== "favorites" || row.favorite) && (!query.kind || row.kind === query.kind) && (query.extension == null || row.extension === query.extension);
   const request = async (method, params) => {
     calls.push({method,params:structuredClone(params)});
@@ -27,8 +27,10 @@ export async function verifyAssetSelection() {
       return {matches:matches(rows.find(row => row.id === params.id),params.query)};
     }
     if (method === "assets.update" && params.operation === "favorite") for (const row of rows.filter(row => params.ids.includes(row.id))) row.favorite = !row.favorite;
+    if (method === "assets.get") return rows.find(row=>row.id===params.id);
+    if (method === "assets.preview" && audioPreview) return {id:params.id,kind:"other",width:500,height:120,audioUrl:"data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA="};
     if (method === "assets.preview") return {id:params.id,kind:"image",width:1,height:1,dataUrl:"data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs="};
-    if (method === "assets.copy" && params.mode === "drag") { await new Promise(resolve => { releaseDrag=resolve; }); return {ok:true}; }
+    if (method === "assets.copy" && params.mode === "drag") { await new Promise(resolve => { releaseDrag=resolve; }); return dragResult; }
     if (method === "assets.importState") return {busy:false,completed:0,duplicates:0,skipped:0,failed:0};
     return {ok:true};
   };
@@ -190,10 +192,47 @@ export async function verifyAssetSelection() {
     await until(()=>releaseDrag);
     const trash=host.querySelector(".assets-trash-drop"), bounds=trash.getBoundingClientRect();
     check(!trash.hidden && bounds.width>0 && last("assets.copy").ids.join()==="a","drag reveals a trash target for selected media");
+    const targets=last("assets.copy").dropTargets;
+    check(targets.some(t=>t.kind==="folder" && t.folderId==="folder-b") && targets.some(t=>t.kind==="unfiled") && targets.every(t=>t.bounds.height>0),"sidebar exposes clipped native folder and unfiled drop targets");
     trash.dispatchEvent(new DragEvent("drop",{bubbles:true,cancelable:true,clientX:bounds.x+bounds.width/2,clientY:bounds.y+bounds.height/2}));
     releaseDrag(); releaseDrag=null; await wait(70);
-    check(last("assets.update").ids.join()==="a" && last("assets.update").operation==="trash" && trash.hidden && host.querySelector(".assets-status").textContent.includes("Ctrl+Z"),"drop archives only the dragged IDs, cleans target and shows undo feedback");
+    check(last("assets.update").ids.join()==="a" && last("assets.update").operation==="organize" && last("assets.update").destination.kind==="trash" && trash.hidden && host.querySelector(".assets-status").textContent.includes("Ctrl+Z"),"drop archives only the dragged IDs, cleans target and shows undo feedback");
+    await clickView("最近の素材"); button(".assets-sidebar","Fixture A").click(); await wait(60);
+    dragResult={ok:true,dropTarget:{kind:"folder",folderId:"folder-b"}};
+    card("a").dispatchEvent(new DragEvent("dragstart",{bubbles:true,cancelable:true})); await until(()=>releaseDrag);
+    releaseDrag(); releaseDrag=null; await wait(70);
+    check(last("assets.update").sourceFolderId==="folder-a" && last("assets.update").destination.folderId==="folder-b","folder drag supplies only its source membership");
+    dragResult={ok:true};
+    const movesBefore=calls.filter(call=>call.method==="assets.update").length;
+    card("a").dispatchEvent(new DragEvent("dragstart",{bubbles:true,cancelable:true})); await until(()=>releaseDrag);
+    let target=button(".assets-sidebar","Fixture B"), targetRect=target.getBoundingClientRect();
+    // WebKit synthetic DragEvent keeps DataTransfer read-only; observe the handler's requested effect.
+    const transfer={dropEffect:"none"};
+    const hover=new DragEvent("dragover",{bubbles:true,cancelable:true,clientX:targetRect.x+targetRect.width/2,clientY:targetRect.y+targetRect.height/2});
+    Object.defineProperty(hover,"dataTransfer",{value:transfer}); target.dispatchEvent(hover);
+    check(transfer.dropEffect==="move" && target.classList.contains("is-drop-target"),"DOM folder hover accepts a move and highlights its destination");
+    releaseDrag(); releaseDrag=null; await wait(70);
+    check(calls.filter(call=>call.method==="assets.update").length===movesBefore,"hover without an actual drop never moves assets");
+    card("a").dispatchEvent(new DragEvent("dragstart",{bubbles:true,cancelable:true})); await until(()=>releaseDrag);
+    target=button(".assets-sidebar","Fixture B"); targetRect=target.getBoundingClientRect();
+    target.dispatchEvent(new DragEvent("drop",{bubbles:true,cancelable:true,clientX:targetRect.x+targetRect.width/2,clientY:targetRect.y+targetRect.height/2}));
+    releaseDrag(); releaseDrag=null; await wait(70);
+    check(last("assets.update").sourceFolderId==="folder-a" && last("assets.update").destination.folderId==="folder-b","DOM folder drop commits the destination when native drag reports no target");
+    dragResult={ok:true,dropTarget:{kind:"folder",folderId:"folder-b"}};
+    await clickView("ゴミ箱");
+    card("a").dispatchEvent(new DragEvent("dragstart",{bubbles:true,cancelable:true})); await until(()=>releaseDrag);
+    releaseDrag(); releaseDrag=null; await wait(70);
+    check(last("assets.update").sourceFolderId===null && last("assets.update").destination.kind==="folder","trash drag requests restore into a folder without removing previous memberships");
+    host.querySelector("[data-action=captureMenu]").click();
+    button(".assets-dialog","音声を録音").click(); await wait(20);
+    check(last("assets.capture").kind==="audio","capture menu dispatches audio recording without a screen capture");
+    audioPreview=true;
+    check(await provider.showAsset("a"),"Windows voice showAsset resolves metadata and opens the shared preview");
+    const audio=host.querySelector("audio");
+    check(!!audio && audio.controls && audio.paused && !audio.autoplay,"audio preview requires explicit playback");
+    host.querySelector("[data-action=endPreview]").click(); await wait(60);
+    check(!audio.hasAttribute("src") && host.querySelector(".assets-preview").hidden,"closing audio preview releases its media source");
     return {ok:true,checks};
-  } catch(error) { return {ok:false,checks,error:error.stack}; }
+  } catch(error) { return {ok:false,checks,error:String(error.message || error) + "\n" + error.stack}; }
   finally { delayMatch=false; releaseMatch?.(); releaseDrag?.(); provider.dispose(); host.remove(); }
 }

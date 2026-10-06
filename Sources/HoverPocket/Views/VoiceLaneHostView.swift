@@ -3,107 +3,117 @@ import SwiftUI
 struct VoiceLaneHostView: View {
     @ObservedObject var runtime: VoiceLaneRuntime
     @ObservedObject var settings: AppSettings
+    @ObservedObject private var chat = CodexChatController.shared
+    @State private var showsVoiceHistory = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        Group {
-            if runtime.snapshot.mode != .disabled {
-                if runtime.snapshot.mode == .expanded {
-                    expanded
+        VStack(spacing: 0) {
+            if chat.panelHeight > CodexChatPanelLayout.composerHeight {
+                historyHeader
+                if showsVoiceHistory && runtime.snapshot.providerID != .off {
+                    voiceHistory
+                        .animation(reduceMotion ? nil : .easeOut(duration: 0.16), value: runtime.snapshot.sessions)
                 } else {
-                    compact
+                    CodexChatTranscript(model: chat, language: settings.appLanguage)
                 }
             }
+            composer
         }
+        .frame(height: chat.panelHeight)
+        .background(Color.white.opacity(0.025))
+        .overlay(alignment: .top) { Divider().overlay(Color.white.opacity(0.08)) }
+        .onAppear { chat.configure(settings: settings) }
+        .onChange(of: chat.messages.count) { _, _ in showsVoiceHistory = false }
         .accessibilityElement(children: .contain)
-        .accessibilityLabel(localized(japanese: "音声レーン", english: "Voice Lane"))
+        .accessibilityLabel(localized(japanese: "チャットと音声", english: "Chat and Voice"))
         .background(alignment: .bottomLeading) {
-            if runtime.snapshot.providerID == .openAIRealtimeBYOK {
-                OpenAIRealtimeMacOSTransportHostView()
-                    .frame(width: 1, height: 1)
-                    .opacity(0.001)
-                    .allowsHitTesting(false)
-                    .accessibilityHidden(true)
-            } else if runtime.snapshot.providerID == .codexAppServer {
-                CodexVoiceWebRTCTransportView(driver: PocketCodexLibrary.driver)
-                    .frame(width: 1, height: 1)
-                    .opacity(0.001)
-                    .allowsHitTesting(false)
-                    .accessibilityHidden(true)
+            if runtime.snapshot.mode != .disabled {
+                if runtime.snapshot.providerID == .openAIRealtimeBYOK {
+                    OpenAIRealtimeMacOSTransportHostView()
+                        .frame(width: 1, height: 1)
+                        .opacity(0.001)
+                        .allowsHitTesting(false)
+                        .accessibilityHidden(true)
+                } else if runtime.snapshot.providerID == .codexAppServer {
+                    CodexVoiceWebRTCTransportView(driver: PocketCodexLibrary.driver)
+                        .frame(width: 1, height: 1)
+                        .opacity(0.001)
+                        .allowsHitTesting(false)
+                        .accessibilityHidden(true)
+                }
             }
         }
     }
 
-    private var compact: some View {
+    private var composer: some View {
         HStack(spacing: 10) {
             voiceSessionButton
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text(statusText)
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                Text(runtime.snapshot.transcriptPreview ?? conversationPlaceholder)
-                    .font(.system(size: 12))
-                    .lineLimit(2)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(alignment: .bottom, spacing: 6) {
+                    CodexChatComposer(model: chat, placeholder: localized(
+                        japanese: "Codexにメッセージ…", english: "Message Codex…"))
+                        .frame(height: 38)
+                        .help(localized(japanese: "Enterで送信 · Shift+Enterで改行 · Escでパネルを閉じる", english: "Enter to send · Shift+Enter for a new line · Esc to hide"))
+                        .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 8))
+                        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.white.opacity(0.1)))
+                    Button { chat.busy ? chat.stop() : chat.send() } label: {
+                        Image(systemName: chat.busy ? "stop.fill" : "arrow.up")
+                            .font(.system(size: 12, weight: .semibold))
+                            .frame(width: 30, height: 32)
+                            .background(Color.accentColor.opacity(0.18), in: RoundedRectangle(cornerRadius: 8))
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(!chat.busy && chat.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    .help(localized(japanese: chat.busy ? "応答を停止" : "送信（Enter）", english: chat.busy ? "Stop response" : "Send (Enter)"))
+                    .accessibilityLabel(localized(japanese: chat.busy ? "応答を停止" : "メッセージを送信", english: chat.busy ? "Stop response" : "Send message"))
+                }
+                HStack(spacing: 8) {
+                    Text(chat.status)
+                        .lineLimit(1).help(chat.status)
+                    Spacer(minLength: 0)
+                    Button {} label: { Image(systemName: "mic.slash") }
+                        .buttonStyle(.plain).disabled(true)
+                        .help(CodexChatController.dictationNotice)
+                        .accessibilityLabel(localized(japanese: "音声入力は現在利用できません", english: "Dictation is currently unavailable"))
+                    if runtime.snapshot.connection == .connected { muteButton }
+                    Button {
+                        if chat.panelHeight > CodexChatPanelLayout.composerHeight {
+                            chat.panelExpanded = false
+                            settings.voiceLaneLayoutPreference = .compact
+                        } else { chat.panelExpanded = true }
+                    } label: {
+                        Image(systemName: chat.panelHeight > CodexChatPanelLayout.composerHeight ? "chevron.up" : "chevron.down")
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(localized(japanese: "会話履歴の表示を切り替え", english: "Toggle conversation history"))
+                }.font(.system(size: 10)).foregroundStyle(.secondary)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-
-            Text("\(runtime.snapshot.visibleSessionCount)")
-                .font(.system(size: 10, design: .monospaced))
-                .foregroundStyle(.secondary)
-                .accessibilityLabel(sessionCountAccessibilityLabel)
-
-            muteButton
-
-            Button {
-                settings.voiceLaneLayoutPreference = .expanded
-            } label: {
-                Image(systemName: "chevron.down")
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel(localized(japanese: "音声レーンを展開", english: "Expand Voice Lane"))
-            .accessibilityValue(localized(japanese: "折りたたみ", english: "collapsed"))
-
         }
         .padding(.horizontal, 14)
-        .frame(height: VoiceLaneGeometry.compactHeight)
-        .background(Color.white.opacity(0.025))
-        .overlay(alignment: .top) {
-            Divider().overlay(Color.white.opacity(0.08))
-        }
+        .frame(height: CodexChatPanelLayout.composerHeight)
     }
 
-    private var expanded: some View {
-        VStack(spacing: 0) {
-            HStack(spacing: 10) {
-                voiceSessionButton
-
-                Text(statusText)
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                Spacer()
-                Text("\(runtime.snapshot.visibleSessionCount)")
-                    .font(.system(size: 10, design: .monospaced))
-                    .foregroundStyle(.secondary)
-                    .accessibilityLabel(sessionCountAccessibilityLabel)
-                muteButton
-                Button {
-                    settings.voiceLaneLayoutPreference = .compact
-                } label: {
-                    Image(systemName: "chevron.up")
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel(localized(japanese: "音声レーンを折りたたむ", english: "Collapse Voice Lane"))
-                .accessibilityValue(localized(japanese: "展開", english: "expanded"))
+    private var historyHeader: some View {
+        HStack(spacing: 12) {
+            Button("Codex") { showsVoiceHistory = false }
+                .foregroundStyle(showsVoiceHistory ? .secondary : .primary)
+            if runtime.snapshot.providerID != .off {
+                Button(localized(japanese: "音声会話", english: "Voice")) { showsVoiceHistory = true }
+                    .foregroundStyle(showsVoiceHistory ? .primary : .secondary)
             }
-            .padding(.horizontal, 14)
-            .frame(height: 38)
+            Spacer()
+            if showsVoiceHistory {
+                Text(statusText).lineLimit(1).foregroundStyle(.secondary)
+            } else {
+                Button(localized(japanese: "新しい会話", english: "New chat"), action: chat.newConversation)
+                    .disabled(chat.busy)
+            }
+        }.buttonStyle(.plain).font(.system(size: 10, weight: .semibold))
+            .padding(.horizontal, 14).frame(height: 28)
+    }
 
-            Divider().overlay(Color.white.opacity(0.08))
-
+    private var voiceHistory: some View {
             GeometryReader { geometry in
                 HStack(spacing: 0) {
                     ScrollView {
@@ -160,17 +170,6 @@ struct VoiceLaneHostView: View {
                     ))
                 }
             }
-        }
-        .frame(
-            height: VoiceLaneGeometry.expandedHeight(
-                panelSizeRawValue: settings.panelSize.rawValue
-            )
-        )
-        .background(Color.white.opacity(0.025))
-        .overlay(alignment: .top) {
-            Divider().overlay(Color.white.opacity(0.08))
-        }
-        .animation(reduceMotion ? nil : .easeOut(duration: 0.16), value: runtime.snapshot.sessions)
     }
 
     private var voiceSessionButton: some View {
@@ -270,13 +269,6 @@ struct VoiceLaneHostView: View {
             connection: runtime.snapshot.connection,
             muted: runtime.snapshot.muted,
             language: settings.appLanguage
-        )
-    }
-
-    private var sessionCountAccessibilityLabel: String {
-        localized(
-            japanese: "セッション \(runtime.snapshot.visibleSessionCount)件",
-            english: "\(runtime.snapshot.visibleSessionCount) sessions"
         )
     }
 

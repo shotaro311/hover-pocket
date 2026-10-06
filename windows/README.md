@@ -46,6 +46,16 @@ Windows実機の検証範囲と再実行手順は[液体アニメーションの
 
 Controlsでは再生速度を「− / ＋」で0.25倍刻みに変更し、Windowsメディアセッションの読み戻し値を表示します。再生サムネイルを押すと、一意に特定できた再生元ウィンドウだけを前面へ表示してパネルを閉じます。Timerはストップウォッチ、タイマー、ポモドーロの3種類を横並びの追加カードから登録できます。実行中項目は1列のコンパクトなリストへ表示し、ストップウォッチとカウントダウンを各4件まで独立して扱います。ストップウォッチは100分の1秒表示で、providerを切り替えたりパネルを閉じたりしてもアプリ稼働中は計測を続けます。
 
+## ライブラリ同期（開発候補）
+
+設定の「ライブラリの同期」で、Syncthingで共有したHoverPocket専用フォルダを選びます。最初の端末は「新規グループを作成」、2台目以降は「既存グループに参加」を押します。Eagleの共有フォルダやライブラリ保存先は選ばないでください。初期状態はオフで、原本・分類・名前・お気に入り・ゴミ箱を3秒ごとに処理します。実際の端末間転送はSyncthingが行います。
+
+同時変更は上書きせず、設定画面に両方の内容を表示します。同名フォルダは名前を変更してから再試行できます。同期の一時停止中も素材は編集でき、再開時に送信します。ゴミ箱を空にする操作は原本の送信後に行えます。相手端末の原本を物理削除することはありません。
+
+DBのみを復元する場合は同期を一時停止してください。復元後も現在の同期履歴と一時停止状態を保持します。同期済みライブラリの完全置換は、別の空ライブラリへバックアップを復元してから行ってください。同期用の転送フォルダは完全バックアップの代わりにはなりません。
+
+[検証と実Syncthing往復の記録](../progress/2026-10/2026-10-05_hover-pocket-windows-sync.md)。再検証は powershell -File windows/script/verify_asset_sync.ps1 -IncludeUi。
+
 ## Build
 
 ```powershell
@@ -78,6 +88,18 @@ dotnet run --project .\windows\src\HoverPocket.Shell\HoverPocket.Shell.csproj --
 WebView2 は通常、GPU 描画を有効にして開閉とリサイズのカクつきを抑えます。GPUドライバーとの相性問題を切り分ける場合だけ、`HOVERPOCKET_WEBVIEW_DISABLE_GPU=1` を設定して起動します。
 
 ## Verify
+
+パネル下部から直接チャットを入力できます。Enterで送信、Shift+Enterで改行、Escまたは収納ボタンで下書きと会話を保持したまま閉じます。返信と履歴は同じパネル内で開き、入力中と返答中はホバーを外しても自動収納しません。送信ボタンは返答中に停止へ切り替わります。音声をOFFにしていてもテキストは使えます。音声を有効にした場合は波形から会話を開始・終了できます。文字起こし専用の音声入力は現在のChatGPTログインでは未対応で、理由を無効な音声入力ボタンに表示します。
+
+チャットの通信・履歴・停止・権限境界は `HOVERPOCKET_CHAT_VERIFY_ONLY=1` と `--verify voice`、実パネルの入力・IME・小/特大サイズ・手動収納・履歴・停止は `HOVERPOCKET_CHAT_PANEL_VERIFY_ONLY=1` と `--verify ui` で検査できます。`HOVERPOCKET_INLINE_CHAT_LIVE_VERIFY_ONLY=1` と `--verify ui` は、既存のアプリ専用ログインを使って日本語の確認文を実Codexに送り、パネル内の返信を確認します。実接続検査は既存のログインが必要で、資格情報を複製せず、検査用の素材庫と履歴を使います。複数の検査用環境変数を同時に指定せず、GUI検査は一つずつ実行してください。
+
+開発版の素材ライブラリでは、選択した素材をサイドバーのフォルダ・お気に入り・未分類・ゴミ箱へドラッグできます。フォルダから別フォルダへ移した場合は元の所属だけを外し、それ以外の分類を残します。Ctrl+Zで直前の整理を戻せます。原本を複製せず、外部アプリへドラッグしたときだけ作業コピーを渡します。
+
+外部ファイルを上端の入口へドラッグすると保存先パネルを表示します。ローカルファイル、画像データ、Windowsの仮想ファイル、画像・動画・音声の直接URLに対応し、元ファイルを保持します。URLと仮想ファイルは1ファイル128MiBまでです。Webページや配信サービスの再生ページは直接メディアとして取得しません。
+
+ライブラリの「カメラ撮影・録音」からカメラ写真・カメラ動画・音声録音を選び、デバイスと保存先を指定して明示的に開始します。収録中は画面を閉じても継続し、上端に経過時間と停止ボタンを表示します。確定済みの保存待ちは「保存待ちを再試行」で取り込めます。音声はM4Aで保存し、素材の分類は既存の `other` を使います。
+
+拡張機能の隔離検査は `HOVERPOCKET_LIBRARY_EXTENSIONS_VERIFY_ONLY=1` と `--verify ui` で実行します。生成したAACのパスを `HOVERPOCKET_ASSET_AUDIO_FIXTURE` に指定すると再生・シーク・保存待ち復旧も検証します。検査用のネイティブドラッグはポインターを動かします。実カメラ撮影は自動実行しません。
 
 ```powershell
 dotnet run --project .\windows\src\HoverPocket.Shell\HoverPocket.Shell.csproj -- --verify shell
@@ -247,3 +269,13 @@ AI command lane の audit log は `%APPDATA%\HoverPocket\auditlog\ailane-YYYYMMD
 - display 再同期は WPF の `HwndSource.AddHook` で `WM_DISPLAYCHANGE` / `WM_DPICHANGED` を受け、加えて `SystemEvents.DisplaySettingsChanged`、`SystemEvents.PowerModeChanged`、`SystemEvents.SessionSwitch`から段階的に再計算します。
 - 120ms pointer pollingとは別に約2秒ごとのshell health checkを行い、access surface / panelのHWND、native visibility、WPF visibility、必須extended styles、期待frameを照合します。修復可能な異常は同じwindowへ再適用し、HWNDが無効なwindowだけを再生成します。panel再生成時もprovider stateを持つ`PanelBridgeController`は維持します。
 - display / DPI change、Power Resume、`SystemEvents.SessionSwitch`のunlock / console connect / remote connectでは、polling timerを再始動し、即時・0.45秒後・1.4秒後の3段階でdisplay再同期とhealth checkを実行します。
+
+### 端末コード連携と設定画面
+
+設定は「一般・表示・素材と同期・撮影・AI・詳細」の6カテゴリと検索で操作します。通常の端末連携は「端末を追加」→別端末でコード入力→元端末で相手を確認して許可、の順です。既存の共有先は保持し、新規参加時はアプリが転送用フォルダを用意します。手動フォルダ設定は復旧用の「接続の詳細」にあります。
+
+両端末でSyncthingを起動してください。短いコードの交換にはTLS仲介サービスとSPAKE2を使います。メディアは仲介サービスへ送りません。コードは5分・1回限りで、承認後に専用共有を登録します。解除はそのライブラリの共有だけを停止し、受信済みのコピーは残します。Eagleの共有や既存端末設定は変更しません。
+
+WindowsビルドにはCargo/Rust 1.92以降が必要です。MSBuildが `shared/pairing-helper` の固定依存をビルドし、単独EXEとライセンスを同梱します。共通プロトコルは同ディレクトリのREADMEを参照してください。
+
+検証: `dotnet run --project windows/tests/Pairing`（隔離API/パス検査）、`cargo test --locked --manifest-path shared/pairing-helper/Cargo.toml`、`windows/script/verify_asset_sync.ps1 -IncludeUi`。公開仲介への隔離接続試験は、架空の端末IDだけを使って `python shared/pairing-helper/verify_pairing.py <helper.exe>` を実行できます。

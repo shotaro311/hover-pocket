@@ -1,0 +1,5 @@
+UI verify: WebView2 host + bridge + provider registry + settings
+PASS cold top-edge open: panel_visible_before_webview_ready=true, dispatch_ms=35.1
+PASS chat: panel exposes labelled independent chat entry
+PASS chat: real panel bridge opens native composer
+PASS chat-panel: real WebView entry -> bridge -> native composer -> editable unsent draft -> closed

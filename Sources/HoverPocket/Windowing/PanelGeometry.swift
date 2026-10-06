@@ -22,7 +22,7 @@ enum PanelLayout {
     static let miniBarExpandedTopOffset: CGFloat = 5
     static let miniBarTriggerHeight: CGFloat = miniBarExpandedTopOffset + miniBarExpandedHeight
     static let previewGap: CGFloat = 0
-    static let collapsedPreviewSize = NSSize(width: 72, height: 12)
+    static let surfaceSidePadding: CGFloat = 8
 
     static var defaultPillWidth: CGFloat {
         notchHandleWidth
@@ -74,8 +74,28 @@ struct PillMetrics {
 struct PanelFrames {
     let access: NSRect
     let preview: NSRect
-    let collapsedPreview: NSRect
+    let surfaceOriginWidth: CGFloat
     let accessStyle: PanelAccessStyle
+    let attachment: PanelAttachmentMetrics
+}
+
+struct PanelAttachmentMetrics: Equatable {
+    let headerHeight: CGFloat
+    let notchWidth: CGFloat
+    var pixelOverlap: CGFloat = 0.5
+
+    var preservedNeckTop: CGFloat {
+        // Only the compact lower meniscus may blend into the physical notch.
+        if notchWidth > 0 {
+            let top = headerHeight - min(6, max(0, headerHeight / 2))
+            guard pixelOverlap > 0 else { return top }
+            return min(headerHeight, ceil(top / pixelOverlap) * pixelOverlap)
+        }
+        return 0
+    }
+
+    var contentTop: CGFloat { headerHeight }
+    var reservedNotchWidth: CGFloat { notchWidth > 0 ? notchWidth + 16 : 0 }
 }
 
 enum PanelGeometry {
@@ -104,27 +124,40 @@ enum PanelGeometry {
             height: access.height
         )
 
-        let previewX = notchProfile.centerX - previewSize.width / 2
-        let previewY = access.previewTopY - previewSize.height - PanelLayout.previewGap
+        let notchWidth: CGFloat
+        switch notchProfile {
+        case let .actual(_, width, _): notchWidth = width
+        case .none: notchWidth = 0
+        }
+        let attachment = PanelAttachmentMetrics(
+            headerHeight: screen.safeAreaInsets.top > 0 ? screen.safeAreaInsets.top
+                : max(screen.frame.maxY - screen.visibleFrame.maxY, NSStatusBar.system.thickness),
+            notchWidth: notchWidth,
+            pixelOverlap: 1 / max(1, screen.backingScaleFactor)
+        )
+        let previewX = notchProfile.centerX - previewSize.width / 2 - PanelLayout.surfaceSidePadding
+        let previewY = screen.frame.maxY - attachment.headerHeight - previewSize.height
         let previewFrame = NSRect(
             x: previewX,
             y: previewY,
-            width: previewSize.width,
-            height: previewSize.height
+            width: previewSize.width + PanelLayout.surfaceSidePadding * 2,
+            height: previewSize.height + attachment.contentTop
         )
 
-        let collapsedFrame = NSRect(
-            x: notchProfile.centerX - PanelLayout.collapsedPreviewSize.width / 2,
-            y: access.previewTopY - PanelLayout.collapsedPreviewSize.height / 2,
-            width: PanelLayout.collapsedPreviewSize.width,
-            height: PanelLayout.collapsedPreviewSize.height
-        )
+        let originWidth: CGFloat
+        switch notchProfile {
+        case let .actual(_, width, _):
+            originWidth = min(previewSize.width, width + (showsVoiceConversation ? 108 : 0))
+        case .none:
+            originWidth = showsVoiceConversation ? 108 : PanelLayout.miniBarExpandedWidth
+        }
 
         return PanelFrames(
             access: accessFrame,
             preview: previewFrame,
-            collapsedPreview: collapsedFrame,
-            accessStyle: access.style
+            surfaceOriginWidth: originWidth,
+            accessStyle: access.style,
+            attachment: attachment
         )
     }
 

@@ -5,6 +5,37 @@ import Foundation
 _ = signal(SIGPIPE, SIG_IGN)
 _ = HoverPocketRuntimeEnvironment.shared
 
+if CommandLine.arguments.contains("--verify-chat") {
+    let app = NSApplication.shared
+    Task { @MainActor in
+        do {
+            let root = FileManager.default.temporaryDirectory.appendingPathComponent("HoverPocket-ChatVerify-" + UUID().uuidString)
+            try CodexChatController.verify(at: root)
+            try CodexChatPanelVerification.run()
+            print("chat_verification=ok evidence=\(root.path)"); exit(0)
+        } catch { print("chat_verification=failed \(error)"); exit(1) }
+    }
+    app.run(); exit(1)
+}
+
+if CommandLine.arguments.contains("--verify-library-voice") {
+    let app = NSApplication.shared
+    Task { @MainActor in
+        do { try await LibraryVoiceVerification.run(); exit(0) }
+        catch { print("library_voice_verification=failed \(error)"); exit(1) }
+    }
+    app.run(); exit(1)
+}
+
+if CommandLine.arguments.contains("--verify-asset-library") || CommandLine.arguments.contains("--verify-asset-ui") || CommandLine.arguments.contains("--verify-asset-reopen") {
+    let app = NSApplication.shared
+    Task { @MainActor in
+        do { try await AssetLibraryVerification.run(); exit(0) }
+        catch { print("asset_verification=failed \(error)"); exit(1) }
+    }
+    app.run(); exit(1)
+}
+
 if CommandLine.arguments.contains(CodexCredentialBrokerDeinitProbe.argument) {
     exit(CodexCredentialBrokerDeinitProbe.run())
 }
@@ -84,6 +115,24 @@ if CommandLine.arguments.contains("--verify-voice-activity") {
             exit(0)
         } catch {
             print("voice_activity_verification=failed \(error)")
+            exit(1)
+        }
+    }
+    app.run()
+    exit(1)
+}
+
+if CommandLine.arguments.contains("--verify-liquid-motion") {
+    let app = NSApplication.shared
+    let evidence = CommandLine.arguments.firstIndex(of: "--motion-evidence").flatMap { index in
+        index + 1 < CommandLine.arguments.count ? URL(fileURLWithPath: CommandLine.arguments[index + 1]) : nil
+    } ?? FileManager.default.temporaryDirectory.appendingPathComponent("HoverPocketLiquid-" + UUID().uuidString)
+    Task { @MainActor in
+        do {
+            try await LiquidMotionVerificationCommand.run(evidenceDirectory: evidence)
+            exit(0)
+        } catch {
+            print("FAIL liquid motion: \(error)")
             exit(1)
         }
     }

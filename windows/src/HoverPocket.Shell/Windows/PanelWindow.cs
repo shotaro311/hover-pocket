@@ -73,8 +73,14 @@ internal sealed class PanelWindow : NoActivateWindow
     public event Action<bool>? AssetDragChanged;
     public async Task ReceiveAssetDropAsync(System.Windows.IDataObject data)
     {
+        var payload = AssetDropPayload.Capture(data, _bridgeController.AssetLibrary.Root);
+        await ReceiveAssetPayloadAsync(payload);
+    }
+    internal async Task<string> ReceiveAssetPayloadAsync(AssetDropPayload payload, string? folderId = null)
+    {
         await EnsureWebViewInitializedAsync();
-        if (_assetPane is not null) await _assetPane.ImportDropAsync(data);
+        if (_assetPane is null) throw new InvalidOperationException("素材ライブラリを開けませんでした。");
+        return await _assetPane.ImportPayloadAsync(payload, folderId);
     }
     public void EndAssetPreview() { if (AssetLayout.Active) _assetPane?.EndPreview(); }
     internal string DragTraceForVerify => _assetPane?.DragTraceForVerify ?? "no-pane";
@@ -121,6 +127,7 @@ internal sealed class PanelWindow : NoActivateWindow
         var metrics = PanelSizeCatalog.Get(_bridgeController.CurrentSettings.PanelSize);
         Width = metrics.Width;
         Height = metrics.TotalHeight
+            + _bridgeController.ChatHeight
             + VoicePanelGeometry.Height(_bridgeController.CurrentSettings.PanelSize, _bridgeController.ResolvedVoiceLaneMode);
         _contentHost.Width = Width;
         _contentHost.Height = Height;
@@ -173,10 +180,15 @@ internal sealed class PanelWindow : NoActivateWindow
             if (_assetPane?.HandleInternalDrag(args, drop: true) == true) return;
             args.Handled = true;
             if (_assetPane is null || !_bridgeController.AssetsVisible) return;
-            await _bridgeController.BeginAssetDropAsync();
-            await _bridgeController.FinishAssetDropAsync(true);
-            await _assetPane.ImportDropAsync(args.Data);
-            AssetDragChanged?.Invoke(false);
+            try
+            {
+                var payload = AssetDropPayload.Capture(args.Data, _bridgeController.AssetLibrary.Root);
+                await _bridgeController.BeginAssetDropAsync();
+                await _bridgeController.FinishAssetDropAsync(true);
+                await _assetPane.ImportPayloadAsync(payload);
+            }
+            catch { await _assetPane.ShowDropErrorAsync(); }
+            finally { AssetDragChanged?.Invoke(false); }
         };
 
         SizeChanged += (_, _) =>
@@ -990,7 +1002,7 @@ internal sealed class PanelWindow : NoActivateWindow
         webView.CoreWebView2.PostWebMessageAsJson(json);
     }
 
-    private object BeginKeyboardInteraction()
+    internal object BeginKeyboardInteraction()
     {
         var activated = SetActivationEnabled(true);
         _ = _webView?.Focus();

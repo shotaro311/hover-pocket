@@ -1,0 +1,103 @@
+PASS fixture asset-japanese
+PASS fixture folder
+PASS fixture trash
+PASS fixture restore
+PASS fixture unsupported-version
+PASS fixture wrong-group
+PASS fixture self-parent
+PASS fixture duplicate-parent
+PASS fixture bad-hash
+PASS fixture negative-size
+PASS fixture invalid-extension
+PASS fixture duplicate-folder
+PASS fixture asset-category-mixed
+PASS fixture missing-null
+PASS fixture unknown-field
+PASS sync without error
+PASS sync without error
+PASS addition and all classifications
+PASS folder hierarchy
+PASS received original hash
+PASS sync without error
+PASS sync without error
+PASS no echo on repeated receive
+PASS sync without error
+PASS sync without error
+PASS reverse rename
+PASS sync without error
+PASS sync without error
+PASS trash
+PASS sync without error
+PASS sync without error
+PASS restore
+PASS sync without error
+PASS sync without error
+PASS sync without error
+PASS conflict keeps local
+PASS sync without error
+PASS resolve remote
+PASS sync without error
+PASS sync without error
+PASS sync without error
+PASS sync without error
+PASS resolve local
+PASS paused has no filesystem exchange
+PASS sync without error
+PASS sync without error
+PASS pause resume
+PASS disconnect stops safely
+PASS sync without error
+PASS sync without error
+PASS reconnect
+PASS sync without error
+PASS sync without error
+PASS sync without error
+PASS sync without error
+PASS physical deletion is local only
+PASS sync without error
+PASS sync without error
+PASS restore after local purge
+PASS sync without error
+PASS sync without error
+PASS sync without error
+PASS category deletion no echo
+PASS synced DB rollback rejected
+PASS foreign marker rejected
+PASS tampered original rejected
+PASS sync without error
+PASS repair retries pending receive
+PASS late join replays all history
+PASS blob arriving last defers
+PASS sync without error
+PASS reverse delivery and blob last converge
+PASS replay does not emit to original transport
+PASS sync without error
+PASS sync without error
+PASS sync without error
+PASS sync without error
+PASS same SHA preserves local IDs and origin protection
+PASS immutable event tampering rejected
+PASS sync without error
+PASS sync without error
+PASS paused DB restore retains paused state
+PASS sync without error
+PASS sync without error
+PASS restored metadata makes descendant without head rollback
+PASS background loop delivers updates
+PASS sync without error
+PASS sync without error
+PASS internet origin protection never weakens
+PASS sync without error
+PASS sync without error
+PASS sync without error
+PASS same-name folders preserved as conflicts
+PASS same-name resolution requires repair
+PASS failed resolution leaves no exportable event
+PASS sync without error
+PASS repair then retry preserves both folders
+PASS failed publication retains durable outbox
+PASS sync without error
+PASS restart retries durable outbox
+PASS corrupt sync DB refuses unknown history rollback
+PASS junction transport rejected
+{"passed":102,"root":"C:\\Users\\shotaro\\AppData\\Local\\Temp\\HoverPocketSyncVerify-tests-e76bb843ecb84a488b7aa4cff983cc0f"}

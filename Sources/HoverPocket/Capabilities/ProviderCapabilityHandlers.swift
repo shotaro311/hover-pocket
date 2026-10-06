@@ -622,7 +622,7 @@ enum ProviderCapabilityCompositionRoot {
         calendarDataSource: any CalendarCapabilityDataSource,
         controlsDataSource: any ControlsCapabilityDataSource = LiveControlsCapabilityDataSource()
     ) throws -> PocketCapabilityHandlerSet {
-        try PocketCapabilityHandlerSet(handlers: PersonalToolOperation.allCases.map { PersonalToolCapabilityHandler(operation: $0, controls: controlsDataSource, calendar: { try await calendarDataSource.personalTool($0, arguments: $1) }) } + [
+        try PocketCapabilityHandlerSet(handlers: LibraryVoiceOperation.allCases.map { LibraryVoiceHandler($0) } + PersonalToolOperation.allCases.map { PersonalToolCapabilityHandler(operation: $0, controls: controlsDataSource, calendar: { try await calendarDataSource.personalTool($0, arguments: $1) }) } + [
             CalendarListCapabilityHandler(dataSource: calendarDataSource),
             CalendarGetCapabilityHandler(dataSource: calendarDataSource),
             CalendarCreateCapabilityHandler(dataSource: calendarDataSource),

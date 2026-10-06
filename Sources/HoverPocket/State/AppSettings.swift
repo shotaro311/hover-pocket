@@ -104,6 +104,18 @@ final class AppSettings: ObservableObject {
         }
     }
 
+    @Published var panelAttachmentStyle: PanelAttachmentStyle {
+        didSet { defaults.set(panelAttachmentStyle.rawValue, forKey: Self.panelAttachmentStyleKey) }
+    }
+
+    @Published var automaticallyCoverMenuOnNoNotchDisplays: Bool {
+        didSet { defaults.set(automaticallyCoverMenuOnNoNotchDisplays, forKey: Self.automaticallyCoverMenuOnNoNotchDisplaysKey) }
+    }
+
+    func resolvedPanelAttachmentStyle(hasNotch: Bool) -> PanelAttachmentStyle {
+        automaticallyCoverMenuOnNoNotchDisplays && !hasNotch ? .coverMenu : panelAttachmentStyle
+    }
+
     @Published var weatherLocation: WeatherLocation {
         didSet {
             if let data = try? JSONEncoder().encode(weatherLocation) {
@@ -255,6 +267,8 @@ final class AppSettings: ObservableObject {
     private static let displayPlacementModeKey = "displayPlacementMode"
     private static let panelSizeKey = "panelSize"
     private static let panelTextSizeKey = "panelTextSize"
+    private static let panelAttachmentStyleKey = "panelAttachmentStyle"
+    private static let automaticallyCoverMenuOnNoNotchDisplaysKey = "automaticallyCoverMenuOnNoNotchDisplays"
     private static let weatherLocationKey = "weatherLocation"
     private static let weatherRegionIDKey = "weatherRegionID"
     private static let weatherTemperatureUnitKey = "weatherTemperatureUnit"
@@ -292,6 +306,9 @@ final class AppSettings: ObservableObject {
         self.panelSize = panelSizeRawValue.flatMap(PanelSizeOption.init(rawValue:)) ?? .medium
         let panelTextSizeRawValue = defaults.string(forKey: Self.panelTextSizeKey)
         self.panelTextSize = panelTextSizeRawValue.flatMap(PanelTextSizeOption.init(rawValue:)) ?? .small
+        self.panelAttachmentStyle = defaults.string(forKey: Self.panelAttachmentStyleKey)
+            .flatMap(PanelAttachmentStyle.init(rawValue:)) ?? .preserveMenu
+        self.automaticallyCoverMenuOnNoNotchDisplays = defaults.bool(forKey: Self.automaticallyCoverMenuOnNoNotchDisplaysKey)
         if let weatherLocationData = defaults.data(forKey: Self.weatherLocationKey),
            let weatherLocation = try? JSONDecoder().decode(
                WeatherLocation.self,

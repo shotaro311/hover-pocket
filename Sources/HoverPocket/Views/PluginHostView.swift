@@ -6,6 +6,7 @@ struct PluginHostView: View {
     let isPreviewActive: Bool
     let onExternalDragStarted: () -> Void
     let onClosePanel: () -> Void
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         Group {
@@ -28,6 +29,11 @@ struct PluginHostView: View {
                         }
                     )
                 )
+                .id(id)
+                .transition(.asymmetric(
+                    insertion: reduceMotion ? .identity : .opacity.animation(.easeOut(duration: 0.14)),
+                    removal: .identity
+                ))
             } else {
                 EmptyProviderView(language: settings.appLanguage)
             }

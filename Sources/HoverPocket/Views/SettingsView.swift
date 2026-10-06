@@ -247,6 +247,30 @@ struct SettingsView: View {
             Toggle(settings.text(.openLastUsedPanel), isOn: $settings.rememberLastSelectedProvider)
 
             VStack(alignment: .leading, spacing: 6) {
+                Picker(localized(japanese: "ノッチとパネルの接続", english: "Panel attachment"),
+                       selection: $settings.panelAttachmentStyle) {
+                    ForEach(PanelAttachmentStyle.allCases) { style in
+                        Text(style.title(language: language)).tag(style)
+                    }
+                }
+                .pickerStyle(.segmented)
+
+                Text(settings.panelAttachmentStyle.detail(language: language))
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Toggle(localized(japanese: "ノッチがない画面では自動で上端モードにする",
+                                 english: "Use top-edge mode on displays without a notch"),
+                       isOn: $settings.automaticallyCoverMenuOnNoNotchDisplays)
+                Text(localized(japanese: "外部ディスプレイなど、ノッチがない画面では「上端まで覆う」を使います。ノッチがある画面では上で選んだ表示を使います。重なるメニューは、開いている間だけ隠れます。",
+                               english: "Use Cover menu area on displays without a notch. Notched displays use the mode selected above. Covered menus are hidden while the panel is open."))
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            VStack(alignment: .leading, spacing: 6) {
                 Picker(settings.text(.panelSize), selection: $settings.panelSize) {
                     ForEach(PanelSizeOption.allCases) { option in
                         Text(option.title(language: language)).tag(option)

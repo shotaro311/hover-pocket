@@ -1,0 +1,15 @@
+UI verify: WebView2 host + bridge + provider registry + settings
+PASS cold top-edge open: panel_visible_before_webview_ready=true, dispatch_ms=33.0
+PASS lazy drag data: internal marker creates no copies; external file consumer receives editable independent copy
+MEASURE native fixture drag: formats=FileDrop, effect=Copy, overlayVisible=True
+PASS external overlay: native WPF/OLE source drag imported its generated file; original retained
+MEASURE virtual target: overlay=105384188, top-window=105384188, origin=2320,0, actual=320x120
+MEASURE native fixture drag: formats=FileGroupDescriptorW,FileContents, effect=Copy, overlayVisible=True
+PASS native virtual-file drop: both indexed files imported with exact bytes into selected folder
+MEASURE automatic drop: overlay=105449724, top-window=105449724, finish=2440,90, origin=2320,0, size=320x120, trace=enter accepted=True; formats=FileDrop
+MEASURE native fixture drag: formats=FileDrop, effect=Copy, overlayVisible=True
+PASS automatic top-edge native drag: overlay revealed from access surface, imported file without opening main panel, source preserved
+PASS direct media URL: generated PNG bytes and Internet origin retained; HTML page rejected
+PASS generated AAC: pending-file recovery, original bytes/folder, muted native playback/seek, range bytes, revoked lease and released file handle
+PASS shared audio UI: real card opens controls without autoplay; end-preview pauses and releases source
+PASS device capture UI/device enumeration/missing-device recovery; cameras=0, microphones=9; hardware capture not exercised

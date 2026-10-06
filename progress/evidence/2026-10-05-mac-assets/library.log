@@ -1,0 +1,41 @@
+PASS Unicode NFKC and shared full case folding
+PASS import committed
+PASS source unchanged
+PASS managed original read only
+PASS hash deduplication
+PASS rename preserves ID extension original
+PASS trash hidden
+PASS duplicate in trash offers restore
+PASS undo restores selection metadata
+PASS tag normalized search
+PASS search v2 extension sort
+PASS v1 refuses v2 search semantics
+PASS category cycle rejected
+PASS external working copy cannot alter original
+PASS symlink import rejected
+PASS native image decode
+PASS native pdf decode
+PASS native video decode
+PASS annotation render keeps dimensions and adds pixels
+PASS Mac backup roundtrip
+PASS Windows fixture schema1 metadata and searches v1 v2
+PASS Windows fixture exported by Mac
+capture_verification=passed
+PASS second writer refused
+PASS duplicate strengthens provenance and working copy quarantine
+PASS managed original cannot import into itself
+PASS existing save destination preserved
+PASS long Unicode external filename preserves extension
+PASS corrupt backup refused before import
+PASS failed restore leaves database empty
+PASS snapshot restore preserves orphan original
+PASS orphan recovery after database restore
+PASS failed pending retry preserves capture
+PASS pending retry imports completed capture
+PASS old capture settings keep default values
+PASS broken database recovery preserves original
+PASS broken database retained byte for byte
+PASS uncertain trash movement preserves record and explains recovery
+PASS completed trash journal recovers after interrupted database cleanup
+PASS future DB writer refused
+asset_verification=ok checks=39

@@ -8,44 +8,37 @@
 </head>
 <body>
   <main class="settings-shell">
+    <aside class="settings-sidebar"><div class="settings-brand">HoverPocket <span data-settings-label>設定</span></div><nav data-settings-nav aria-label="設定カテゴリ"></nav></aside>
+    <div class="settings-content">
     <header class="settings-header">
-      <h1 data-i18n="settingsTitle">HoverPocket 設定</h1>
-      <button type="button" data-reset>既定値に戻す</button>
+      <h1 data-category-title>一般</h1>
+      <input type="search" data-settings-search placeholder="設定を検索" aria-label="設定を検索">
     </header>
-    <section class="settings-section">
+    <section class="settings-section" data-settings-category="general">
       <h2 data-i18n="language">言語</h2>
       <div class="segmented" data-language></div>
     </section>
-    <section class="settings-section">
-      <h2 data-i18n="displayPlacement">表示先</h2>
-      <div class="segmented" data-display-placement></div>
+    <section class="settings-section" data-settings-category="general">
+      <label class="toggle-row">
+        <span data-i18n="startWithWindows">Windows 起動時に開始</span>
+        <input type="checkbox" data-startup>
+      </label>
+      <div class="settings-status" data-startup-status></div>
     </section>
-    <section class="settings-section">
-      <h2 data-i18n="panelSize">パネルサイズ</h2>
-      <div class="segmented" data-panel-size></div>
+    <section class="settings-section" data-settings-category="general">
+      <div class="settings-action-row">
+        <div>
+          <h2 data-i18n="updates">更新</h2>
+          <div class="settings-status" data-update-status></div>
+        </div>
+        <button type="button" data-check-updates>更新を確認</button>
+      </div>
+      <label class="toggle-row">
+        <span data-i18n="autoCheckForUpdates">起動時に確認</span>
+        <input type="checkbox" data-auto-updates>
+      </label>
     </section>
-    <section class="settings-section">
-      <h2 data-attachment-heading>上端とのつながり</h2>
-      <label class="toggle-row"><span data-auto-hide-handle-label>上部の入口を自動で隠す</span><input type="checkbox" data-auto-hide-handle></label>
-      <p class="settings-note" data-auto-hide-handle-note>上部にマウスを近づけると入口が現れ、入口にホバーするとパネルが開きます。</p>
-      <div class="segmented" data-panel-attachment></div>
-      <label class="toggle-row"><span data-automatic-attachment-label>ノッチがない画面では自動で上端まで覆う</span><input type="checkbox" data-automatic-attachment></label>
-      <label class="toggle-row"><span data-reduce-motion-label>動きを減らす</span><input type="checkbox" data-reduce-motion></label>
-    </section>
-    <section class="settings-section">
-      <h2 data-i18n="textSize">文字サイズ</h2>
-      <div class="segmented" data-text-size></div>
-    </section>
-    <section class="settings-section" data-weather-settings></section>
-    <section class="settings-section">
-      <h2 data-i18n="switchingMode">ツール切替</h2>
-      <div class="segmented" data-switching></div>
-    </section>
-    <section class="settings-section">
-      <h2 data-i18n="providerOrder">ツールの表示と順序</h2>
-      <div class="provider-list" data-provider-list></div>
-    </section>
-    <section class="settings-section">
+    <section class="settings-section" data-settings-category="general">
       <h2 data-i18n="providerSelection">起動時のツール</h2>
       <div class="segmented" data-provider-selection></div>
       <label class="select-row">
@@ -53,14 +46,83 @@
         <select data-preferred-provider></select>
       </label>
     </section>
-    <section class="settings-section">
+    <section class="settings-section" data-settings-category="general">
+      <h2 data-i18n="stickyNotes">付箋</h2>
+      <label class="toggle-row">
+        <span data-i18n="stickyUndoToast">取り消し通知を表示</span>
+        <input type="checkbox" data-sticky-undo-toast>
+      </label>
+      <div class="settings-spaced-row">
+        <span class="settings-inline-label" data-i18n="stickyGridSize">グリッドサイズ</span>
+        <div class="segmented" data-sticky-grid-size></div>
+      </div>
+    </section>
+    <section class="settings-section" data-settings-category="general"><details class="settings-details"><summary data-weather-details-label>天気の設定</summary><div data-weather-settings></div></details></section>
+
+    <section class="settings-section" data-settings-category="appearance">
+      <h2 data-i18n="displayPlacement">表示先</h2>
+      <div class="segmented" data-display-placement></div>
+    </section>
+    <section class="settings-section" data-settings-category="appearance">
+      <h2 data-i18n="panelSize">パネルサイズ</h2>
+      <div class="segmented" data-panel-size></div>
+    </section>
+    <section class="settings-section" data-settings-category="appearance">
+      <h2 data-attachment-heading>上端とのつながり</h2>
+      <label class="toggle-row"><span data-auto-hide-handle-label>上部の入口を自動で隠す</span><input type="checkbox" data-auto-hide-handle></label>
+      <details class="settings-details"><summary data-details-label>詳しく見る</summary><p class="settings-note" data-auto-hide-handle-note>上部にマウスを近づけると入口が現れ、入口にホバーするとパネルが開きます。</p></details>
+      <div class="segmented" data-panel-attachment></div>
+      <label class="toggle-row"><span data-automatic-attachment-label>ノッチがない画面では自動で上端まで覆う</span><input type="checkbox" data-automatic-attachment></label>
+      <label class="toggle-row"><span data-reduce-motion-label>動きを減らす</span><input type="checkbox" data-reduce-motion></label>
+    </section>
+    <section class="settings-section" data-settings-category="appearance">
+      <h2 data-i18n="textSize">文字サイズ</h2>
+      <div class="segmented" data-text-size></div>
+    </section>
+
+    <section class="settings-section" data-settings-category="appearance">
+      <h2 data-i18n="switchingMode">ツール切替</h2>
+      <div class="segmented" data-switching></div>
+    </section>
+    <section class="settings-section" data-settings-category="appearance">
+      <h2 data-i18n="providerOrder">ツールの表示と順序</h2>
+      <div class="provider-list" data-provider-list></div>
+    </section>
+
+    <section class="settings-section" data-settings-category="ai">
+      <h2 data-voice-heading>Voice Lane</h2>
+      <div class="segmented" data-voice-provider></div>
+      <label class="toggle-row settings-spaced-row">
+        <span data-voice-enabled-label>Voice Laneを有効化</span>
+        <input type="checkbox" data-voice-enabled>
+      </label>
+      <div class="settings-button-row settings-spaced-row" data-voice-openai-key-row hidden>
+        <span class="settings-status" data-voice-openai-key-status></span>
+        <button type="button" data-voice-openai-key-configure>APIキーを設定</button>
+        <button type="button" data-voice-openai-key-delete>APIキーを削除</button>
+      </div>
+      <div class="segmented settings-spaced-row" data-voice-layout></div>
+      <div class="settings-button-row settings-spaced-row" data-voice-codex-row hidden>
+        <span class="settings-status" role="status" data-voice-codex-status></span>
+        <button type="button" data-voice-codex-login>ChatGPTにログイン</button>
+        <button type="button" data-voice-codex-retry>再接続</button>
+        <button type="button" data-voice-codex-cancel hidden>ログインをキャンセル</button>
+      </div>
+      <label class="toggle-row settings-spaced-row">
+        <span data-voice-calendar-label>今日の予定名と時刻をCodexへ共有</span>
+        <input type="checkbox" data-voice-calendar-access>
+      </label>
+      <p class="settings-note" data-voice-calendar-note></p>
+      <details class="settings-details"><summary data-details-label>詳しく見る</summary><p class="settings-note" data-voice-note></p></details>
+    </section>
+    <section class="settings-section" data-settings-category="ai">
       <h2>Pocket Apps</h2>
       <label class="toggle-row">
         <span data-ai-native-label>AIネイティブ機能</span>
         <input type="checkbox" data-ai-native>
       </label>
-      <p class="settings-note" data-ai-native-note></p>
-      <div class="pocket-sandbox-setup" data-codex-sandbox>
+      <details class="settings-details"><summary data-details-label>詳しく見る</summary><p class="settings-note" data-ai-native-note></p></details>
+      <details class="settings-details"><summary data-generation-setup-label>生成環境の設定</summary><div class="pocket-sandbox-setup" data-codex-sandbox>
         <div class="pocket-app-heading">
           <strong data-codex-sandbox-heading>Codex生成sandbox</strong>
           <span data-codex-sandbox-badge>未準備</span>
@@ -72,9 +134,9 @@
         </div>
         <div class="settings-status" data-codex-sandbox-status></div>
       </div>
-      <div class="pocket-app-list" data-pocket-app-list></div>
+      </details><div class="pocket-app-list" data-pocket-app-list></div>
       <div class="pocket-generation" data-pocket-generation hidden>
-        <p class="settings-note" data-pocket-generation-note></p>
+        <details class="settings-details"><summary data-details-label>詳しく見る</summary><p class="settings-note" data-pocket-generation-note></p></details>
         <div class="pocket-workspace-backup">
           <div class="settings-button-row">
             <button type="button" data-pocket-workspace-export>workspaceを書き出す</button>
@@ -82,7 +144,7 @@
           </div>
           <div class="settings-status" data-pocket-workspace-status></div>
           <div class="pocket-app-list" data-pocket-workspace-preview></div>
-          <p class="settings-note" data-pocket-workspace-note></p>
+          <details class="settings-details"><summary data-details-label>詳しく見る</summary><p class="settings-note" data-pocket-workspace-note></p></details>
         </div>
         <textarea rows="4" maxlength="8000" data-pocket-generation-request aria-label="Pocket App request"></textarea>
         <div class="pocket-generation-update-target" data-pocket-generation-update-selection hidden>
@@ -98,34 +160,15 @@
         <div class="pocket-app-list settings-spaced-row" data-pocket-generation-managed></div>
       </div>
     </section>
-    <section class="settings-section">
+    <section class="settings-section" data-settings-category="advanced">
       <h2 data-capability-history-heading>監査ログと実行履歴</h2>
       <div class="segmented" data-capability-retention></div>
       <p class="settings-note" data-capability-history-summary></p>
       <button type="button" data-capability-history-clear>履歴を削除</button>
-      <p class="settings-note" data-capability-history-note></p>
+      <details class="settings-details"><summary data-details-label>詳しく見る</summary><p class="settings-note" data-capability-history-note></p></details>
     </section>
-    <section class="settings-section">
-      <h2 data-voice-heading>Voice Lane</h2>
-      <div class="segmented" data-voice-provider></div>
-      <label class="toggle-row settings-spaced-row">
-        <span data-voice-enabled-label>Voice Laneを有効化</span>
-        <input type="checkbox" data-voice-enabled>
-      </label>
-      <div class="settings-button-row settings-spaced-row" data-voice-openai-key-row hidden>
-        <span class="settings-status" data-voice-openai-key-status></span>
-        <button type="button" data-voice-openai-key-configure>APIキーを設定</button>
-        <button type="button" data-voice-openai-key-delete>APIキーを削除</button>
-      </div>
-      <div class="segmented settings-spaced-row" data-voice-layout></div>
-      <label class="toggle-row settings-spaced-row">
-        <span data-voice-calendar-label>今日の予定名と時刻をCodexへ共有</span>
-        <input type="checkbox" data-voice-calendar-access>
-      </label>
-      <p class="settings-note" data-voice-calendar-note></p>
-      <p class="settings-note" data-voice-note></p>
-    </section>
-    <section class="settings-section">
+
+    <section class="settings-section" data-settings-category="appearance">
       <h2 data-i18n="topHandle">上端ハンドル</h2>
       <div class="segmented" data-handle-icon></div>
       <label class="toggle-row settings-spaced-row">
@@ -137,7 +180,8 @@
         <input type="checkbox" data-disable-fullscreen>
       </label>
     </section>
-    <section class="settings-section">
+    <section class="settings-section" data-settings-category="library" data-asset-sync-settings></section>
+    <section class="settings-section" data-settings-category="library">
       <h2 data-i18n="clipboard">クリップボード</h2>
       <label class="toggle-row">
         <span data-i18n="clipboardPrivateMode">プライベートモード</span>
@@ -145,45 +189,24 @@
       </label>
       <p class="settings-note" data-i18n="clipboardPrivacyNote">クリップボード履歴はパスワードや個人情報を保存する可能性があります。</p>
     </section>
-    <section class="settings-section">
-      <h2 data-i18n="stickyNotes">付箋</h2>
-      <label class="toggle-row">
-        <span data-i18n="stickyUndoToast">取り消し通知を表示</span>
-        <input type="checkbox" data-sticky-undo-toast>
-      </label>
-      <div class="settings-spaced-row">
-        <span class="settings-inline-label" data-i18n="stickyGridSize">グリッドサイズ</span>
-        <div class="segmented" data-sticky-grid-size></div>
-      </div>
-    </section>
-    <section class="settings-section">
-      <label class="toggle-row">
-        <span data-i18n="startWithWindows">Windows 起動時に開始</span>
-        <input type="checkbox" data-startup>
-      </label>
-      <div class="settings-status" data-startup-status></div>
-    </section>
-    <section class="settings-section">
+    <section class="settings-section" data-settings-category="advanced">
       <h2 data-i18n="systemActions">システム操作</h2>
       <div class="settings-button-row">
+        <button type="button" data-reset>既定値に戻す</button>
         <button type="button" data-reset-binding data-i18n="resetPanelBinding">表示先をメインに戻す</button>
         <button type="button" data-open-data-folder data-i18n="openDataFolder">データフォルダーを開く</button>
       </div>
     </section>
-    <section class="settings-section">
-      <div class="settings-action-row">
-        <div>
-          <h2 data-i18n="updates">更新</h2>
-          <div class="settings-status" data-update-status></div>
-        </div>
-        <button type="button" data-check-updates>更新を確認</button>
-      </div>
-      <label class="toggle-row">
-        <span data-i18n="autoCheckForUpdates">起動時に確認</span>
-        <input type="checkbox" data-auto-updates>
-      </label>
+
+    <section class="settings-section" data-settings-category="capture">
+      <h2 data-capture-heading>スクリーンショットと収録</h2>
+      <p class="settings-note" data-capture-note>保存先や撮影後の通知を設定できます。</p>
+      <button type="button" data-capture-settings>撮影の設定を開く</button>
+      <p class="settings-status" data-capture-status role="status"></p>
     </section>
-    <footer class="settings-footer" data-status></footer>
+    <p data-settings-empty hidden role="status"></p>
+    <footer class="settings-footer" data-status role="status"></footer>
+    </div>
   </main>
   <script type="module" src="./settings.js"></script>
 </body>

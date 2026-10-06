@@ -66,4 +66,13 @@
     </Content>
   </ItemGroup>
 
+  <Target Name="BuildDevicePairing" BeforeTargets="BeforeBuild" Condition="'$(DesignTimeBuild)' != 'true'">
+    <Exec Command="cargo build --release --locked --manifest-path &quot;$(MSBuildProjectDirectory)\..\..\..\shared\pairing-helper\Cargo.toml&quot; --target-dir &quot;$(MSBuildProjectDirectory)\..\..\..\artifacts\pairing-helper-target&quot; -q" />
+  </Target>
+  <ItemGroup>
+    <Content Include="..\..\..\artifacts\pairing-helper-target\release\hoverpocket-pairing.exe" Link="hoverpocket-pairing.exe" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="..\..\..\shared\pairing-helper\LICENSE.txt" Link="ThirdParty\Pairing-LICENSE.txt" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="..\..\..\shared\pairing-helper\NOTICE.md" Link="ThirdParty\Pairing-NOTICE.md" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="..\..\..\shared\pairing-helper\THIRD-PARTY-LICENSES.html" Link="ThirdParty\Pairing-LICENSES.html" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
 </Project>

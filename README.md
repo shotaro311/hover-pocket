@@ -60,6 +60,8 @@ GitHub が自動で表示する `Source code (zip)` / `Source code (tar.gz)` は
 
 ## 現在できること
 
+macOSローカル開発版667には、素材ライブラリ内のドラッグ整理と取り込みパネル、カメラ写真・動画・録音、音声プレビュー、パネル内で直接入力・返信を読めるCodexチャットを追加しています。AIによる素材の検索・整理・撮影操作も利用できます。公開macOS版644への配信はまだ行っていません。[使い方](docs/usage/macos-asset-library.md)と[検証結果・残る実機確認](progress/2026-10/2026-10-05_hover-pocket-mac-assets.md)を参照してください。
+
 現在は組み込みの `Mirror`、`Controls`、`Calendar`、`Clipboard`、`Sticky Notes`、`Timer`、`Calculator` プロバイダーを搭載しています。macOSでは設定の「音声・AI」から音声操作を、「自作ツール」から個人用機能の作成を有効にできます。
 
 ### ミラー

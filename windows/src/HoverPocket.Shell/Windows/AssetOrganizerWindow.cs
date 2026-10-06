@@ -56,10 +56,35 @@ internal sealed class AssetOrganizerWindow : Window
         };
         Closing += (_, args) => { if (!args.Cancel) { _closed = true; _pane?.Dispose(); _web.Dispose(); } };
         AllowDrop = true;
-        System.Windows.DragEventHandler assetDragOver = (_, args) => { if (_pane?.HandleInternalDrag(args) == true) return; if (args.Data.GetDataPresent(System.Windows.DataFormats.FileDrop)) { args.Effects = System.Windows.DragDropEffects.Copy; args.Handled = true; } };
+        System.Windows.DragEventHandler assetDragOver = (_, args) => { if (_pane?.HandleInternalDrag(args) == true) return; args.Effects = AssetDropPayload.Supports(args.Data) ? System.Windows.DragDropEffects.Copy : System.Windows.DragDropEffects.None; args.Handled = true; };
         PreviewDragEnter += assetDragOver; PreviewDragOver += assetDragOver;
         PreviewDragLeave += (_, _) => _pane?.ClearDragHover();
-        PreviewDrop += async (_, args) => { if (_pane?.HandleInternalDrag(args, drop: true) == true) return; if (_pane is not null && args.Data.GetDataPresent(System.Windows.DataFormats.FileDrop)) { args.Handled = true; await _pane.ImportPathsAsync((string[])args.Data.GetData(System.Windows.DataFormats.FileDrop)); } };
+        PreviewDrop += async (_, args) => { if (_pane?.HandleInternalDrag(args, drop: true) == true) return; if (_pane is not null) { args.Handled = true; await _pane.ImportDropAsync(args.Data); } };
+    }
+    internal async Task<bool> ShowForVoiceAsync(string? assetId, CancellationToken token)
+    {
+        var deadline = DateTime.UtcNow.AddSeconds(20);
+        while (!_closed && DateTime.UtcNow < deadline)
+        {
+            token.ThrowIfCancellationRequested();
+            if (_web.CoreWebView2 is { } web && await web.ExecuteScriptAsync("!!window.hpLibrary") == "true")
+            {
+                if (assetId is null) return IsVisible;
+                var nonce = System.Text.Json.JsonSerializer.Serialize(Guid.NewGuid().ToString("N"));
+                var id = System.Text.Json.JsonSerializer.Serialize(assetId);
+                await web.ExecuteScriptAsync($"window.hpVoicePreview=null; window.hpLibrary.showAsset({id}).then(ok=>window.hpVoicePreview={{nonce:{nonce},ok}},()=>window.hpVoicePreview={{nonce:{nonce},ok:false}})");
+                while (!_closed && DateTime.UtcNow < deadline)
+                {
+                    token.ThrowIfCancellationRequested();
+                    var status = await web.ExecuteScriptAsync($"window.hpVoicePreview?.nonce==={nonce} ? window.hpVoicePreview.ok : null");
+                    if (status is "true" or "false") return status == "true" && IsVisible;
+                    await Task.Delay(50, token);
+                }
+                return false;
+            }
+            await Task.Delay(50, token);
+        }
+        return false;
     }
     private void ApplyLayout(AssetPreviewLayout layout)
     {

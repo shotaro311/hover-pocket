@@ -6,22 +6,31 @@ struct HoverPanelShell: View {
     @ObservedObject var settings: AppSettings
     @ObservedObject var stickyReminders = StickyReminderController.shared
     @ObservedObject private var voiceRuntime = VoiceLaneRuntime.shared
+    @ObservedObject private var chat = CodexChatController.shared
+    @ObservedObject private var assets = AssetLibraryRuntime.shared
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let onOpenSettings: () -> Void
     let onClosePanel: () -> Void
     let onExternalDragStarted: () -> Void
 
     var body: some View {
-        let baseline = PanelLayout.panelTotalSize(for: settings.panelSize)
-        let voiceHeight = VoiceLaneGeometry.height(
-            panelSizeRawValue: settings.panelSize.rawValue,
-            mode: voiceRuntime.snapshot.mode
-        )
+        let normal = PanelLayout.panelTotalSize(for: settings.panelSize)
+        let voiceHeight = assets.fullscreen ? 0 : chat.panelHeight
+        let baseline = assets.panelSize.map { CGSize(width: $0.width,
+            height: max(200, $0.height - CGFloat(voiceHeight) - store.attachmentMetrics.contentTop)) } ?? normal
 
-        ZStack(alignment: .top) {
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .fill(Color(red: 0.02, green: 0.02, blue: 0.025))
-
+        Group {
             VStack(spacing: 0) {
+                ZStack {
+                    if store.effectivePanelAttachmentStyle == .coverMenu && store.providerActive {
+                        PanelTopBarView(providerStore: store.providerStore, settings: settings,
+                                        metrics: store.attachmentMetrics)
+                            .transition(.opacity)
+                    }
+                }
+                .frame(height: store.attachmentMetrics.headerHeight)
+                .animation(reduceMotion ? nil : .easeOut(duration: 0.14), value: store.effectivePanelAttachmentStyle)
+
                 VStack(spacing: 0) {
                     ProviderHeaderView(
                         providerStore: store.providerStore,
@@ -54,21 +63,14 @@ struct HoverPanelShell: View {
                 }
                 .frame(width: baseline.width, height: baseline.height)
 
-                VoiceLaneHostView(runtime: voiceRuntime, settings: settings)
+                if !assets.fullscreen { VoiceLaneHostView(runtime: voiceRuntime, settings: settings) }
             }
-            .opacity(store.contentVisible ? 1 : 0)
-            .scaleEffect(store.contentVisible ? 1 : 0.92, anchor: .top)
-            .offset(y: store.contentVisible ? 0 : -14)
         }
         .frame(
             width: baseline.width,
-            height: baseline.height + CGFloat(voiceHeight)
+            height: baseline.height + CGFloat(voiceHeight) + store.attachmentMetrics.contentTop
         )
-        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .stroke(Color.white.opacity(0.08), lineWidth: 1)
-        )
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .onDisappear {
             voiceRuntime.detachPanel()
         }

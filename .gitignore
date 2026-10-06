@@ -19,3 +19,6 @@ dist/
 __pycache__/
 *.pyc
 artifacts/
+
+# Standalone secure pairing helper build cache
+shared/pairing-helper/target/

@@ -1,0 +1,7 @@
+UI verify: WebView2 host + bridge + provider registry + settings
+PASS cold top-edge open: panel_visible_before_webview_ready=true, dispatch_ms=39.5
+MEASURE diagnostics root: C:\Users\shotaro\AppData\Local\Temp\HoverPocket\Shell\1517c37907e44b358527aedc21644848\AssetLibrary\inline-chat-live
+PASS inline chat: live installed model route exactly matches the app's current grants; tools=17
+MEASURE JSON structure: {"xxxxxx":"xxxx/xxxxxxx","xxxxxx":{"xxxx":{"xxxx":"xxxxxxxxxxx","xx":"xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx","xxxxxxxx":xxxx,"xxxxxxx":[{"xxxx":"xxxx","xxxx":"UUUUUUUUUUUUUU+xUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUU,"xxxx_xxxxxxxx":[]}]},"xxxxxxxx":"xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx","xxxxxx":"xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx","xxxxxxxxxxx":xxxxxxxxxxxxx},"xxxxxxxxxxx":xxxxxxxxxxxxx}
+MEASURE inline chat result: chat_disconnected
+FAIL inline-chat-live: InvalidOperationException live_codex_returned_7_from_the_panel_composer

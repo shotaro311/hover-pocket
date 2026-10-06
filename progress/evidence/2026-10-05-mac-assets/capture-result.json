@@ -1,0 +1,32 @@
+{
+  "audio" : [
+    {
+      "audioTracks" : 1,
+      "duration" : 2.2416666666666667,
+      "microphone" : false,
+      "status" : "passed",
+      "system" : true,
+      "systemSamplesCaptured" : true
+    },
+    {
+      "audioTracks" : 1,
+      "duration" : 2.0433333333333334,
+      "microphone" : true,
+      "status" : "passed",
+      "system" : false,
+      "systemSamplesCaptured" : false
+    },
+    {
+      "audioTracks" : 1,
+      "duration" : 2.0916666666666668,
+      "microphone" : true,
+      "status" : "passed",
+      "system" : true,
+      "systemSamplesCaptured" : true
+    }
+  ],
+  "duration" : 3.1033333333333335,
+  "height" : 388,
+  "status" : "passed",
+  "width" : 640
+}

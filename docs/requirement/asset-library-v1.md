@@ -1,8 +1,8 @@
 ---
 project_slug: hover-pocket
 created: 2026-10-02
-updated: 2026-10-04
-status: windows-local-implementation; distribution-acceptance-pending
+updated: 2026-10-05
+status: windows-0.2.10-published; macos-local-662; macos-physical-and-distribution-acceptance-partial
 requirement_version: 1
 scope: Windows and macOS local asset library
 ---
@@ -15,7 +15,9 @@ Eagleを介さず、上端のポケットでファイルを保存・検索・取
 
 ユーザーが明示した条件は、独立した素材ライブラリ、誰でも利用できる配布アプリ、Eagleを参考にした軽快な操作、**動画・PDFのプレビューも初期版に含めること**、**プレビューでは上端につながったパネル自体が素材に合わせて自動拡大し、その中で動画/PDFを操作でき、全画面へも切り替えられること**。その他の細部は以下の実装前提として定める。初期版は本番品質で実装し、保存と復元の検証が完了してから配布する。
 
-この文書が機能範囲・動作・受入条件の正本。[設計資料](../plan/20261002_ASSET_LIBRARY_DESIGN.md)は理由と構成を説明し、範囲が異なる場合は本書を優先する。既存のAI用機能台帳とクリップボード履歴の契約は維持する。以下の要件は未実装で、性能値は測定結果ではない。
+この文書が機能範囲・動作・受入条件の正本。[設計資料](../plan/20261002_ASSET_LIBRARY_DESIGN.md)は理由と構成を説明し、範囲が異なる場合は本書を優先する。既存のAI用機能台帳とクリップボード履歴の契約は維持する。性能値は受入目標であり、測定結果ではない。
+
+2026-10-05現在、Windowsは0.2.10を公開済み。macOSはローカル開発版662に実装し、保存・表示・注釈・短い音声付き収録を確認した。[Mac対応表](../plan/20261005_MAC_ASSET_PARITY.md)と[検証記録](../../progress/2026-10/2026-10-05_hover-pocket-mac-assets.md)に実機で未確認の条件を記録する。以下の過去日付の「Mac未実施」は、その時点の履歴として読む。
 
 ## 2. 初期版の範囲
 

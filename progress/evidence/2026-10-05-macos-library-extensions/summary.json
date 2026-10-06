@@ -1,0 +1,41 @@
+{
+  "build": "666",
+  "bundleIdentifier": "local.codex.hover-pocket.asset-dev",
+  "binarySha256": "db058cd5b199ac61774c01e03c940b223fd07b8a7b93e64bd46c533d2fe392fc",
+  "sourceBaseline": "b3fa3e5 plus macOS modal hold fix",
+  "automated": {
+    "storage": 54,
+    "ui": 70,
+    "reopen": 2,
+    "chat": 9,
+    "aiLibrary": 53,
+    "voiceFoundation": 42,
+    "panelLayout": 128,
+    "panelSoakCycles": 100,
+    "schemaValidFixtures": 5,
+    "schemaInvalidRejected": 3
+  },
+  "liveMacChat": {
+    "firstAssistantReply": "4",
+    "afterApplicationRestartReply": "7",
+    "threadResumeVerified": true,
+    "usedExistingLogin": true,
+    "toolsRequested": false,
+    "returnedToNewConversation": true
+  },
+  "nativeUI": [
+    "text chat opened from provider header",
+    "camera dialog opened from actual capture menu",
+    "camera/microphone recording not started"
+  ],
+  "unverified": [
+    "human native drag on macOS; automation sends mouse-down/drag/up within 0.2 ms",
+    "macOS external Finder/browser drag",
+    "physical camera and microphone capture",
+    "device disconnection and mixed-DPI interaction"
+  ],
+  "windowsVerifiedImplementation": "a5fedee80f22a06300352bf57d052238b84bcda8",
+  "windowsHeadAfterCIFix": "9164e1968b4066df2f88c079384bfcf28c3cded5",
+  "windowsCI": "https://github.com/shotaro311/hover-pocket/actions/runs/37269873013",
+  "windowsCIConclusion": "success"
+}

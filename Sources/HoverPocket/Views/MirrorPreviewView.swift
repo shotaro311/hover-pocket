@@ -73,6 +73,13 @@ struct MirrorPreviewView: View {
             RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .stroke(Color.white.opacity(0.10), lineWidth: 1)
         )
+        .overlay(alignment: .bottomTrailing) {
+            Button {
+                AssetLibraryRuntime.shared.closePanel?()
+                AssetDeviceCapture.shared.show(kind: "cameraPhoto", folder: nil)
+            } label: { Image(systemName: "camera").padding(8) }
+            .buttonStyle(.plain).background(.ultraThinMaterial, in: Circle()).padding(10).help("写真・動画をライブラリへ保存")
+        }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
