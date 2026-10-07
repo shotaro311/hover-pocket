@@ -141,6 +141,12 @@ internal sealed class SettingsVerifier
         using var panelAttachment = controller.Attach(panelDispatcher, BridgeSurface.Panel);
         var focus = await Send(panelDispatcher, """{"id":"focus-before","method":"provider.select","params":{"id":"today-focus"}}""");
         if (!focus.Contains("\"pocketSurface\":{", StringComparison.Ordinal)) _failures.Add("Focus fixture was not active before removal");
+        var canSaveFocus = false;
+        controller.SetPocketAppStateFlush((appId, _) => Task.FromResult(new PocketAppStateTransitionLease(appId, "focus-removal", canSaveFocus)));
+        await Send(dispatcher, """{"id":"remove-unsaved-focus","method":"settings.removeTodayFocus"}""");
+        if (store.Load(providers.ProviderIds).TodayFocusRemoved)
+            _failures.Add("Focus was removed despite failed state save");
+        canSaveFocus = true;
         await Send(dispatcher, """{"id":"remove-focus","method":"settings.removeTodayFocus"}""");
         if (!store.Load(providers.ProviderIds).TodayFocusRemoved
             || JsonSerializer.Serialize(controller.BuildState(BridgeSurface.Settings), BridgeJson.Options).Contains("\"appId\":\"local.example.today-focus\"", StringComparison.Ordinal))

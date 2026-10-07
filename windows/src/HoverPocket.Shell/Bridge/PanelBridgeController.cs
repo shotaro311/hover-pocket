@@ -416,7 +416,6 @@ internal sealed partial class PanelBridgeController : IDisposable
             "app.getState",
             (_, _) => Task.FromResult<object?>(BuildState(surface)));
         RegisterUx(Register, surface);
-        if (surface == BridgeSurface.Settings) RegisterToolSettings(Register);
         Register("app.ready", (_, _) => Task.FromResult<object?>(new { ok = true }));
         Register("diagnostics.echo", (parameters, _) => Task.FromResult<object?>(DeserializeObject(parameters)));
         Register("settings.setPanelSize", SetPanelSizeAsync);
@@ -474,6 +473,7 @@ internal sealed partial class PanelBridgeController : IDisposable
         }
         if (surface == BridgeSurface.Settings)
         {
+            RegisterToolSettings(Register);
             foreach (var method in new[] { "status", "invite", "join", "approve", "cancel", "remove" })
                 Register("pairing." + method, (p, token) => PairingRequest(method, p, token));
             Register("settings.openCapture", async (_, _) => { if (AssetCaptureRequested is not { } capture) throw new InvalidOperationException("撮影を利用できません。"); await capture("settings", null); return new { opened = true }; });

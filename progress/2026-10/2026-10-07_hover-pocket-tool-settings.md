@@ -14,6 +14,9 @@
 - Windows生成要求: 選択モデル／推論のCLI引数とモデル定義への反映、変更時の要求識別子更新、既存のツール／権限制限が同一であることを検証。
 - Mac開発ビルド、Pocket Appのパッケージ／生成／保存／復元検証、チャット、自由サイズ160条件が成功。モデル／推論の保存と要求識別子の検証を追加した。
 - 最初のWindowsビルドで自動編集による余分な閉じ括弧が検出され、修正後に成功した。
+- Windowsの復旧テストには、以前からチャット入力欄126pxを除外した古いサイズの期待値が残っていた。故障を入れる直前の実寸を独立して取得し、復旧後に同一寸法へ戻るかを比較する検証へ修正した。製品のサイズ処理は変更していない。
+- 最初のWindows CIは、追加したSettings用登録位置がVoice静的検査の区切りに重なって失敗した。既存のSettings専用登録ブロックに統合し、検査と実画面の境界検証を再実行した。
+- MacでGPT-6.1 Solを指定して2つのツール（標準の管理画面と独自HTML画面）を実生成し、パッケージ検証と各3項目のstaging検証に成功。既定Astraへの自動切替はなく、選択モデルで完了した。根拠は `live-sol-generation.log` と隔離した `PocketToolsLive-D14BCCB3-C79A-42FA-A3F5-ECE178294A0C`。
 - 根拠: 各専用worktreeの `artifacts/tool-settings-20261007/`。Windowsの `settings-verify.log`、`settings-focus-verify.log`、`pocket-surface.log`、`ui-model.log`、`windows-settings.png`。Macの `build-tests.log`、`pocket-app.log`、`chat.log`、`panel-layout.log`。
 
 ## 反映状況
