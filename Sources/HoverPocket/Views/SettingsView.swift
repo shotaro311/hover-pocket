@@ -142,7 +142,6 @@ struct SettingsView: View {
         case .appearance:
             SettingsCard { panelsSection }
             SettingsCard { displaySection }
-            SettingsCard { entryPointSection }
             SettingsCard {
                 SettingsDetails(title: localized(japanese: "表示する機能", english: "Visible features")) { providersSection }
             }
@@ -208,28 +207,6 @@ struct SettingsView: View {
             VStack(alignment: .leading, spacing: 4) {
                 Toggle(settings.text(.showMirrorOnSecondaryDisplays), isOn: $settings.showMirrorOnSecondaryDisplays)
                     .help(settings.text(.showMirrorOnSecondaryDisplaysDetail))
-            }
-        }
-    }
-
-    private var entryPointSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text(settings.text(.entryPointSectionTitle))
-                .font(.system(size: 13, weight: .bold))
-
-            VStack(alignment: .leading, spacing: 6) {
-                Toggle(settings.text(.showSideHandle), isOn: $settings.showNotchSideHandleArea)
-                    .help(handleIconDetail)
-            }
-
-            VStack(alignment: .leading, spacing: 6) {
-                Picker(settings.text(.handleIcon), selection: $settings.pillHandleIconStyle) {
-                    ForEach(PillHandleIconStyle.allCases) { style in
-                        Text(style.title(language: language)).tag(style)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .disabled(!settings.showNotchSideHandleArea)
             }
         }
     }
@@ -327,13 +304,6 @@ struct SettingsView: View {
                 }
             }
         }
-    }
-
-    private var handleIconDetail: String {
-        if !settings.showNotchSideHandleArea {
-            return settings.text(.handleIconHiddenDetail)
-        }
-        return settings.pillHandleIconStyle.detail(language: language)
     }
 
     private var pocketAppsSection: some View {

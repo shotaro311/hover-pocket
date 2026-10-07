@@ -51,17 +51,20 @@ enum PocketToolsPlatformVerification {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("PocketToolsLive-" + UUID().uuidString)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         let generator = try CodexAppServerPocketGenerator(workspaceRoot: root.appendingPathComponent("Generator"), diagnostic: { print("CHECK " + $0) })
-        let efforts = try await generator.supportedEfforts()
+        let models = try await generator.availableModels()
+        let selectedModel = ProcessInfo.processInfo.environment["HOVERPOCKET_GENERATION_VERIFY_MODEL"] ?? CodexAppServerPocketGenerator.model
+        let efforts = models.first { $0.model == selectedModel }?.efforts ?? []
         guard efforts.contains("medium") else { throw PocketAppGenerationError.generatorUnavailable }
-        print("PASS live Astra model discovery: Medium supported")
+        print("PASS live generation model discovery: \(selectedModel), Medium supported")
         let requests = [
             "読みたい本の管理ツール。タイトル、著者、読了したかを保存し、追加・編集・検索できる標準画面にしてください。",
             "水やり記録ツール。植物名と最後に水をあげた日を保存し、植物ごとにカードを並べる独自HTML画面にしてください。追加・編集・削除と読み込み・保存エラーの表示も必要です。"
         ]
         for (index, text) in requests.enumerated() {
-            let request = PocketAppGenerationRequest(requestID: "live:\(UUID().uuidString.lowercased())",
+            var request = PocketAppGenerationRequest(requestID: "live:\(UUID().uuidString.lowercased())",
                 userRequest: text, appID: "local.verification.tool\(index)", version: "1.0.0", namespace: "live-tool-\(index)",
                 capabilities: PocketAppGenerationCapability.boundedCatalog(namespace: "live-tool-\(index)"))
+            request.model = selectedModel
             let envelope = try await generator.generate(request, cancellation: PocketAppGenerationCancellation())
             let draftRoot = root.appendingPathComponent("Drafts\(index)")
             try FileManager.default.createDirectory(at: draftRoot, withIntermediateDirectories: true)

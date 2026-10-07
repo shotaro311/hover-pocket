@@ -89,6 +89,7 @@ final class AppSettings: ObservableObject {
         disabledPocketLibraries = ids
     }
 
+    @Published var pocketToolModel: String { didSet { defaults.set(pocketToolModel, forKey: "pocketToolModel") } }
     @Published var pocketToolReasoningEffort: String {
         didSet { defaults.set(pocketToolReasoningEffort, forKey: "pocketToolReasoningEffort") }
     }
@@ -149,18 +150,6 @@ final class AppSettings: ObservableObject {
     @Published var providerSwitchingMode: ProviderSwitchingMode {
         didSet {
             defaults.set(providerSwitchingMode.rawValue, forKey: Self.providerSwitchingModeKey)
-        }
-    }
-
-    @Published var pillHandleIconStyle: PillHandleIconStyle {
-        didSet {
-            defaults.set(pillHandleIconStyle.rawValue, forKey: Self.pillHandleIconStyleKey)
-        }
-    }
-
-    @Published var showNotchSideHandleArea: Bool {
-        didSet {
-            defaults.set(showNotchSideHandleArea, forKey: Self.showNotchSideHandleAreaKey)
         }
     }
 
@@ -286,8 +275,6 @@ final class AppSettings: ObservableObject {
     private static let weatherRegionIDKey = "weatherRegionID"
     private static let weatherTemperatureUnitKey = "weatherTemperatureUnit"
     private static let providerSwitchingModeKey = "providerSwitchingMode"
-    private static let pillHandleIconStyleKey = "pillHandleIconStyle"
-    private static let showNotchSideHandleAreaKey = "showNotchSideHandleArea"
     private static let providerOrderKey = "providerOrder"
     private static let hiddenProvidersKey = "hiddenProviders"
     private static let rememberLastSelectedProviderKey = "rememberLastSelectedProvider"
@@ -318,6 +305,7 @@ final class AppSettings: ObservableObject {
         chatEffort = defaults.string(forKey: "chatEffort") ?? "medium"
         shortcuts = defaults.object(forKey: "shortcuts") as? [String: String] ?? AppShortcutBindings.defaults
         self.disabledPocketLibraries = Set(defaults.stringArray(forKey: "disabledPocketLibraries") ?? [])
+        self.pocketToolModel = defaults.string(forKey: "pocketToolModel") ?? CodexAppServerPocketGenerator.model
         self.pocketToolReasoningEffort = defaults.string(forKey: "pocketToolReasoningEffort") ?? "medium"
         let languageRawValue = defaults.string(forKey: Self.appLanguageKey)
         self.appLanguage = languageRawValue.flatMap(AppLanguage.init(rawValue:)) ?? .japanese
@@ -349,13 +337,6 @@ final class AppSettings: ObservableObject {
             .flatMap(WeatherTemperatureUnitOption.init(rawValue:)) ?? .automatic
         let providerSwitchingModeRawValue = defaults.string(forKey: Self.providerSwitchingModeKey)
         self.providerSwitchingMode = providerSwitchingModeRawValue.flatMap(ProviderSwitchingMode.init(rawValue:)) ?? .click
-        let pillHandleIconStyleRawValue = defaults.string(forKey: Self.pillHandleIconStyleKey)
-        self.pillHandleIconStyle = pillHandleIconStyleRawValue.flatMap(PillHandleIconStyle.init(rawValue:)) ?? .chevron
-        if defaults.object(forKey: Self.showNotchSideHandleAreaKey) == nil {
-            self.showNotchSideHandleArea = true
-        } else {
-            self.showNotchSideHandleArea = defaults.bool(forKey: Self.showNotchSideHandleAreaKey)
-        }
         self.providerOrderRawValues = defaults.stringArray(forKey: Self.providerOrderKey) ?? []
         let hiddenValues = defaults.stringArray(forKey: Self.hiddenProvidersKey) ?? []
         self.hiddenProviderRawValues = Set(hiddenValues)

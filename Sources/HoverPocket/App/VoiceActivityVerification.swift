@@ -95,7 +95,6 @@ enum VoiceActivityVerification {
                 providerRegistry: ProviderRegistry(providers: [CalculatorProvider()]))
             panel.appSettings.voiceEnabled = true
             panel.appSettings.appLanguage = .japanese
-            panel.appSettings.showNotchSideHandleArea = true
             panel.showPill()
             panelController = panel
             settings.appLanguage = .japanese

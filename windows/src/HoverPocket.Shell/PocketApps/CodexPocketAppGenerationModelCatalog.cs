@@ -28,6 +28,18 @@ internal static class CodexPocketAppGenerationModelCatalog
         return data;
     }
 
+    public static byte[] ForSelection(PocketAppGenerationRequest request)
+    {
+        request.Validate();
+        var root = JsonNode.Parse(Load())!.AsObject();
+        var model = root["models"]![0]!.AsObject();
+        model["slug"] = request.ModelId;
+        model["display_name"] = request.ModelId;
+        model["default_reasoning_level"] = request.ReasoningEffort;
+        model["supported_reasoning_levels"] = new JsonArray(new JsonObject { ["effort"] = request.ReasoningEffort, ["description"] = "User-selected reasoning effort." });
+        return System.Text.Encoding.UTF8.GetBytes(root.ToJsonString());
+    }
+
     public static void Validate(byte[] data)
     {
         if (data.Length is <= 0 or > MaximumBytes

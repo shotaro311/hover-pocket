@@ -560,7 +560,7 @@ internal sealed class CodexPocketAppGenerationAdapter : IPocketAppGenerationAdap
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         request.Validate();
-        var modelCatalog = CodexPocketAppGenerationModelCatalog.Load();
+        var modelCatalog = CodexPocketAppGenerationModelCatalog.ForSelection(request);
         _workspaceRoot.Validate();
         _executableDirectory.Validate();
         cancellationToken.ThrowIfCancellationRequested();
@@ -610,7 +610,7 @@ internal sealed class CodexPocketAppGenerationAdapter : IPocketAppGenerationAdap
                 HostUserProfile(),
                 schemaPath,
                 modelCatalogPath,
-                helperExecutable))
+                helperExecutable, request.ModelId, request.ReasoningEffort))
             {
                 start.ArgumentList.Add(argument);
             }
@@ -701,7 +701,9 @@ internal sealed class CodexPocketAppGenerationAdapter : IPocketAppGenerationAdap
         string hostUserProfile,
         string schemaPath,
         string modelCatalogPath,
-        string credentialHelperExecutable)
+        string credentialHelperExecutable,
+        string modelId = CodexPocketAppGenerationModelCatalog.ModelId,
+        string reasoningEffort = CodexPocketAppGenerationModelCatalog.ReasoningEffort)
     {
         var normalizedWorkspace = Path.GetFullPath(workspace);
         var normalizedCodexHome = Path.GetFullPath(codexHome);
@@ -770,8 +772,8 @@ internal sealed class CodexPocketAppGenerationAdapter : IPocketAppGenerationAdap
             "--ignore-rules",
             "--skip-git-repo-check",
             "-c", "approval_policy=\"never\"",
-            "-c", $"model={JsonSerializer.Serialize(CodexPocketAppGenerationModelCatalog.ModelId)}",
-            "-c", $"model_reasoning_effort={JsonSerializer.Serialize(CodexPocketAppGenerationModelCatalog.ReasoningEffort)}",
+            "-c", $"model={JsonSerializer.Serialize(modelId)}",
+            "-c", $"model_reasoning_effort={JsonSerializer.Serialize(reasoningEffort)}",
             "-c", $"model_catalog_json={JsonSerializer.Serialize(normalizedModelCatalog)}",
             "-c", "model_provider=\"hoverpocket\"",
             "-c", "model_providers.hoverpocket.name=\"HoverPocket OpenAI\"",

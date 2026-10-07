@@ -302,7 +302,8 @@ internal sealed partial class PanelBridgeController : IDisposable
                         generator,
                         runtimeActivationReadback: receipt => activationRegistry?.Synchronize(receipt)
                             ?? throw new PocketAppRuntimeActivationException("RUNTIME_ACTIVATION_UNAVAILABLE"),
-                        postRefreshHook: OnGeneratedPocketAppsRefreshed);
+                        postRefreshHook: OnGeneratedPocketAppsRefreshed,
+                        generationOptions: () => (CurrentSettings.PocketToolModel, CurrentSettings.PocketToolReasoningEffort));
                     _generatedPocketApps = activationRegistry;
                 }
                 catch
@@ -427,8 +428,6 @@ internal sealed partial class PanelBridgeController : IDisposable
         Register("settings.setProviderOrder", SetProviderOrderAsync);
         Register("settings.setProviderSelection", SetProviderSelectionAsync);
         Register("settings.setPreferredProvider", SetPreferredProviderAsync);
-        Register("settings.setHandleIcon", SetHandleIconAsync);
-        Register("settings.setShowTopHandleSideArea", SetShowTopHandleSideAreaAsync);
         Register("settings.setAutoHideTopHandle", SetAutoHideTopHandleAsync);
         Register("settings.setPanelAttachment", SetPanelAttachmentAsync);
         Register("settings.setDisableTopEdgeInFullscreen", SetDisableTopEdgeInFullscreenAsync);
@@ -474,6 +473,7 @@ internal sealed partial class PanelBridgeController : IDisposable
         }
         if (surface == BridgeSurface.Settings)
         {
+            RegisterToolSettings(Register);
             foreach (var method in new[] { "status", "invite", "join", "approve", "cancel", "remove" })
                 Register("pairing." + method, (p, token) => PairingRequest(method, p, token));
             Register("settings.openCapture", async (_, _) => { if (AssetCaptureRequested is not { } capture) throw new InvalidOperationException("撮影を利用できません。"); await capture("settings", null); return new { opened = true }; });
@@ -621,7 +621,7 @@ internal sealed partial class PanelBridgeController : IDisposable
         var metrics = PanelSizeCatalog.Get(CurrentSettings.PanelSize);
         var voiceSnapshot = _voiceCoordinator.Snapshot;
         var voiceLaneHeight = VoicePanelGeometry.Height(CurrentSettings.PanelSize, _resolvedVoiceLaneMode);
-        var builtInPocketAppAvailable = CurrentSettings.AiNativeEnabled
+        var builtInPocketAppAvailable = CurrentSettings.AiNativeEnabled && !CurrentSettings.TodayFocusRemoved
             && _pocketAppHostController?.IsActivationActive == true;
         var generatedRoute = SelectedGeneratedRoute();
         if (includePocketSurface && generatedRoute is not null)
@@ -654,6 +654,9 @@ internal sealed partial class PanelBridgeController : IDisposable
                 startWithWindowsRegistered = IsStartupRegistered(),
                 autoCheckForUpdates = CurrentSettings.AutoCheckForUpdates,
                 aiNativeEnabled = CurrentSettings.AiNativeEnabled,
+                todayFocusRemoved = CurrentSettings.TodayFocusRemoved,
+                pocketToolModel = CurrentSettings.PocketToolModel, pocketToolReasoningEffort = CurrentSettings.PocketToolReasoningEffort,
+                pocketToolModels = _inlineChat?.Models ?? [],
                 capabilityDataRetentionPeriod = ToWireValue(CurrentSettings.CapabilityDataRetentionPeriod),
                 voiceEnabled = CurrentSettings.VoiceEnabled,
                 voiceProviderId = CurrentSettings.VoiceProviderId,
@@ -667,8 +670,6 @@ internal sealed partial class PanelBridgeController : IDisposable
                 rememberLastSelectedProvider = CurrentSettings.RememberLastSelectedProvider,
                 preferredProviderId = CurrentSettings.PreferredProviderId,
                 lastSelectedProviderId = CurrentSettings.LastSelectedProviderId,
-                handleIcon = ToWireValue(CurrentSettings.HandleIconStyle),
-                showTopHandleSideArea = CurrentSettings.ShowTopHandleSideArea,
                 autoHideTopHandle = CurrentSettings.AutoHideTopHandle,
                 panelAttachmentStyle = PanelAttachment.WireValue(CurrentSettings.PanelAttachmentStyle),
                 effectivePanelAttachmentStyle = PanelAttachment.WireValue(PanelAttachment.Resolve(CurrentSettings)),
@@ -959,7 +960,7 @@ internal sealed partial class PanelBridgeController : IDisposable
     private PocketAppHostController ResolveSelectedPocketAppHost(JsonElement? parameters)
     {
         var appId = ReadRequiredString(parameters, "appId");
-        if (_pocketAppHostController is not null
+        if (_pocketAppHostController is not null && !CurrentSettings.TodayFocusRemoved
             && string.Equals(_selectedProviderId, "today-focus", StringComparison.OrdinalIgnoreCase)
             && string.Equals(_pocketAppHostController.AppId, appId, StringComparison.Ordinal))
         {
@@ -1201,19 +1202,6 @@ internal sealed partial class PanelBridgeController : IDisposable
         return await PublishStateAsync(cancellationToken);
     }
 
-    private async Task<object?> SetHandleIconAsync(JsonElement? parameters, CancellationToken cancellationToken)
-    {
-        var style = ParseHandleIcon(ReadRequiredString(parameters, "handleIcon"));
-        if (CurrentSettings.HandleIconStyle != style)
-        {
-            var updated = CurrentSettings.Clone();
-            updated.HandleIconStyle = style;
-            SaveSettings(updated);
-        }
-
-        return await PublishStateAsync(cancellationToken);
-    }
-
     private async Task<object?> SetPanelAttachmentAsync(JsonElement? parameters, CancellationToken cancellationToken)
     {
         var updated = CurrentSettings.Clone();
@@ -1240,19 +1228,6 @@ internal sealed partial class PanelBridgeController : IDisposable
         var updated = CurrentSettings.Clone();
         updated.AutoHideTopHandle = ReadRequiredBool(parameters, "enabled");
         SaveSettings(updated);
-        return await PublishStateAsync(cancellationToken);
-    }
-
-    private async Task<object?> SetShowTopHandleSideAreaAsync(JsonElement? parameters, CancellationToken cancellationToken)
-    {
-        var visible = ReadRequiredBool(parameters, "visible");
-        if (CurrentSettings.ShowTopHandleSideArea != visible)
-        {
-            var updated = CurrentSettings.Clone();
-            updated.ShowTopHandleSideArea = visible;
-            SaveSettings(updated);
-        }
-
         return await PublishStateAsync(cancellationToken);
     }
 
@@ -2627,6 +2602,7 @@ internal sealed partial class PanelBridgeController : IDisposable
     {
         var provider = FindProvider(providerId);
         if (provider is null
+            || (providerId == "today-focus" && CurrentSettings.TodayFocusRemoved)
             || (!provider.DefaultVisible && !CurrentSettings.AiNativeEnabled))
         {
             return false;
@@ -2865,16 +2841,6 @@ internal sealed partial class PanelBridgeController : IDisposable
         };
     }
 
-    private static HandleIconStyle ParseHandleIcon(string value)
-    {
-        return value.ToLowerInvariant() switch
-        {
-            "c" => HandleIconStyle.C,
-            "none" => HandleIconStyle.None,
-            _ => HandleIconStyle.B
-        };
-    }
-
     private static ProviderSwitchingMode ParseSwitchingMode(string value)
     {
         return value.Equals("hover", StringComparison.OrdinalIgnoreCase)
@@ -2973,16 +2939,6 @@ internal sealed partial class PanelBridgeController : IDisposable
             DisplayPlacement.Sub => "sub",
             DisplayPlacement.All => "all",
             _ => "main"
-        };
-    }
-
-    private static string ToWireValue(HandleIconStyle style)
-    {
-        return style switch
-        {
-            HandleIconStyle.C => "c",
-            HandleIconStyle.None => "none",
-            _ => "b"
         };
     }
 

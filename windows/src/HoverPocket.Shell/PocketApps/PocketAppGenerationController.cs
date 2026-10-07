@@ -7,6 +7,7 @@ namespace HoverPocket.Shell.PocketApps;
 internal sealed class PocketAppGenerationController : IDisposable
 {
     private readonly IPocketAppGenerationAdapter? _generator;
+    private readonly Func<(string Model, string Effort)>? _generationOptions;
     private readonly PocketAppLifecycleManager _lifecycle;
     private readonly PocketAppGenerationMaterializer _materializer;
     private readonly PocketAppWorkspaceBackupManager _workspaceBackupManager;
@@ -40,13 +41,15 @@ internal sealed class PocketAppGenerationController : IDisposable
         IPocketAppGenerationAdapter? generator,
         Action? postCommitHook = null,
         Func<PocketAppLifecycleReceipt, PocketAppRuntimeReadback>? runtimeActivationReadback = null,
-        Action? postRefreshHook = null)
+        Action? postRefreshHook = null,
+        Func<(string Model, string Effort)>? generationOptions = null)
     {
         var definitionPin = new PocketAppPinnedDirectory(rootDirectory);
         var userDataPin = new PocketAppPinnedDirectory(userDataRoot);
         var generationPin = new PocketAppPinnedDirectory(generationRoot);
         _pins = [definitionPin, userDataPin, generationPin];
         _generator = generator;
+        _generationOptions = generationOptions;
         _postCommitHook = postCommitHook;
         _postRefreshHook = postRefreshHook;
         _lifecycle = new PocketAppLifecycleManager(
@@ -1051,6 +1054,7 @@ internal sealed class PocketAppGenerationController : IDisposable
             version,
             @namespace,
             PocketAppGenerationCapability.BoundedCatalog(@namespace));
+        if (_generationOptions is not null) { var options = _generationOptions(); request = request with { ModelId = options.Model, ReasoningEffort = options.Effort }; }
         request.Validate();
         return request;
     }

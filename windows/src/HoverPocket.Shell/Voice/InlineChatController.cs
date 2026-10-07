@@ -31,6 +31,7 @@ internal sealed class InlineChatController : IAsyncDisposable
     internal bool KeepOpen => MenuOpen;
     internal string Draft => _drafts.GetValueOrDefault(_draftKey, "");
     internal CodexChatSnapshot Snapshot => _chat.Snapshot;
+    internal IReadOnlyList<ChatModelChoice> Models => _chat.Models;
     internal Task LoadModelsAsync(CancellationToken token) => _chat.LoadModelsAsync(token);
     internal void Configure(string model, string effort) => _chat.Configure(model, effort);
     internal Task OperationForVerify => _operation;

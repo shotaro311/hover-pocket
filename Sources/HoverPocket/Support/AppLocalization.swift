@@ -123,15 +123,8 @@ enum AppTextKey: String, Sendable {
     case displaySectionTitle
     case editEvent
     case end
-    case entryPointSectionTitle
     case english
     case googleCalendar
-    case handleChevronDetail
-    case handleIcon
-    case handleIconHiddenDetail
-    case handleNone
-    case handleNoneDetail
-    case handlePocketDetail
     case hover
     case iconSwitching
     case iconSwitchingClickDetail
@@ -389,15 +382,8 @@ enum AppText {
         case .displaySectionTitle: return "表示"
         case .editEvent: return "予定を編集"
         case .end: return "終了"
-        case .entryPointSectionTitle: return "起点表示"
         case .english: return "英語"
         case .googleCalendar: return "Google カレンダー"
-        case .handleChevronDetail: return "小さな下向きマークを表示します。"
-        case .handleIcon: return "ハンドルアイコン"
-        case .handleIconHiddenDetail: return "オフの場合、ノッチ横には何も表示せず、ノッチ本体側の透明な反応領域だけを残します。"
-        case .handleNone: return "なし"
-        case .handleNoneDetail: return "マークとノッチ横の黒い背景を表示しません。"
-        case .handlePocketDetail: return "ポケット形状の小さなマークを表示します。"
         case .hover: return "ホバー"
         case .iconSwitching: return "機能切り替え"
         case .iconSwitchingClickDetail: return "アイコンをクリックしたときにパネルを切り替えます。"
@@ -625,15 +611,8 @@ enum AppText {
         case .displaySectionTitle: return "Display"
         case .editEvent: return "Edit event"
         case .end: return "End"
-        case .entryPointSectionTitle: return "Entry Point"
         case .english: return "English"
         case .googleCalendar: return "Google Calendar"
-        case .handleChevronDetail: return "Shows the compact downward mark."
-        case .handleIcon: return "Handle icon"
-        case .handleIconHiddenDetail: return "When off, nothing is drawn beside the notch; only the transparent notch trigger remains."
-        case .handleNone: return "None"
-        case .handleNoneDetail: return "Hides the mark and the black side-handle background."
-        case .handlePocketDetail: return "Shows the compact pocket-shaped mark."
         case .hover: return "Hover"
         case .iconSwitching: return "Icon switching"
         case .iconSwitchingClickDetail: return "Switches panels when you click an icon."

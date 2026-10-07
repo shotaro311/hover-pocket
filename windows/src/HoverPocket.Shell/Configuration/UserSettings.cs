@@ -12,6 +12,9 @@ internal sealed class UserSettings
 
     public double? PanelWidthDips { get; set; }
     public double? PanelHeightDips { get; set; }
+    public bool TodayFocusRemoved { get; set; }
+    public string PocketToolModel { get; set; } = PocketApps.CodexPocketAppGenerationModelCatalog.ModelId;
+    public string PocketToolReasoningEffort { get; set; } = "medium";
     public string? ChatModel { get; set; }
     public string? ChatEffort { get; set; }
     public Dictionary<string, string> Shortcuts { get; set; } = new() { ["panel"] = "Ctrl+Alt+H", ["chat"] = "Ctrl+Alt+C", ["library"] = "Ctrl+Alt+L", ["settings"] = "Ctrl+Alt+O", ["voice"] = "Ctrl+Alt+V", ["regionRecording"] = "Ctrl+Alt+Shift+G" };
@@ -50,7 +53,6 @@ internal sealed class UserSettings
 
     public string? LastSelectedProviderId { get; set; }
 
-    public HandleIconStyle HandleIconStyle { get; set; } = HandleIconStyle.B;
 
     public PanelAttachmentStyle PanelAttachmentStyle { get; set; } = PanelAttachmentStyle.PreserveMenu;
 
@@ -58,7 +60,6 @@ internal sealed class UserSettings
 
     public bool ReduceMotion { get; set; }
 
-    public bool ShowTopHandleSideArea { get; set; } = true;
 
     public bool AutoHideTopHandle { get; set; }
 
@@ -72,6 +73,7 @@ internal sealed class UserSettings
     {
         return new UserSettings
         {
+            TodayFocusRemoved = TodayFocusRemoved, PocketToolModel = PocketToolModel, PocketToolReasoningEffort = PocketToolReasoningEffort,
             DisplayPlacement = DisplayPlacement,
             PanelWidthDips = PanelWidthDips, PanelHeightDips = PanelHeightDips, ChatModel = ChatModel, ChatEffort = ChatEffort, Shortcuts = new(Shortcuts),
             PanelSize = PanelSize,
@@ -92,11 +94,9 @@ internal sealed class UserSettings
             RememberLastSelectedProvider = RememberLastSelectedProvider,
             PreferredProviderId = PreferredProviderId,
             LastSelectedProviderId = LastSelectedProviderId,
-            HandleIconStyle = HandleIconStyle,
             PanelAttachmentStyle = PanelAttachmentStyle,
             AutomaticScreenEdgeAttachment = AutomaticScreenEdgeAttachment,
             ReduceMotion = ReduceMotion,
-            ShowTopHandleSideArea = ShowTopHandleSideArea,
             AutoHideTopHandle = AutoHideTopHandle,
             DisableTopEdgeInFullscreen = DisableTopEdgeInFullscreen,
             ProviderOrder = [.. ProviderOrder],

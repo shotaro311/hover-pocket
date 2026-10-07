@@ -886,6 +886,17 @@ internal sealed class PocketAppGenerationVerifier
         var modelCatalog = CodexPocketAppGenerationModelCatalog.Load();
         CodexPocketAppGenerationModelCatalog.Validate(modelCatalog);
         Require(modelCatalog.Length > 0, "generation_codex_static_model_catalog");
+        var selection = MakeRequest("model-selection", "Create a focus tool", "local.generated.model-choice", "1.0.0", "model-choice")
+            with { ModelId = "fixture-model", ReasoningEffort = "high" };
+        var selectedCatalog = JsonNode.Parse(CodexPocketAppGenerationModelCatalog.ForSelection(selection))!["models"]![0]!;
+        Require(selectedCatalog["slug"]!.GetValue<string>() == selection.ModelId
+            && selectedCatalog["default_reasoning_level"]!.GetValue<string>() == selection.ReasoningEffort,
+            "generation_selected_model_catalog");
+        var originalModel = JsonNode.Parse(modelCatalog)!["models"]![0]!.AsObject();
+        Require(originalModel.All(item => item.Key is "slug" or "display_name" or "default_reasoning_level" or "supported_reasoning_levels"
+            || JsonNode.DeepEquals(item.Value, selectedCatalog[item.Key])), "generation_selection_preserves_confinement");
+        Require(selection.RequestDigest() != (selection with { ModelId = CodexPocketAppGenerationModelCatalog.ModelId }).RequestDigest()
+            && selection.RequestDigest() != (selection with { ReasoningEffort = "medium" }).RequestDigest(), "generation_digest_binds_model_and_effort");
         var tamperedModelCatalog = (byte[])modelCatalog.Clone();
         tamperedModelCatalog[0] ^= 0x01;
         try
@@ -907,6 +918,12 @@ internal sealed class PocketAppGenerationVerifier
             confinementModelCatalog,
             confinementHelper);
         var confinementJoined = string.Join('\n', confinementArguments);
+        var selectedArguments = string.Join('\n', CodexPocketAppGenerationAdapter.ConfinementArguments(
+            confinementWorkspace, confinementCodexHome, confinementUserHome, confinementHostUserProfile,
+            confinementSchema, confinementModelCatalog, confinementHelper, selection.ModelId, selection.ReasoningEffort));
+        Require(selectedArguments.Contains("model=\"fixture-model\"", StringComparison.Ordinal)
+            && selectedArguments.Contains("model_reasoning_effort=\"high\"", StringComparison.Ordinal)
+            && selectedArguments.Contains("network.enabled=false", StringComparison.Ordinal), "generation_selected_model_cli_arguments");
         Require(
             !confinementArguments.Contains("--sandbox", StringComparer.Ordinal)
                 && confinementArguments.Contains("--ignore-user-config", StringComparer.Ordinal)

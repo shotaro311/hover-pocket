@@ -48,8 +48,6 @@ internal sealed class UiModelVerifier
         settings.ClipboardPrivateMode = true;
         settings.RememberLastSelectedProvider = false;
         settings.PreferredProviderId = "sticky";
-        settings.HandleIconStyle = HandleIconStyle.C;
-        settings.ShowTopHandleSideArea = false;
         settings.DisableTopEdgeInFullscreen = false;
         settings.ProviderOrder = ["sticky", "calculator", "timer"];
         settings.ProviderVisibility["timer"] = false;
@@ -65,8 +63,6 @@ internal sealed class UiModelVerifier
             || !reloaded.ClipboardPrivateMode
             || reloaded.RememberLastSelectedProvider
             || reloaded.PreferredProviderId != "sticky"
-            || reloaded.HandleIconStyle != HandleIconStyle.C
-            || reloaded.ShowTopHandleSideArea
             || reloaded.DisableTopEdgeInFullscreen)
         {
             _failures.Add("settings round-trip: scalar values were not preserved");

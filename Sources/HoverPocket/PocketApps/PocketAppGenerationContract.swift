@@ -71,6 +71,7 @@ struct PocketAppGenerationRequest: Equatable, Sendable {
     let capabilities: [PocketAppGenerationCapability]
     var libraryCatalog: PocketLibraryCatalog? = nil
     var previousFiles: [PocketAppGeneratedFile] = []
+    var model: String = CodexAppServerPocketGenerator.model
     var reasoningEffort: String = "medium"
 
     var requestDigest: String {
@@ -88,6 +89,7 @@ struct PocketAppGenerationRequest: Equatable, Sendable {
         if let libraryCatalog {
             field("libraries:" + (try! libraryCatalog.promptJSON(namespace: namespace)))
         }
+        if model != CodexAppServerPocketGenerator.model { field("model:" + model) }
         if reasoningEffort != "medium" { field("effort:" + reasoningEffort) }
         for file in previousFiles.sorted(by: { $0.path < $1.path }) {
             field("previous:" + file.path)
@@ -116,6 +118,8 @@ struct PocketAppGenerationRequest: Equatable, Sendable {
               !userRequest.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
               userRequest.unicodeScalars.count <= Self.maximumUserRequestScalars,
               !userRequest.contains("\0"),
+              model.range(of: "^[A-Za-z0-9][A-Za-z0-9._-]{0,159}$", options: .regularExpression) != nil,
+              ["none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"].contains(reasoningEffort),
               capabilities.count <= 32,
               Set(capabilities.map { "\($0.id)@\($0.version)" }).count == capabilities.count else {
             throw PocketAppGenerationError.invalidRequest

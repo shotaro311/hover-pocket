@@ -90,7 +90,6 @@ enum StickyReminderPresentationVerification {
                 stickyReminders: previewReminders)
             controller.appSettings.appLanguage = .japanese
             controller.appSettings.voiceEnabled = false
-            controller.appSettings.showNotchSideHandleArea = true
             if CommandLine.arguments.contains("--hidden-sticky-preview") {
                 controller.appSettings.hiddenProviderRawValues = [StickyNotesProvider.pluginID.rawValue]
             }

@@ -245,6 +245,11 @@ internal sealed class ShellVerifier
             _controller.SimulatePointerMoveForVerify(accessCenter.X, accessCenter.Y);
             await WaitForPanelPlacementAsync(layout);
             var panel = _controller.Panel;
+            if (!NativeMethods.TryGetWindowRect(panel.Hwnd, out var expectedFrame))
+            {
+                _failures.Add("panel health: cannot capture the settled frame before fault injection");
+                return;
+            }
             if (!_controller.PanelExpectedVisibleForVerify)
             {
                 _failures.Add("panel health: controller did not retain expected-visible state after polling open");
@@ -271,7 +276,8 @@ internal sealed class ShellVerifier
             }
 
             VerifyWindow("panel health", panel.Hwnd);
-            VerifyNativeWindowState("panel health", panel.Hwnd, layout.PanelTarget.PhysicalRect, expectedVisible: true);
+            VerifyNativeWindowState("panel health", panel.Hwnd,
+                new PhysicalRect(expectedFrame.Left, expectedFrame.Top, expectedFrame.Width, expectedFrame.Height), expectedVisible: true);
         }
         finally
         {
