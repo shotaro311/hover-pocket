@@ -154,8 +154,6 @@ internal sealed class UserSettingsStore
             VoiceLaneLayout = VoiceLaneLayoutPreference.Compact,
             RememberLastSelectedProvider = true,
             PreferredProviderId = providerIds.FirstOrDefault(),
-            HandleIconStyle = HandleIconStyle.B,
-            ShowTopHandleSideArea = true,
             DisableTopEdgeInFullscreen = true,
             ProviderOrder = [.. providerIds],
             ProviderVisibility = providerIds.ToDictionary(id => id, _ => true, StringComparer.OrdinalIgnoreCase)

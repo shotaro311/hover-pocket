@@ -24,10 +24,8 @@ internal sealed class TopHandlePeekVerifier(HoverShellController controller)
             Require(controller.PointerPollingIntervalForVerify == HoverShellController.AutoHidePollingInterval,
                 "auto-hide did not enable responsive pointer polling");
             foreach (var size in PanelSizeCatalog.All)
-            foreach (var wide in new[] { true, false })
             {
                 await Send("settings.setPanelSize", new { panelSize = size.Id });
-                await Send("settings.setShowTopHandleSideArea", new { visible = wide });
                 var layout = controller.Layouts[0];
                 var entry = layout.AccessSurface.PhysicalRect;
                 var surface = controller.AccessSurfaces[0];
@@ -61,7 +59,7 @@ internal sealed class TopHandlePeekVerifier(HoverShellController controller)
                 await Wait(() => surface.PeekReady);
                 Require(!controller.Panel.IsVisible && !surface.IsPeeking, "proximity did not settle with only the entry visible");
                 Require(NativeMethods.LiquidWindowAtPoint(near.X, near.Y) != surface.Hwnd, "invisible proximity area intercepted input");
-                if (size.Id == "medium" && wide && controller.Panel.WebView is not null) CaptureEntry(surface);
+                if (size.Id == "medium" && controller.Panel.WebView is not null) CaptureEntry(surface);
 
                 controller.SimulatePointerMoveForVerify(near.X, entry.Top + entry.Height / 2);
                 await Wait(() => controller.Panel.IsVisible && !controller.Panel.IsAnimating);
@@ -69,7 +67,7 @@ internal sealed class TopHandlePeekVerifier(HoverShellController controller)
                 controller.SimulatePointerMoveForVerify(far.X, far.Y);
                 await Wait(() => !controller.Panel.IsVisible && !surface.IsVisible && !surface.IsPeeking);
                 Require(!NativeMethods.IsWindowShown(surface.Hwnd), "entry left a native window after closing");
-                VerifyConsole.WriteLine($"PASS top-entry peek: size={size.Id}, wide={wide}, hidden=true, direct_top_open=true, direct_dispatch_ms={directMilliseconds:0.0}, animating_entry_open=true, expanded_proximity=true, proximity_only=true, hover_open=true, leave_hide=true, idle=true");
+                VerifyConsole.WriteLine($"PASS top-entry peek: size={size.Id}, compact=true, hidden=true, direct_top_open=true, direct_dispatch_ms={directMilliseconds:0.0}, animating_entry_open=true, expanded_proximity=true, proximity_only=true, hover_open=true, leave_hide=true, idle=true");
             }
 
             // Passing near the entry must not open a panel, even during a reveal/reversal.
@@ -108,7 +106,6 @@ internal sealed class TopHandlePeekVerifier(HoverShellController controller)
             await controller.HidePanelForVerifyAsync();
             await Send("settings.setPanelAttachment", new { reduceMotion = false });
             await Send("settings.setAutoHideTopHandle", new { enabled = false });
-            await Send("settings.setShowTopHandleSideArea", new { visible = true });
             await Send("settings.setPanelSize", new { panelSize = "medium" });
             controller.ClearPointerSimulationForVerify();
         }

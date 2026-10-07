@@ -14,12 +14,6 @@ struct HoverPillView: View {
         Group {
             if showsVoiceConversation {
                 voiceAccessIndicator
-            } else if showsVisibleSideHandle {
-                visiblePill
-                    .modifier(TimerAlertBounceModifier(
-                        startedAt: timerStore.activeAlert?.startedAt ?? stickyReminders.startedAt
-                    ))
-                    .onTapGesture(perform: onTap)
             } else {
                 Color.black.opacity(0.001)
                     .onTapGesture(perform: onTap)
@@ -70,52 +64,6 @@ struct HoverPillView: View {
         inside ? onEnter() : onExit()
     }
 
-    private var showsVisibleSideHandle: Bool {
-        settings.showNotchSideHandleArea && settings.pillHandleIconStyle != .none
-    }
-
-    private var alertAccent: Color? {
-        timerStore.activeAlert?.color.color ?? stickyReminders.activeNote?.color.color
-    }
-
-    private var visiblePill: some View {
-        ZStack(alignment: .leading) {
-            TopDockedPillShape(radius: 10)
-                .fill(Color.black.opacity(0.94))
-
-            TopDockedPillShape(radius: 10)
-                .strokeBorder(alertAccent?.opacity(0.85) ?? Color.white.opacity(0.09), lineWidth: 1)
-
-            VStack(spacing: 0) {
-                Rectangle()
-                    .fill(Color.black.opacity(0.94))
-                    .frame(height: PanelLayout.topEdgeOverfill)
-
-                Spacer(minLength: 0)
-            }
-            .allowsHitTesting(false)
-
-            ZStack {
-                handleIcon
-            }
-            .frame(width: PanelLayout.notchHandleWidth, height: PanelLayout.pillHeight)
-        }
-    }
-
-    @ViewBuilder
-    private var handleIcon: some View {
-        switch settings.pillHandleIconStyle {
-        case .chevron:
-            Image(systemName: "chevron.down")
-                .font(.system(size: 12, weight: .bold))
-                .foregroundStyle(alertAccent ?? Color.white.opacity(0.72))
-        case .pocket:
-            PocketHandleGlyph()
-                .frame(width: 15, height: 13)
-        case .none:
-            EmptyView()
-        }
-    }
 }
 
 /// Repeats a small peeking bounce while a timer alert is active: the bar rests

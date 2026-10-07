@@ -5,6 +5,7 @@ import Foundation
 enum PocketAppGenerationVerification {
     static func verify(failures: inout [String]) {
         verifyDefaultOff(failures: &failures)
+        verifyGeneratorPreferences(failures: &failures)
         PocketAppRuntimeActivationVerification.verify(failures: &failures)
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("hover-pocket-generation-host-\(UUID().uuidString)", isDirectory: true)
@@ -283,6 +284,35 @@ enum PocketAppGenerationVerification {
         let settings = AppSettings(defaults: defaults)
         require(!settings.aiNativeEnabled, "generation_default_off", failures: &failures)
         defaults.removePersistentDomain(forName: suite)
+    }
+
+    private static func verifyGeneratorPreferences(failures: inout [String]) {
+        let suite = "hover-pocket-generation-preferences-\(UUID().uuidString)"
+        guard let defaults = UserDefaults(suiteName: suite) else { failures.append("generation_preferences_defaults"); return }
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = AppSettings(defaults: defaults)
+        settings.pocketToolModel = "fixture-model"
+        settings.pocketToolReasoningEffort = "high"
+        let reloaded = AppSettings(defaults: defaults)
+        require(reloaded.pocketToolModel == "fixture-model" && reloaded.pocketToolReasoningEffort == "high", "generation_model_preferences_persist", failures: &failures)
+        do {
+            let original = try makeRequest(requestID: "model-selection", userRequest: "Create a focus tool", appID: "local.generated.model-choice", version: "1.0.0", namespace: "model-choice")
+            var selected = original
+            selected.model = reloaded.pocketToolModel
+            selected.reasoningEffort = reloaded.pocketToolReasoningEffort
+            try selected.validate()
+            require(selected.requestDigest != original.requestDigest, "generation_digest_binds_selection", failures: &failures)
+            var changed = selected
+            changed.model = original.model
+            require(changed.requestDigest != selected.requestDigest, "generation_digest_binds_model", failures: &failures)
+            changed = selected
+            changed.reasoningEffort = "medium"
+            require(changed.requestDigest != selected.requestDigest, "generation_digest_binds_effort", failures: &failures)
+            for bad in ["bad model", "\"unsafe\""] {
+                changed = selected; changed.model = bad
+                do { try changed.validate(); failures.append("generation_invalid_model_accepted") } catch PocketAppGenerationError.invalidRequest { }
+            }
+        } catch { failures.append("generation_preferences:\(error)") }
     }
 
     private static func makeRequest(

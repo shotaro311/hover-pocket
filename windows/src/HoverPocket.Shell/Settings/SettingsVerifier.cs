@@ -24,6 +24,7 @@ internal sealed class SettingsVerifier
         {
             await VerifyAsync();
             await VerifyVoiceSettingsUiAsync();
+            await VerifyToolSettingsAsync();
         }
         catch (Exception ex)
         {
@@ -104,6 +105,76 @@ internal sealed class SettingsVerifier
             VerifyConsole.WriteLine("PASS voice Settings UI: ready, signed-out, sign-in pending/cancel, narrow layout, isolated fixture");
         }
         finally { window.Close(); window.WebViewForVerify?.Dispose(); }
+    }
+
+    private async Task VerifyToolSettingsAsync()
+    {
+        var providers = ProviderRegistry.CreateDefault();
+        var store = UserSettingsStore.CreateTemporary("ToolSettingsVerify");
+        var settings = store.Load(providers.ProviderIds);
+        settings.AiNativeEnabled = true;
+        store.Save(settings);
+        using var controller = new PanelBridgeController(providers, store, settings, externalIntegrationsEnabled: false);
+        await controller.ReplaceChatForVerifyAsync(new CodexChatCoordinator(_ =>
+            Task.FromResult(new CodexChatVerifier.Harness().Client()), new CodexChatVerifier.TestTools(),
+            new CodexChatHistory(Path.Combine(store.RootDirectory, "ChatFixture"))));
+        var dispatcher = new BridgeDispatcher();
+        using var attachment = controller.Attach(dispatcher, BridgeSurface.Settings);
+        await Send(dispatcher, """{"id":"models","method":"settings.loadGenerationModels"}""");
+        await Send(dispatcher, """{"id":"choose","method":"settings.setGenerationOptions","params":{"model":"fixture-model","effort":"high"}}""");
+        var saved = store.Load(providers.ProviderIds);
+        if (saved.PocketToolModel != "fixture-model" || saved.PocketToolReasoningEffort != "high")
+            _failures.Add("generation model/effort selection did not persist");
+        foreach (var invalid in new[] { ("missing-model", "high"), ("fixture-model", "ultra") })
+        {
+            var result = await dispatcher.ProcessRawMessageAsync(JsonSerializer.Serialize(new {
+                id = "invalid-choice", method = "settings.setGenerationOptions",
+                @params = new { model = invalid.Item1, effort = invalid.Item2 } }));
+            if (result?.Contains("handler_error", StringComparison.Ordinal) != true
+                || controller.CurrentSettings.PocketToolModel != "fixture-model"
+                || controller.CurrentSettings.PocketToolReasoningEffort != "high")
+                _failures.Add("invalid generation selection changed previous settings");
+        }
+        var sentinel = Path.Combine(store.RootDirectory, "FocusHistoryFixture.txt");
+        File.WriteAllText(sentinel, "retained-focus-history");
+        var panelDispatcher = new BridgeDispatcher();
+        using var panelAttachment = controller.Attach(panelDispatcher, BridgeSurface.Panel);
+        var focus = await Send(panelDispatcher, """{"id":"focus-before","method":"provider.select","params":{"id":"today-focus"}}""");
+        if (!focus.Contains("\"pocketSurface\":{", StringComparison.Ordinal)) _failures.Add("Focus fixture was not active before removal");
+        await Send(dispatcher, """{"id":"remove-focus","method":"settings.removeTodayFocus"}""");
+        if (!store.Load(providers.ProviderIds).TodayFocusRemoved
+            || JsonSerializer.Serialize(controller.BuildState(BridgeSurface.Settings), BridgeJson.Options).Contains("\"appId\":\"local.example.today-focus\"", StringComparison.Ordinal))
+            _failures.Add("Focus removal did not persist or hide the tool");
+        var removedLoad = await panelDispatcher.ProcessRawMessageAsync("""{"id":"focus-after","method":"pocketApp.load","params":{"appId":"local.example.today-focus","surfaceId":"main"}}""");
+        if (removedLoad?.Contains("handler_error", StringComparison.Ordinal) != true)
+            _failures.Add("removed Focus remained invokable through the panel");
+        await Send(dispatcher, """{"id":"restore-focus","method":"settings.restoreTodayFocus"}""");
+        if (store.Load(providers.ProviderIds).TodayFocusRemoved || File.ReadAllText(sentinel) != "retained-focus-history")
+            _failures.Add("Focus restore lost retained data");
+        var window = new SettingsWindow(controller, false, Path.Combine(store.RootDirectory, "WebView"), false)
+        { Left = -20000, Top = -20000, Width = 520, WindowStartupLocation = System.Windows.WindowStartupLocation.Manual, ShowActivated = false };
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        try
+        {
+            window.Show();
+            while (window.WebViewForVerify?.CoreWebView2 is null
+                || await window.WebViewForVerify.ExecuteScriptAsync("document.querySelector('[data-generation-model]')?.value === 'fixture-model'") != "true")
+                await Task.Delay(100, timeout.Token);
+            var web = window.WebViewForVerify;
+            await web.ExecuteScriptAsync("document.querySelector('[data-category=ai]').click();let effort=document.querySelector('[data-generation-effort]');effort.value='medium';effort.dispatchEvent(new Event('change',{bubbles:true}))");
+            while (store.Load(providers.ProviderIds).PocketToolReasoningEffort != "medium") await Task.Delay(50, timeout.Token);
+            if (await web.ExecuteScriptAsync("document.documentElement.scrollWidth <= document.documentElement.clientWidth && !document.querySelector('[data-handle-icon]') && !document.querySelector('[data-top-handle-side-area]')") != "true")
+                _failures.Add("generation settings overflow or removed entry option remains");
+            var screenshot = Environment.GetEnvironmentVariable("HOVERPOCKET_TOOL_SETTINGS_SNAPSHOT");
+            if (!string.IsNullOrEmpty(screenshot))
+            {
+                await web.ExecuteScriptAsync("document.querySelector('[data-generation-model]').scrollIntoView({block:'center'})");
+                await using var output = File.Create(screenshot);
+                await web.CoreWebView2.CapturePreviewAsync(Microsoft.Web.WebView2.Core.CoreWebView2CapturePreviewImageFormat.Png, output);
+            }
+        }
+        finally { window.Close(); window.WebViewForVerify?.Dispose(); }
+        VerifyConsole.WriteLine("PASS tool settings: model/effort durable selection, invalid choice rejection, Focus remove/restore retains data, narrow UI");
     }
 
     private async Task VerifyAsync()
@@ -310,8 +381,6 @@ internal sealed class SettingsVerifier
         await Send(dispatcher, """{"id":"7d","method":"settings.setDisplayPlacement","params":{"displayPlacement":"all"}}""");
         await Send(dispatcher, """{"id":"7p","method":"settings.setProviderSelection","params":{"rememberLast":false}}""");
         await Send(dispatcher, """{"id":"7f","method":"settings.setPreferredProvider","params":{"id":"sticky"}}""");
-        await Send(dispatcher, """{"id":"7i","method":"settings.setHandleIcon","params":{"handleIcon":"c"}}""");
-        await Send(dispatcher, """{"id":"7a","method":"settings.setShowTopHandleSideArea","params":{"visible":false}}""");
         await Send(dispatcher, """{"id":"7x","method":"settings.setDisableTopEdgeInFullscreen","params":{"disabled":false}}""");
         await Send(dispatcher, """{"id":"7z","method":"sticky.setGridSize","params":{"gridSize":"large"}}""");
 
@@ -323,8 +392,6 @@ internal sealed class SettingsVerifier
             || written.DisplayPlacement != DisplayPlacement.All
             || written.RememberLastSelectedProvider
             || written.PreferredProviderId != "sticky"
-            || written.HandleIconStyle != HandleIconStyle.C
-            || written.ShowTopHandleSideArea
             || written.DisableTopEdgeInFullscreen
             || !written.StartWithWindows
             || written.AutoCheckForUpdates
@@ -1220,8 +1287,6 @@ internal sealed class SettingsVerifier
             || defaults.VoiceLaneLayout != VoiceLaneLayoutPreference.Compact
             || !defaults.RememberLastSelectedProvider
             || defaults.PreferredProviderId != "controls"
-            || defaults.HandleIconStyle != HandleIconStyle.B
-            || !defaults.ShowTopHandleSideArea
             || defaults.PanelAttachmentStyle != PanelAttachmentStyle.PreserveMenu
             || defaults.AutomaticScreenEdgeAttachment
             || defaults.ReduceMotion

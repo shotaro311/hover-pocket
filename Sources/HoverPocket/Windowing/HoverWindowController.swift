@@ -873,7 +873,7 @@ final class HoverWindowController {
     }
 
     private var showsVisibleNotchSideHandle: Bool {
-        settings.showNotchSideHandleArea && settings.pillHandleIconStyle != .none
+        false
     }
 
     private func configureAccessWindow(for screen: NSScreen) -> NSPanel {
@@ -1615,29 +1615,6 @@ final class HoverWindowController {
             }
             .store(in: &settingsCancellables)
 
-        settings.$showNotchSideHandleArea
-            .dropFirst()
-            .sink { [weak self] _ in
-                guard let self else { return }
-                DispatchQueue.main.async { [weak self] in
-                    self?.syncAccessWindows(orderFront: false)
-                    self?.resizePreviewForPanelSizeChange()
-                    self?.showPill()
-                }
-            }
-            .store(in: &settingsCancellables)
-
-        settings.$pillHandleIconStyle
-            .dropFirst()
-            .sink { [weak self] _ in
-                guard let self else { return }
-                DispatchQueue.main.async { [weak self] in
-                    self?.syncAccessWindows(orderFront: false)
-                    self?.resizePreviewForPanelSizeChange()
-                    self?.showPill()
-                }
-            }
-            .store(in: &settingsCancellables)
     }
 
     private func observeTimerAlerts() {

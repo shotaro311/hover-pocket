@@ -53,6 +53,8 @@ internal sealed record PocketAppGenerationRequest(
     string Namespace,
     IReadOnlyList<PocketAppGenerationCapability> Capabilities)
 {
+    public string ModelId { get; init; } = CodexPocketAppGenerationModelCatalog.ModelId;
+    public string ReasoningEffort { get; init; } = "medium";
     public const int MaximumUserRequestScalars = 8_000;
 
     public string RequestDigest()
@@ -69,6 +71,8 @@ internal sealed record PocketAppGenerationRequest(
         Field(Version);
         Field(Namespace);
         Field(UserRequest);
+        if (ModelId != CodexPocketAppGenerationModelCatalog.ModelId) Field("model:" + ModelId);
+        if (ReasoningEffort != "medium") Field("effort:" + ReasoningEffort);
         foreach (var capability in Capabilities
             .OrderBy(item => item.Id, StringComparer.Ordinal)
             .ThenBy(item => item.Version))
@@ -98,6 +102,8 @@ internal sealed record PocketAppGenerationRequest(
             || string.IsNullOrWhiteSpace(UserRequest)
             || UserRequest.EnumerateRunes().Count() > MaximumUserRequestScalars
             || UserRequest.Contains('\0')
+            || !Regex.IsMatch(ModelId, "^[A-Za-z0-9][A-Za-z0-9._-]{0,159}$", RegexOptions.CultureInvariant)
+            || ReasoningEffort is not ("none" or "minimal" or "low" or "medium" or "high" or "xhigh" or "max" or "ultra")
             || Capabilities.Count is < 1 or > 32)
         {
             throw Failure("GENERATION_REQUEST_INVALID");

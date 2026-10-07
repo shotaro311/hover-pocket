@@ -42,6 +42,9 @@ const voiceCalendarAccessEl = document.querySelector("[data-voice-calendar-acces
 const voiceCalendarLabelEl = document.querySelector("[data-voice-calendar-label]");
 const voiceCalendarNoteEl = document.querySelector("[data-voice-calendar-note]");
 const pocketGenerationEl = document.querySelector("[data-pocket-generation]");
+const generationModelEl = document.querySelector("[data-generation-model]");
+const generationEffortEl = document.querySelector("[data-generation-effort]");
+const generationModelRefreshEl = document.querySelector("[data-generation-model-refresh]");
 const pocketGenerationNoteEl = document.querySelector("[data-pocket-generation-note]");
 const pocketGenerationRequestEl = document.querySelector("[data-pocket-generation-request]");
 const pocketGenerationUpdateSelectionEl = document.querySelector("[data-pocket-generation-update-selection]");
@@ -62,8 +65,6 @@ const capabilityRetentionEl = document.querySelector("[data-capability-retention
 const capabilityHistorySummaryEl = document.querySelector("[data-capability-history-summary]");
 const capabilityHistoryClearEl = document.querySelector("[data-capability-history-clear]");
 const capabilityHistoryNoteEl = document.querySelector("[data-capability-history-note]");
-const handleIconEl = document.querySelector("[data-handle-icon]");
-const handleSideAreaEl = document.querySelector("[data-handle-side-area]");
 const disableFullscreenEl = document.querySelector("[data-disable-fullscreen]");
 const clipboardPrivateEl = document.querySelector("[data-clipboard-private]");
 const stickyUndoToastEl = document.querySelector("[data-sticky-undo-toast]");
@@ -189,11 +190,6 @@ function render(state) {
   generationState = state.pocketAppGeneration ?? generationState;
   renderPocketGeneration(generationState, state.settings.language);
   renderCapabilityHistory(state);
-  renderSegment(handleIconEl, [
-    { id: "b", label: "B" },
-    { id: "c", label: "C" },
-    { id: "none", label: t("none") },
-  ], state.settings.handleIcon, (handleIcon) => update("settings.setHandleIcon", { handleIcon }));
   const attachmentEnglish = state.settings.language === "en";
   document.querySelector("[data-auto-hide-handle-label]").textContent = attachmentEnglish ? "Automatically hide the top entry" : "上部の入口を自動で隠す";
   document.querySelector("[data-auto-hide-handle-note]").textContent = attachmentEnglish ? "Move near the top to reveal the entry, then hover over it to open the panel." : "上部にマウスを近づけると入口が現れ、入口にホバーするとパネルが開きます。";
@@ -207,7 +203,6 @@ function render(state) {
   ], state.settings.panelAttachmentStyle, (style) => update("settings.setPanelAttachment", { style }));
   automaticAttachmentEl.checked = Boolean(state.settings.automaticScreenEdgeAttachment);
   reduceMotionEl.checked = Boolean(state.settings.reduceMotion);
-  handleSideAreaEl.checked = state.settings.showTopHandleSideArea !== false;
   disableFullscreenEl.checked = state.settings.disableTopEdgeInFullscreen !== false;
   clipboardPrivateEl.checked = Boolean(state.settings.clipboardPrivateMode);
   renderStickySettings();
@@ -320,6 +315,13 @@ function renderCapabilityHistory(state) {
 
 function renderPocketApps(state) {
   pocketAppListEl.replaceChildren();
+  if (state.settings.todayFocusRemoved) {
+    const restore = document.createElement("button");
+    restore.type = "button";
+    restore.textContent = state.settings.language === "en" ? "Restore Focus tool" : "Focusツールを復元";
+    restore.addEventListener("click", () => update("settings.restoreTodayFocus"));
+    pocketAppListEl.append(restore);
+  }
   const apps = state.pocketApps ?? [];
   if (!apps.length) {
     const empty = document.createElement("p");
@@ -352,9 +354,51 @@ function renderPocketApps(state) {
       ? "Definition, user data, and receipts are stored separately."
       : "定義、ユーザーデータ、実行履歴は分離して保持します。";
     card.append(heading, intent, capabilities, boundary);
+    if (app.appId === "local.example.today-focus") {
+      const remove = document.createElement("button");
+      remove.type = "button";
+      remove.textContent = state.settings.language === "en" ? "Remove, preserve data" : "削除（データ保持）";
+      remove.addEventListener("click", () => update("settings.removeTodayFocus"));
+      card.append(remove);
+    }
     pocketAppListEl.append(card);
   }
 }
+
+let generationModelsRequested = false;
+function renderGenerationModels(settings, generation, language) {
+  const models = settings.pocketToolModels ?? [];
+  const model = settings.pocketToolModel;
+  const effort = settings.pocketToolReasoningEffort ?? "medium";
+  generationModelEl.replaceChildren(...models.map(choice => new Option(choice.displayName, choice.model)));
+  if (!models.some(choice => choice.model === model)) {
+    generationModelEl.add(new Option(model + (language === "en" ? " (check availability)" : "（利用状況を確認中）"), model));
+  }
+  generationModelEl.value = model;
+  const choice = models.find(choice => choice.model === model);
+  generationEffortEl.replaceChildren(...(choice?.efforts ?? [effort]).map(value => new Option(value, value)));
+  if (choice && !choice.efforts.includes(effort)) generationEffortEl.add(new Option(effort + "（利用不可）", effort));
+  generationEffortEl.value = effort;
+  const busy = generation.phase === "generating" || generation.phase === "installing";
+  generationModelEl.disabled = busy || models.length === 0;
+  generationEffortEl.disabled = busy || !choice;
+  generationModelRefreshEl.disabled = busy;
+  generationModelRefreshEl.textContent = language === "en" ? "Refresh models" : "モデル一覧を更新";
+  document.querySelector("[data-generation-model-note]").textContent = language === "en" ? "Changes apply to the next generation." : "モデルと推論の変更は次の生成から反映します。";
+  if (!generationModelsRequested && models.length === 0) {
+    generationModelsRequested = true;
+    queueMicrotask(() => update("settings.loadGenerationModels"));
+  }
+}
+
+generationModelRefreshEl.addEventListener("click", () => update("settings.loadGenerationModels"));
+generationModelEl.addEventListener("change", () => {
+  const choice = currentState.settings.pocketToolModels.find(item => item.model === generationModelEl.value);
+  if (!choice) return;
+  const effort = choice.efforts.includes(generationEffortEl.value) ? generationEffortEl.value : choice.defaultReasoningEffort;
+  update("settings.setGenerationOptions", { model: choice.model, effort });
+});
+generationEffortEl.addEventListener("change", () => update("settings.setGenerationOptions", { model: generationModelEl.value, effort: generationEffortEl.value }));
 
 function renderPocketGeneration(generation, language) {
   const enabled = Boolean(currentState?.settings?.aiNativeEnabled && generation);
@@ -366,6 +410,7 @@ function renderPocketGeneration(generation, language) {
   }
 
   generationState = generation;
+  renderGenerationModels(currentState.settings, generation, language);
   pocketGenerationNoteEl.textContent = language === "en"
     ? "Codex returns definition files only. HoverPocket revalidates exact bytes, previews, permissions, grants, and tests before explicit approval."
     : "Codexは定義ファイルだけを返します。HoverPocketがbytes・preview・権限・grant・testsを再検証し、明示承認後にだけ導入します。";
@@ -783,9 +828,6 @@ codexSandboxSetupEl.addEventListener("click", () => {
   update("settings.setupCodexGenerationSandbox");
 });
 
-handleSideAreaEl.addEventListener("change", () => {
-  update("settings.setShowTopHandleSideArea", { visible: handleSideAreaEl.checked });
-});
 
 disableFullscreenEl.addEventListener("change", () => {
   update("settings.setDisableTopEdgeInFullscreen", { disabled: disableFullscreenEl.checked });

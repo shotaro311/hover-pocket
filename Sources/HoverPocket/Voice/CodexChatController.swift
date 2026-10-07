@@ -56,7 +56,7 @@ final class CodexChatController: ObservableObject {
         var draft: String
         var title: String { messages.first(where: { $0.role == "user" })?.text.prefix(60).description ?? createdAt.formatted(date: .abbreviated, time: .shortened) }
     }
-    struct ChatModelChoice: Identifiable {
+    struct ChatModelChoice: Identifiable, Sendable {
         let model: String
         let displayName: String
         let defaultEffort: String

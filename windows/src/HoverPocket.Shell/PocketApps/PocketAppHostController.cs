@@ -257,7 +257,7 @@ internal sealed class PocketAppHostController : IDisposable
 
     private void EnsureAiNativeEnabled()
     {
-        if (!_settings().AiNativeEnabled)
+        if (!_settings().AiNativeEnabled || (AppId == "local.example.today-focus" && _settings().TodayFocusRemoved))
         {
             throw new CapabilityBrokerException("CAPABILITY_UNAVAILABLE", "ai_native_disabled");
         }

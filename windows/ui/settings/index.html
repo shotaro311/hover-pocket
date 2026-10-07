@@ -137,6 +137,12 @@
       </div>
       </details><div class="pocket-app-list" data-pocket-app-list></div>
       <div class="pocket-generation" data-pocket-generation hidden>
+        <div class="settings-button-row">
+          <label>生成モデル <select data-generation-model aria-label="生成モデル"></select></label>
+          <label>推論 <select data-generation-effort aria-label="推論の強さ"></select></label>
+          <button type="button" data-generation-model-refresh>モデル一覧を更新</button>
+        </div>
+        <p class="settings-note" data-generation-model-note>変更は次の生成から反映します。</p>
         <details class="settings-details"><summary data-details-label>詳しく見る</summary><p class="settings-note" data-pocket-generation-note></p></details>
         <div class="pocket-workspace-backup">
           <div class="settings-button-row">
@@ -171,11 +177,6 @@
 
     <section class="settings-section" data-settings-category="appearance">
       <h2 data-i18n="topHandle">上端ハンドル</h2>
-      <div class="segmented" data-handle-icon></div>
-      <label class="toggle-row settings-spaced-row">
-        <span data-i18n="showTopHandleSideArea">横幅を広くする</span>
-        <input type="checkbox" data-handle-side-area>
-      </label>
       <label class="toggle-row settings-spaced-row">
         <span data-i18n="disableInFullscreen">全画面アプリ中は開かない</span>
         <input type="checkbox" data-disable-fullscreen>

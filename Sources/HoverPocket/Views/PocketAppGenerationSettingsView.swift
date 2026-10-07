@@ -58,8 +58,15 @@ struct PocketAppGenerationSettingsView: View {
             .foregroundStyle(.secondary)
             .fixedSize(horizontal: false, vertical: true)
 
-            HStack {
-                Text("GPT-6 Astra")
+            VStack(alignment: .leading, spacing: 8) {
+                Picker(localized(japanese: "生成モデル", english: "Generation model"), selection: Binding(get: { settings.pocketToolModel }, set: { controller.chooseGeneratorModel($0) })) {
+                    if !controller.generatorModels.contains(where: { $0.model == settings.pocketToolModel }) {
+                        Text(settings.pocketToolModel + "（利用状況を確認中）").tag(settings.pocketToolModel)
+                    }
+                    ForEach(controller.generatorModels) { choice in Text(choice.displayName).tag(choice.model) }
+                }
+                .disabled(controller.phase == .generating || controller.phase == .installing || controller.generatorModels.isEmpty)
+                HStack {
                 Picker("推論の強さ", selection: $settings.pocketToolReasoningEffort) {
                     if !controller.supportedReasoningEfforts.contains(settings.pocketToolReasoningEffort) {
                         Text(settings.pocketToolReasoningEffort.capitalized + "（利用状況を確認中）").tag(settings.pocketToolReasoningEffort)
@@ -68,10 +75,13 @@ struct PocketAppGenerationSettingsView: View {
                         Text(effort.capitalized).tag(effort)
                     }
                 }
+                .disabled(controller.phase == .generating || controller.phase == .installing || controller.supportedReasoningEfforts.isEmpty)
                 Button { Task { await controller.refreshGeneratorModels() } } label: { Image(systemName: "arrow.clockwise") }
-                    .accessibilityLabel("利用可能な推論設定を確認")
+                    .accessibilityLabel("利用可能なモデルと推論設定を確認")
+                    .disabled(controller.phase == .generating || controller.phase == .installing)
+                }
             }
-            Text("既定はMediumです。変更は次の生成から反映します。")
+            Text("モデルと推論の変更は次の生成から反映します。")
                 .font(.caption).foregroundStyle(.secondary)
             if let status = controller.generatorStatus { Text(status).font(.caption).foregroundStyle(.orange) }
 

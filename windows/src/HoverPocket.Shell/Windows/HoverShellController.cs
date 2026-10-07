@@ -678,9 +678,7 @@ internal sealed partial class HoverShellController : IDisposable
 
         var previousActiveLayout = _activeLayout;
         var userSettings = _panelBridgeController.CurrentSettings;
-        var accessWidth = userSettings.ShowTopHandleSideArea
-            ? AccessSurfaceWindow.ExpandedWidth
-            : AccessSurfaceWindow.CompactWidth;
+        var accessWidth = AccessSurfaceWindow.CompactWidth;
         _layouts = _displayLayoutService.CreateLayouts(
             userSettings.DisplayPlacement,
             userSettings.PanelSize,
@@ -692,7 +690,6 @@ internal sealed partial class HoverShellController : IDisposable
         {
             var accessSurface = _accessSurfaces[index];
             var layout = _layouts[index];
-            accessSurface.UpdateAppearance(userSettings);
             _surfaceLayouts[accessSurface] = layout;
             accessSurface.ApplyPlacement(layout.AccessSurface, show: false);
             accessSurface.SetPeekVisible(ShouldRevealAccessSurface(layout, GetPointerPosition()), immediate: true);
@@ -747,7 +744,6 @@ internal sealed partial class HoverShellController : IDisposable
     {
         var accessSurface = new AccessSurfaceWindow();
         accessSurface.CanImportAssets = () => _panelBridgeController.AssetsVisible;
-        accessSurface.UpdateAppearance(_panelBridgeController.CurrentSettings);
         accessSurface.HoverEntered += OnAccessSurfaceHoverEntered;
         accessSurface.AssetDragChanged += active =>
         {
@@ -899,7 +895,6 @@ internal sealed partial class HoverShellController : IDisposable
                     requireNoActivate: true))
             {
                 RepairStyles(accessSurface.Hwnd, requireNoActivate: true);
-                accessSurface.UpdateAppearance(_panelBridgeController.CurrentSettings);
                 accessSurface.ApplyPlacement(layout.AccessSurface, show: accessSurface.PeekTargetVisible);
                 accessSurface.SetPeekVisible(accessSurface.PeekTargetVisible, immediate: true);
                 accessRepaired++;

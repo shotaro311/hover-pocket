@@ -18,7 +18,13 @@ final class PocketAppGenerationController: ObservableObject {
     @Published private(set) var lastWorkspaceBackupDigest: String?
     @Published private(set) var lastWorkspaceRestoreReceipt: PocketAppWorkspaceRestoreReceipt?
     @Published private(set) var workspaceBackupErrorCode: String?
-    @Published private(set) var supportedReasoningEfforts: [String] = []
+    @Published private(set) var generatorModels: [CodexChatController.ChatModelChoice] = []
+    var supportedReasoningEfforts: [String] { generatorModels.first { $0.model == generationSettings?.pocketToolModel }?.efforts ?? [] }
+    func chooseGeneratorModel(_ model: String) {
+        guard let settings = generationSettings, let choice = generatorModels.first(where: { $0.model == model }) else { return }
+        settings.pocketToolModel = model
+        if !choice.efforts.contains(settings.pocketToolReasoningEffort) { settings.pocketToolReasoningEffort = choice.defaultEffort }
+    }
     @Published private(set) var generatorStatus: String?
     @Published private(set) var history: [PocketToolCheckpoint] = []
     @Published private(set) var historyIssue: String?
@@ -106,7 +112,7 @@ final class PocketAppGenerationController: ObservableObject {
         guard let errorCode else { return nil }
         switch errorCode {
         case "GENERATION_REQUEST_INVALID": return "作りたいツールや修正したい内容を、もう少し短く具体的に入力してください。"
-        case "GENERATOR_UNAVAILABLE": return "選択中のAstra設定を利用できません。ログインと推論設定を確認してください。"
+        case "GENERATOR_UNAVAILABLE": return "選択中のモデルと推論設定を利用できません。ログインと推論設定を確認してください。"
         case "GENERATOR_TIMEOUT": return "生成に時間がかかりすぎたため停止しました。直前のツールは保持しています。"
         case "GENERATOR_CANCELLED": return "生成をキャンセルしました。直前のツールは保持しています。"
         case "GENERATOR_PROCESS_FAILED": return "生成の接続が終了しました。ログインと接続を確認してから、もう一度お試しください。"
@@ -124,11 +130,11 @@ final class PocketAppGenerationController: ObservableObject {
     func refreshGeneratorModels() async {
         guard let generator = generator as? CodexAppServerPocketGenerator else { return }
         do {
-            supportedReasoningEfforts = try await generator.supportedEfforts()
+            generatorModels = try await generator.availableModels()
             generatorStatus = nil
         } catch {
-            supportedReasoningEfforts = []
-            generatorStatus = "Astraの利用情報を取得できません。Codexへのログインと接続を確認してください。"
+            generatorModels = []
+            generatorStatus = "モデルの利用情報を取得できません。Codexへのログインと接続を確認してください。"
         }
     }
 
@@ -736,6 +742,7 @@ final class PocketAppGenerationController: ObservableObject {
                 }
         }
         request.libraryCatalog = libraryCatalog
+        request.model = generationSettings?.pocketToolModel ?? CodexAppServerPocketGenerator.model
         request.reasoningEffort = generationSettings?.pocketToolReasoningEffort ?? "medium"
         try request.validate()
         return request
