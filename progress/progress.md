@@ -2,14 +2,15 @@
 project_slug: hover-menu-preview
 updated: 2026-10-07
 updated_by: codex
-status: windows-0.2.11-published-installed-38832; release-readback-99-and-transition-verified; mac-source-ci-passed-but-ssh-offline; mac-release-install-pending
+status: windows-0.2.11-installed-38832; macos-0.2.11-677-installed-91090; signed-notarized; both-feeds-readback-99-and-release-transitions-verified
 ---
 
 ## 2026-10-07 本番反映
 
 - 両OSソースをPR #48でmainへ統合。Windows 0.2.11を公開して本番アプリへ更新し、起動・公開DLL一致・設定・自動起動・素材20件の保持を確認。公開版99項目と更新／復元CIが成功した。
 - Clipboardは通常取り込みによって30件上限の1件が入れ替わった。画像と残る履歴は一致し、更新前の履歴はバックアップへ保持している。
-- MacのソースCIは成功したが、SSHのホスト名解決／既知IP接続が復旧せず、署名・公証・公開・本番インストールは未実施。接続回復が必要。[検証・readback・残作業](2026-10/2026-10-07_hover-pocket-production-ux.md)。
+- Codex内のPC Operator接続でMacへ直接実行し、0.2.11 / build 677を署名・公証して公開。本番の/Applicationsへ適用し、PID91090の起動、公開版との一致、設定・素材20件・チャット履歴の保持を確認した。MacのClipboardはテキストと画像で各1件が上限整理により入れ替わり、更新前の全履歴をバックアップへ保持している。
+- 両OSの公開フィード・配布物99項目と、Macの644から677への更新・復元・再インストールCIが成功。Windows PID38832も本番版で応答中。Macの実範囲録画は引き続きOS許可待ち。[検証・readback・残作業](2026-10/2026-10-07_hover-pocket-production-ux.md)。
 
 ## 2026-10-06 チャットの二重表示を防ぐ処理
 
