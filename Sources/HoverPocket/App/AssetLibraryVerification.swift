@@ -264,19 +264,18 @@ enum AssetLibraryVerification {
                 }
                 AssetLibraryRuntime.shared.verificationStore = store
                 let runtime = AssetLibraryRuntime.shared
-                var enabled = false
                 let clipboardImage = try AssetMedia.png(try fixtureImage()) + Data([1, 2, 3])
                 let before = try await store.query(LibraryQuery()).total
-                runtime.importClipboardImage(clipboardImage, enabled: { enabled })
+                runtime.importClipboardImage(clipboardImage, enabled: { false })
                 try await Task.sleep(for: .milliseconds(200))
                 try check(try await store.query(LibraryQuery()).total == before, "clipboard default off")
-                enabled = true; runtime.importClipboardImage(clipboardImage, enabled: { enabled })
+                runtime.importClipboardImage(clipboardImage, enabled: { true })
                 let deadline = Date().addingTimeInterval(5)
                 while try await store.query(LibraryQuery()).total == before, Date() < deadline { try await Task.sleep(for: .milliseconds(30)) }
                 try check(try await store.query(LibraryQuery()).total == before + 1, "clipboard enabled imports independent image")
-                runtime.importClipboardImage(clipboardImage, enabled: { enabled }); try await Task.sleep(for: .milliseconds(300))
+                runtime.importClipboardImage(clipboardImage, enabled: { true }); try await Task.sleep(for: .milliseconds(300))
                 try check(try await store.query(LibraryQuery()).total == before + 1, "clipboard duplicate ignored")
-                enabled = false; runtime.importClipboardImage(clipboardImage + Data([4]), enabled: { enabled }); try await Task.sleep(for: .milliseconds(200))
+                runtime.importClipboardImage(clipboardImage + Data([4]), enabled: { false }); try await Task.sleep(for: .milliseconds(200))
                 try check(try await store.query(LibraryQuery()).total == before + 1, "clipboard disabled preserves saved image")
             }
             let editor = AssetEditorSession(image: image)

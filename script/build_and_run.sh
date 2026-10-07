@@ -252,7 +252,14 @@ cp ".build/$HOVERPOCKET_SWIFT_CONFIGURATION/$PRODUCT_NAME" "$EXECUTABLE_PATH"
 chmod +x "$EXECUTABLE_PATH"
 cp "$ROOT_DIR/.build/pairing/release/hoverpocket-pairing" "$BUNDLE_DIR/Contents/MacOS/hoverpocket-pairing"
 python3 "$ROOT_DIR/script/prepare_media_tools.py" --platform macos --output "$ROOT_DIR/artifacts/media-tools-macos"
-ditto "$ROOT_DIR/artifacts/media-tools-macos" "$BUNDLE_DIR/Contents/MacOS/MediaTools"
+mkdir -p "$BUNDLE_DIR/Contents/Resources/MediaTools"
+for media_file in "$ROOT_DIR/artifacts/media-tools-macos/"*; do
+  if [[ "$(basename "$media_file")" == "ffmpeg" ]]; then
+    cp "$media_file" "$BUNDLE_DIR/Contents/MacOS/ffmpeg"
+  else
+    cp "$media_file" "$BUNDLE_DIR/Contents/Resources/MediaTools/"
+  fi
+done
 mkdir -p "$BUNDLE_DIR/Contents/Resources/ThirdParty/pairing-helper"
 cp "$ROOT_DIR/shared/pairing-helper/"{LICENSE.txt,NOTICE.md,THIRD-PARTY-LICENSES.html} "$BUNDLE_DIR/Contents/Resources/ThirdParty/pairing-helper/"
 ditto "$ROOT_DIR/.build/$HOVERPOCKET_SWIFT_CONFIGURATION/HoverPocket_HoverPocket.bundle" "$BUNDLE_DIR/Contents/Resources/HoverPocket_HoverPocket.bundle"
@@ -364,7 +371,7 @@ if [[ -n "$CODESIGN_IDENTITY" ]]; then
     codesign_args+=(--entitlements "$ENTITLEMENTS_PATH")
   fi
   codesign "${codesign_args[@]}" "$BUNDLE_DIR/Contents/MacOS/hoverpocket-pairing" >/dev/null
-  codesign "${codesign_args[@]}" "$BUNDLE_DIR/Contents/MacOS/MediaTools/ffmpeg" >/dev/null
+  codesign "${codesign_args[@]}" "$BUNDLE_DIR/Contents/MacOS/ffmpeg" >/dev/null
   codesign "${codesign_args[@]}" "$BUNDLE_DIR" >/dev/null
   echo "Signed $APP_NAME.app with $CODESIGN_IDENTITY"
 else

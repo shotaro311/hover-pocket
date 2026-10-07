@@ -5,7 +5,7 @@ actor AssetCompatibleMedia {
     private var previous: Task<URL, Error>?
     private var generation = 0
     static var executable: URL? {
-        let paths = [Bundle.main.bundleURL.appendingPathComponent("Contents/MacOS/MediaTools/ffmpeg").path, "/opt/homebrew/bin/ffmpeg", "/usr/local/bin/ffmpeg"]
+        let paths = [Bundle.main.bundleURL.appendingPathComponent("Contents/MacOS/ffmpeg").path, "/opt/homebrew/bin/ffmpeg", "/usr/local/bin/ffmpeg"]
         return paths.first { FileManager.default.isExecutableFile(atPath: $0) }.map { URL(fileURLWithPath: $0) }
     }
     func convert(_ source: URL, hash: String, mode: String, root: URL) async throws -> URL {
