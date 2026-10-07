@@ -473,6 +473,11 @@ internal sealed partial class PanelBridgeController : IDisposable
         }
         if (surface == BridgeSurface.Settings)
         {
+            Register("settings.setCodexAllowAllAppActions", async (p, token) =>
+            {
+                var updated = CurrentSettings.Clone(); updated.CodexAllowAllAppActions = ReadRequiredBool(p, "enabled");
+                SaveSettings(updated); return await PublishStateAsync(token);
+            });
             Register("settings.setLibraryAutoImportClipboardImages", async (p, token) =>
             {
                 var updated = CurrentSettings.Clone();
@@ -674,6 +679,8 @@ internal sealed partial class PanelBridgeController : IDisposable
                 voiceCalendarAccessGranted = CurrentSettings.VoiceCalendarAccessGranted,
                 voiceLaneLayout = ToWireValue(CurrentSettings.VoiceLaneLayout),
                 clipboardPrivateMode = CurrentSettings.ClipboardPrivateMode,
+                codexAllowAllAppActions = CurrentSettings.CodexAllowAllAppActions,
+                chatSplitRatio = CurrentSettings.ChatSplitRatio,
                 libraryAutoImportClipboardImages = CurrentSettings.LibraryAutoImportClipboardImages,
                 rememberLastSelectedProvider = CurrentSettings.RememberLastSelectedProvider,
                 preferredProviderId = CurrentSettings.PreferredProviderId,
@@ -2130,6 +2137,9 @@ internal sealed partial class PanelBridgeController : IDisposable
 
     private async Task<bool> RequestVoiceNativeApprovalAsync(VoiceNativeApproval request, CancellationToken cancellationToken)
     {
+
+        cancellationToken.ThrowIfCancellationRequested();
+        if (CurrentSettings.CodexAllowAllAppActions) return true;
         return await _voiceTimerApprovalCoordinator.RequestAsync(new VoiceTimerApprovalRequest(request.Title, 0),
             async (_, token) =>
             {
@@ -2144,6 +2154,9 @@ internal sealed partial class PanelBridgeController : IDisposable
         VoiceTimerApprovalRequest request,
         CancellationToken cancellationToken)
     {
+
+        cancellationToken.ThrowIfCancellationRequested();
+        if (CurrentSettings.CodexAllowAllAppActions) return true;
         return await _voiceTimerApprovalCoordinator.RequestAsync(
             request,
             PresentVoiceTimerApprovalAsync,
@@ -2154,6 +2167,9 @@ internal sealed partial class PanelBridgeController : IDisposable
         VoiceCalendarCreateApprovalRequest request,
         CancellationToken cancellationToken)
     {
+
+        cancellationToken.ThrowIfCancellationRequested();
+        if (CurrentSettings.CodexAllowAllAppActions) return true;
         return await _voiceCalendarCreateApprovalCoordinator.RequestAsync(
             request,
             PresentVoiceCalendarCreateApprovalAsync,

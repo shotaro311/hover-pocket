@@ -26,6 +26,12 @@ internal sealed partial class PanelBridgeController
     }
     private void RegisterChat(Action<string, Func<JsonElement?, CancellationToken, Task<object?>>> register)
     {
+        register("chat.setSplitRatio", (p, _) => {
+            var ratio = p!.Value.GetProperty("ratio").GetDouble();
+            if (!double.IsFinite(ratio) || ratio < .1 || ratio > .9) throw new ArgumentException("split_ratio_invalid");
+            var updated = CurrentSettings.Clone(); updated.ChatSplitRatio = ratio; SaveSettings(updated);
+            return Task.FromResult<object?>(new { ok = true });
+        });
         register("chat.models", async (_, token) => { await InlineChat.LoadModelsAsync(token); return InlineChat.State(); });
         register("chat.configure", (p, _) => { var model = ReadRequiredString(p, "model"); var effort = ReadRequiredString(p, "effort"); InlineChat.Configure(model, effort); var updated = CurrentSettings.Clone(); updated.ChatModel = model; updated.ChatEffort = effort; SaveSettings(updated); return Task.FromResult<object?>(InlineChat.State()); });
         register("chat.getState", (_, _) => Task.FromResult<object?>(InlineChat.State()));

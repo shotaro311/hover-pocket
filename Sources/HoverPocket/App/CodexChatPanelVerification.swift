@@ -15,6 +15,10 @@ enum CodexChatPanelVerification {
         }
         let defaults = EphemeralAppSettingsDefaults()
         let settings = AppSettings(defaults: defaults)
+        try check(!settings.codexAllowAllAppActions, "automatic app actions default off")
+        settings.codexAllowAllAppActions = true; settings.chatSplitRatio = 0.42
+        let saved = AppSettings(defaults: defaults)
+        try check(saved.codexAllowAllAppActions && saved.chatSplitRatio == 0.42, "app permission and chat boundary persist after restart")
         settings.panelResizing = true; settings.customPanelSize = CGSize(width: 720, height: 580)
         try check(defaults.object(forKey: "customPanelWidth") == nil, "resize drag avoids writing every movement")
         settings.panelResizing = false; settings.persistPanelSize()

@@ -3,6 +3,7 @@ import SwiftUI
 struct VoiceLaneHostView: View {
     @ObservedObject var runtime: VoiceLaneRuntime
     @ObservedObject var settings: AppSettings
+    var height: CGFloat? = nil
     var onOpenSettings: () -> Void = {}
     @ObservedObject private var chat = CodexChatController.shared
     @State private var showsVoiceHistory = false
@@ -24,7 +25,7 @@ struct VoiceLaneHostView: View {
             }
             composer
         }
-        .frame(height: chat.panelHeight)
+        .frame(height: height ?? chat.panelHeight)
         .background(Color.white.opacity(0.025))
         .overlay(alignment: .top) { Divider().overlay(Color.white.opacity(0.08)) }
         .onAppear { chat.configure(settings: settings) }

@@ -28,7 +28,7 @@ const voiceContentEl = document.createElement("div"); voiceContentEl.className =
 voiceLaneEl.append(voiceContentEl);
 const inlineChat = createInlineChat({ container: voiceLaneEl, request, on, toggleVoice: () => { void ((currentState?.voiceLane?.realtimeAttached || voiceTransport || voiceTransportStarting) ? endVoiceRealtime() : startVoiceRealtime()); }, toggleMute: () => { const muted = !currentState?.voiceLane?.muted; setVoiceTransportMuted(muted); void request("voice.setMuted", { muted }).then(render); } });
 const providerIconsEl = document.querySelector("[data-provider-icons]");
-const sizeSwitchEl = document.querySelector("[data-size-switch]");
+
 const refreshButtonEl = document.querySelector("[data-refresh]");
 const settingsButtonEl = document.querySelector("[data-settings]");
 const chatButtonEl = document.querySelector("[data-chat]");
@@ -123,7 +123,7 @@ async function renderNow(state, options = {}) {
   }
 
   renderTitle(state);
-  renderSizeSwitch(state);
+  updateChatSplit();
   renderProviderIcons(state);
   renderProvider(state, options, providerWillRemount);
   renderVoiceLane(state);
@@ -142,28 +142,7 @@ function renderTitle(state) {
 /**
  * @param {any} state
  */
-function renderSizeSwitch(state) {
-  const buttons = new Map([...sizeSwitchEl.children].map(button => [button.dataset.sizeId, button]));
-  state.panel.sizes.forEach((size, index) => {
-    let button = buttons.get(size.id);
-    if (!button) {
-      button = document.createElement("button");
-      button.className = "hp-size-button";
-      button.type = "button";
-      button.dataset.sizeId = size.id;
-      button.addEventListener("click", () => {
-        request("settings.setPanelSize", { panelSize: size.id }).then(render);
-      });
-    }
-    buttons.delete(size.id);
-    if (sizeSwitchEl.children[index] !== button) sizeSwitchEl.insertBefore(button, sizeSwitchEl.children[index] ?? null);
-    const label = labelForSize(size.id);
-    if (button.textContent !== label) button.textContent = label;
-    button.setAttribute("aria-label", `${t("panelSize")} ${label}`);
-    button.setAttribute("aria-pressed", String(size.id === state.settings.panelSize));
-  });
-  for (const button of buttons.values()) button.remove();
-}
+
 
 /**
  * @param {any} state
@@ -1906,3 +1885,64 @@ function waitForElement(selector, timeoutMs) {
     observer.observe(document.body, { childList: true, subtree: true, attributes: true });
   });
 }
+
+const chatSplitter = document.createElement("div");
+chatSplitter.className = "hp-chat-splitter";
+chatSplitter.role = "separator"; chatSplitter.tabIndex = 0;
+chatSplitter.setAttribute("aria-orientation", "horizontal");
+voiceLaneEl.prepend(chatSplitter);
+let splitDrag = null;
+function updateChatSplit(ratio = currentState?.settings?.chatSplitRatio) {
+  if (!currentState) return;
+  const total = document.documentElement.clientHeight - currentState.panel.headerHeight;
+  const min = 126, max = Math.max(min, total - 160 - (currentState.panel.voiceLaneHeight ?? 0));
+  const height = Number.isFinite(ratio) ? Math.min(max, Math.max(min, total * ratio)) : currentState.panel.chatHeight;
+  document.documentElement.style.setProperty("--hp-chat-height", `${Math.min(max, height)}px`);
+  chatSplitter.setAttribute("aria-valuenow", String(Math.round(height)));
+  chatSplitter.setAttribute("aria-valuemin", String(min));
+  chatSplitter.setAttribute("aria-valuemax", String(Math.round(max)));
+  chatSplitter.setAttribute("aria-label", currentState.settings.language === "en" ? "Resize tools and chat" : "素材とチャットの高さを調整");
+  chatSplitter.title = currentState.settings.language === "en" ? "Drag to resize tools and chat" : "ドラッグして素材とチャットの高さを調整";
+}
+async function saveChatSplit(ratio) {
+  const previous = currentState.settings.chatSplitRatio;
+  currentState.settings.chatSplitRatio = ratio;
+  try { await request("chat.setSplitRatio", {ratio}); }
+  catch {
+    if (currentState.settings.chatSplitRatio !== ratio) return;
+    currentState.settings.chatSplitRatio = previous; updateChatSplit();
+    const status = document.querySelector(".hp-chat-status");
+    if (status) status.textContent = currentState.settings.language === "en" ? "Could not save the panel boundary. Try again." : "境界の位置を保存できませんでした。もう一度操作してください。";
+  }
+}
+new ResizeObserver(() => updateChatSplit()).observe(document.documentElement);
+chatSplitter.addEventListener("pointerdown", event => {
+  if (event.button !== 0 || chatSplitter.getClientRects().length === 0) return;
+  event.preventDefault();
+  splitDrag = { y:event.clientY, height:parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--hp-chat-height")), ratio:currentState.settings.chatSplitRatio };
+  chatSplitter.setPointerCapture(event.pointerId);
+  void request("chat.menu", {open:true});
+});
+chatSplitter.addEventListener("pointermove", event => {
+  if (!splitDrag) return;
+  const total = document.documentElement.clientHeight - currentState.panel.headerHeight;
+  splitDrag.ratio = Math.max(.1, Math.min(.9, (splitDrag.height + splitDrag.y - event.clientY) / total));
+  updateChatSplit(splitDrag.ratio);
+});
+function finishChatSplit() {
+  if (!splitDrag) return;
+  const ratio = splitDrag.ratio; splitDrag = null;
+  void request("chat.menu", {open:false});
+  if (Number.isFinite(ratio)) void saveChatSplit(ratio);
+}
+chatSplitter.addEventListener("pointerup", finishChatSplit);
+chatSplitter.addEventListener("pointercancel", finishChatSplit);
+chatSplitter.addEventListener("lostpointercapture", finishChatSplit);
+chatSplitter.addEventListener("keydown", event => {
+  if (!["ArrowUp", "ArrowDown", "Home", "End"].includes(event.key)) return;
+  event.preventDefault();
+  const total = document.documentElement.clientHeight - currentState.panel.headerHeight;
+  let ratio = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--hp-chat-height")) / total;
+  ratio = event.key === "Home" ? .1 : event.key === "End" ? .9 : Math.max(.1, Math.min(.9, ratio + (event.key === "ArrowUp" ? .03 : -.03)));
+  updateChatSplit(ratio); void saveChatSplit(ratio);
+});

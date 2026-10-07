@@ -15,6 +15,8 @@ internal sealed class UserSettings
     public bool TodayFocusRemoved { get; set; }
     public string PocketToolModel { get; set; } = PocketApps.CodexPocketAppGenerationModelCatalog.ModelId;
     public string PocketToolReasoningEffort { get; set; } = "medium";
+    public bool CodexAllowAllAppActions { get; set; }
+    public double? ChatSplitRatio { get; set; }
     public string? ChatModel { get; set; }
     public string? ChatEffort { get; set; }
     public Dictionary<string, string> Shortcuts { get; set; } = new() { ["panel"] = "Ctrl+Alt+H", ["chat"] = "Ctrl+Alt+C", ["library"] = "Ctrl+Alt+L", ["settings"] = "Ctrl+Alt+O", ["voice"] = "Ctrl+Alt+V", ["regionRecording"] = "Ctrl+Alt+Shift+G" };
@@ -74,6 +76,7 @@ internal sealed class UserSettings
     {
         return new UserSettings
         {
+            CodexAllowAllAppActions = CodexAllowAllAppActions, ChatSplitRatio = ChatSplitRatio,
             TodayFocusRemoved = TodayFocusRemoved, PocketToolModel = PocketToolModel, PocketToolReasoningEffort = PocketToolReasoningEffort,
             DisplayPlacement = DisplayPlacement,
             PanelWidthDips = PanelWidthDips, PanelHeightDips = PanelHeightDips, ChatModel = ChatModel, ChatEffort = ChatEffort, Shortcuts = new(Shortcuts),

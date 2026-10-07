@@ -253,6 +253,8 @@ final class AppSettings: ObservableObject {
         }
     }
 
+    @Published var codexAllowAllAppActions: Bool { didSet { defaults.set(codexAllowAllAppActions, forKey: "codexAllowAllAppActions") } }
+    @Published var chatSplitRatio: Double? { didSet { defaults.set(chatSplitRatio, forKey: "chatSplitRatio") } }
     @Published var voiceActionConfirmationEnabled: Bool {
         didSet {
             defaults.set(voiceActionConfirmationEnabled, forKey: Self.voiceActionConfirmationEnabledKey)
@@ -388,6 +390,8 @@ final class AppSettings: ObservableObject {
         self.voiceContinueWhenPanelHidden = defaults.object(forKey: Self.voiceContinueWhenPanelHiddenKey) == nil
             ? false
             : defaults.bool(forKey: Self.voiceContinueWhenPanelHiddenKey)
+        self.codexAllowAllAppActions = defaults.bool(forKey: "codexAllowAllAppActions")
+        self.chatSplitRatio = (defaults.object(forKey: "chatSplitRatio") as? Double).flatMap { $0.isFinite && (0.1...0.9).contains($0) ? $0 : nil }
         self.voiceActionConfirmationEnabled = defaults.object(forKey: Self.voiceActionConfirmationEnabledKey) == nil
             ? true
             : defaults.bool(forKey: Self.voiceActionConfirmationEnabledKey)

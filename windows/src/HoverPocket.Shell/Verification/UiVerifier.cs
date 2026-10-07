@@ -36,6 +36,7 @@ internal sealed class UiVerifier
                 _failures.Add("webview: UI did not report ready within 8s");
             }
 
+            if (ready && Environment.GetEnvironmentVariable("HOVERPOCKET_LIBRARY_ACTIONS_VERIFY_ONLY") == "1") return await LibraryActionVerifier.RunAsync(_controller);
             if (ready && Environment.GetEnvironmentVariable("HOVERPOCKET_SYNC_VERIFY_ONLY") == "1")
                 return await AssetSyncVerifier.RunAsync(_controller);
             if (ready && Environment.GetEnvironmentVariable("HOVERPOCKET_LIBRARY_MEDIA_VERIFY_ONLY") == "1")
@@ -390,6 +391,11 @@ internal sealed class UiVerifier
                     await wait(s => s.reduceMotion === true);
                     reduced.checked = false; reduced.dispatchEvent(new Event('change'));
                     await wait(s => s.reduceMotion === false);
+                    const appActions = document.querySelector('[data-codex-actions]');
+                    appActions.checked = true; appActions.dispatchEvent(new Event('change'));
+                    await wait(s => s.codexAllowAllAppActions === true);
+                    appActions.checked = false; appActions.dispatchEvent(new Event('change'));
+                    await wait(s => s.codexAllowAllAppActions === false);
                     window.__liquidSettingsResult = true;
                 }).catch(error => { window.__liquidSettingsResult = String(error); });
                 """);

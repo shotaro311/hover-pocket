@@ -93,21 +93,14 @@ internal static class AssetInteractionVerifier
             if (!web.IsVisible || !web.IsHitTestVisible || Math.Abs(editor!.TranslatePoint(new Point(), web).Y - headerBottom) > 1)
                 failures.Add("assets: inline editor hides or overlaps the shell header");
             await web.ExecuteScriptAsync("window.__editorHeaderClicks=0;document.querySelector('.hp-header').addEventListener('click',e=>{if(e.isTrusted)window.__editorHeaderClicks++})");
-            var previousSize = JsonSerializer.Deserialize<string>(await web.ExecuteScriptAsync("document.querySelector('[data-size-id][aria-pressed=true]').dataset.sizeId"));
-            var otherSize = JsonSerializer.Deserialize<string>(await web.ExecuteScriptAsync("document.querySelector('[data-size-id][aria-pressed=false]').dataset.sizeId"));
-            await ClickSurfaceAsync(web, web.CoreWebView2, $"[data-size-id='{otherSize}']");
-            try { await UntilAsync(async () => await web.ExecuteScriptAsync($"document.querySelector('[data-size-id={otherSize}]').getAttribute('aria-pressed')==='true'") == "true"); }
-            catch (TimeoutException) { throw new TimeoutException($"Native header: active={controller.Panel.IsActive}, animating={controller.Panel.IsAnimating}; " + await web.ExecuteScriptAsync("({clicks:window.__editorHeaderClicks,focus:document.activeElement.tagName,pressed:document.querySelector('[data-size-id][aria-pressed=true]').dataset.sizeId,hit:window.__surfaceClickTarget})")); }
-            await ClickSurfaceAsync(web, web.CoreWebView2, $"[data-size-id='{previousSize}']");
-            await UntilAsync(async () => await web.ExecuteScriptAsync($"document.querySelector('[data-size-id={previousSize}]').getAttribute('aria-pressed')==='true'") == "true");
             await UntilAsync(() => Task.FromResult(!controller.Panel.IsAnimating));
             await UntilAsync(async () => await web.ExecuteScriptAsync("!document.querySelector('[data-refresh]').disabled") == "true");
             await ClickSurfaceAsync(web, web.CoreWebView2, "[data-refresh]");
-            try { await UntilAsync(async () => await web.ExecuteScriptAsync("window.__editorHeaderClicks===3") == "true"); }
+            try { await UntilAsync(async () => await web.ExecuteScriptAsync("window.__editorHeaderClicks===1") == "true"); }
             catch (TimeoutException) { throw new TimeoutException("Native header refresh: " + await web.ExecuteScriptAsync("({clicks:window.__editorHeaderClicks,focus:document.activeElement.tagName,hit:window.__surfaceClickTarget,refreshDisabled:document.querySelector('[data-refresh]').disabled})")); }
             if (!editor!.IsVisible || controller.Panel.LiquidTargetForVerify != previewBounds || !controller.Panel.AssetLayout.PinOnly)
                 failures.Add("assets: shell header interaction dismissed or resized inline editing");
-            VerifyConsole.WriteLine("PASS inline header: original header visible above editor, native size/refresh clicks, editing and bounds preserved");
+            VerifyConsole.WriteLine("PASS inline header: original header visible above editor, native refresh click, editing and bounds preserved");
             editor!.AddAnnotationsForVerify();
             if (Environment.GetEnvironmentVariable("HOVERPOCKET_VERIFY_LOG") is { Length: > 0 } log)
             {

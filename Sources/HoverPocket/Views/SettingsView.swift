@@ -443,6 +443,8 @@ struct SettingsView: View {
     private var voiceSection: some View {
         VStack(alignment: .leading, spacing: 14) {
             Text(localized(japanese: "チャットと音声", english: "Chat & voice")).font(.headline)
+            Toggle(localized(japanese: "Codexにアプリ内の操作をすべて許可", english: "Allow Codex all app actions"), isOn: $settings.codexAllowAllAppActions)
+            Text(localized(japanese: "追加・編集・削除・撮影など、対応する操作を追加確認なしで実行します。素材の削除はゴミ箱へ移動します。OSの権限許可は別途必要です。", english: "Run supported edits, deletions and captures without additional confirmation. Library deletions move assets to Trash. OS permissions still apply.")).font(.caption).foregroundStyle(.secondary)
             Picker(localized(japanese: "音声の接続先", english: "Voice service"), selection: $settings.voiceProvider) {
                 Text(localized(japanese: "オフ", english: "Off")).tag(VoiceProviderID.off)
                 Text("Codex / ChatGPT").tag(VoiceProviderID.codexAppServer)

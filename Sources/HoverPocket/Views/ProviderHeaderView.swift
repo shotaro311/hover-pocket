@@ -65,7 +65,6 @@ struct ProviderHeaderView: View {
                 .font(.system(size: 13, weight: .bold, design: .monospaced))
                 .foregroundStyle(.white)
 
-            PanelSizeCycleButton(settings: settings)
         }
     }
 

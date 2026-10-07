@@ -2,8 +2,13 @@
 project_slug: hover-menu-preview
 updated: 2026-10-07
 updated_by: codex
-status: library-media-options-and-hover-close-released; production-0.2.13; public-and-transition-readback-passed
+status: library-chat-actions-verification; candidate-0.2.14; production-0.2.13
 ---
+
+## 2026-10-07 素材メニュー・会話の境界・Codex操作権限
+
+- 両OSでサイズ選択ボタンを廃止し、素材の操作を1行へまとめ、会話との境界ドラッグと保存を実装。設定にCodexのアプリ内操作をすべて許可するオプションと、AIのゴミ箱移動・復元・一括操作を追加した。
+- 隔離したゴミ箱操作と設定、Windowsの実ドラッグ、両OSの1行メニューが成功。候補0.2.14の回帰検査・CI・公開／本番反映を進める。[変更と検証](2026-10/2026-10-07_hover-pocket-library-chat-actions.md)。
 
 ## 2026-10-07 ライブラリの自動保存・表示拡張・ホバー収納
 
