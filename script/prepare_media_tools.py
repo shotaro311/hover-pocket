@@ -72,11 +72,14 @@ def prepare(target: str, output: Path) -> None:
         configure = ["./configure", "--disable-shared", "--enable-static", "--disable-autodetect",
                      "--disable-gpl", "--disable-nonfree", "--disable-doc", "--disable-debug",
                      "--disable-network", "--disable-avdevice", "--disable-ffplay", "--disable-ffprobe",
-                     "--enable-videotoolbox", "--enable-audiotoolbox", "--enable-zlib"]
+                     "--enable-videotoolbox", "--enable-audiotoolbox", "--enable-zlib",
+                     "--extra-cflags=-mmacosx-version-min=14.0", "--extra-ldflags=-mmacosx-version-min=14.0"]
         marker = source / "hoverpocket-build-command.json"
         if not executable.exists() or not marker.exists() or json.loads(marker.read_text()) != configure:
             with (cache / "build.log").open("w") as log:
                 subprocess.run(configure, cwd=source, stdout=log, stderr=subprocess.STDOUT, check=True)
+                # Rebuild objects when SDK or deployment flags change; reused objects can raise the minimum OS.
+                subprocess.run(["make", "clean"], cwd=source, stdout=log, stderr=subprocess.STDOUT, check=True)
                 subprocess.run(["make", "-j", str(min(8, os.cpu_count() or 2))], cwd=source,
                                stdout=log, stderr=subprocess.STDOUT, check=True)
             marker.write_text(json.dumps(configure))
@@ -85,7 +88,7 @@ def prepare(target: str, output: Path) -> None:
             shutil.copy2(source / name, output / Path(name).name)
         # Provide the exact corresponding source and build configuration with the helper.
         shutil.copy2(archive, output / archive.name)
-        (output / "build-command.txt").write_text(" ".join(configure) + "\nmake -j8\n")
+        (output / "build-command.txt").write_text(" ".join(configure) + "\nmake clean\nmake -j8\n")
     (output / "NOTICE.txt").write_text(
         "FFmpeg is a separate, replaceable executable used for local media previews.\n"
         "Original library files are never overwritten.\n"
