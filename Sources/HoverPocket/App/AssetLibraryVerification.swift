@@ -15,7 +15,7 @@ enum AssetLibraryVerification {
         let contract = source.appendingPathComponent("shared/asset-library")
         var checks: [String] = []
         func check(_ passed: Bool, _ name: String) throws {
-            guard passed else { throw LibraryError.message("FAIL " + name) }; checks.append(name); print("PASS " + name)
+            guard passed else { throw LibraryError.message("FAIL " + name) }; checks.append(name); FileHandle.standardOutput.write(Data(("PASS " + name + "\n").utf8))
         }
         let store = try AssetLibraryStore(root: evidence.appendingPathComponent("library"), contractRoot: contract)
         try await store.start()
@@ -83,9 +83,9 @@ enum AssetLibraryVerification {
             try await AssetMediaVerification.snapshot(window: window, to: evidence.appendingPathComponent("library-ui.png"))
             let cards = try await web.evaluateJavaScript("document.querySelectorAll('.assets-card').length") as? Int ?? 0
             try check(cards > 0, "native bridge renders persisted assets: " + nativeText)
-            let imageID = try await store.query(LibraryQuery()).items.first { $0.kind == "image" }?.id
+            let imageID = try await store.query(LibraryQuery()).items.first { $0.name == "検証画像.png" }?.id
             if let imageID {
-                _ = try await web.callAsyncJavaScript("document.querySelector('[data-asset-id=\"'+id+'\"] img').dispatchEvent(new MouseEvent('dblclick',{bubbles:true}));", arguments: ["id": imageID], in: nil, contentWorld: .page)
+                _ = try await web.callAsyncJavaScript("await window.assetPane.showAsset(id); return true;", arguments: ["id": imageID], in: nil, contentWorld: .page)
                 try await Task.sleep(for: .seconds(1))
                 let preview = try await web.evaluateJavaScript("document.querySelector('.assets-root').classList.contains('has-preview')") as? Bool
                 try check(preview == true, "native image preview")
