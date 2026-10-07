@@ -1,0 +1,53 @@
+{
+  "macOS": {
+    "build": 667,
+    "bundleID": "local.codex.hover-pocket.asset-dev",
+    "binarySHA256": "4facfec9e9f3984c274f599082f0d11017831dcf001856906a5e290eb7c17cd3",
+    "chatChecks": 22,
+    "panelSizes": [
+      "small",
+      "medium",
+      "large",
+      "extraLarge"
+    ],
+    "openCloseCycles": 100,
+    "assetStorageChecks": 54,
+    "assetUIChecks": 70,
+    "assetReopenChecks": 2,
+    "livePanel": {
+      "directInput": true,
+      "reply": "7",
+      "resumeAfterRelaunch": "12",
+      "stopButton": "停止しました。",
+      "shiftEnter": "two-line Japanese draft",
+      "escape": "hide and reopen preserves draft",
+      "newChat": "empty composer",
+      "standaloneChatWindow": false
+    },
+    "physicalVoiceTest": false,
+    "notes": [
+      "Regression suite ran before the final native focus release and Escape refinements; chat and real panel soak were rerun on the final binary.",
+      "Live UI tests used generated arithmetic only; no library tools or new authentication were used."
+    ]
+  },
+  "windows": {
+    "sourceCommit": "678c2aeb8ca78b51e715f43b94d8b4e139be1653",
+    "implementationAndNativeVerification": "S311-win Codex",
+    "livePanelReply": "7",
+    "voiceDisabledChat": true,
+    "standaloneChatWindow": false,
+    "fixtureChecks": [
+      "IME",
+      "single send and stop",
+      "streaming caret preservation",
+      "small and extraLarge",
+      "manual hide and hover reopen",
+      "history and drafts",
+      "text selection",
+      "library keyboard shortcut isolation"
+    ],
+    "fullUIRegression": "final PASS and process exit observed; exit code was not recovered",
+    "productionAppReplaced": false,
+    "evidence": "windows/verification/inline-chat-20261005/"
+  }
+}

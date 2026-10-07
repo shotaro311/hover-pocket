@@ -1,0 +1,37 @@
+{
+  "originalCheckout": {
+    "files": 2099,
+    "changed": [],
+    "missing": []
+  },
+  "databases": {
+    "library": {
+      "schema": 1,
+      "assets": 5,
+      "originalHashes": "passed",
+      "quickCheck": "ok",
+      "foreignKeys": "ok"
+    },
+    "restored": {
+      "schema": 1,
+      "assets": 4,
+      "originalHashes": "passed",
+      "quickCheck": "ok",
+      "foreignKeys": "ok"
+    },
+    "windows-fixture": {
+      "schema": 1,
+      "assets": 1,
+      "originalHashes": "passed",
+      "quickCheck": "ok",
+      "foreignKeys": "ok"
+    }
+  },
+  "windowsManifestMatchesBeforeRefactor": true,
+  "nativeWebViewAndDragMovedUnchanged": true,
+  "processMetricsMovedUnchanged": true,
+  "build": "662",
+  "bundleId": "local.codex.hover-pocket.asset-dev",
+  "executableSha256": "fa837be6a1d463c4ee2cf767bffbb85788fbfa29ca8f6c45c51ea48607649986",
+  "evidenceRoot": "/var/folders/mv/0d7m444d25d_q88sj2wfntj80000gn/T/HoverPocket-Assets-SfxMXo"
+}

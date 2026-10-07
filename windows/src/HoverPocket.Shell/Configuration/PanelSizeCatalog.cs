@@ -5,6 +5,15 @@ internal static class PanelSizeCatalog
     public const double HeaderHeight = 54;
     public const double AiLaneHeight = 0;
 
+    internal static PanelResizeLimits ResizeLimits(double additionalHeight)
+    {
+        var small = Get(PanelSize.Small);
+        var extraLarge = Get(PanelSize.ExtraLarge);
+        return new(small.Width, small.TotalHeight + additionalHeight,
+            Math.Ceiling(extraLarge.Width * 1.15 / 10) * 10,
+            Math.Ceiling(extraLarge.TotalHeight * 1.15 / 10) * 10 + additionalHeight);
+    }
+
     public static PanelSizeMetrics Get(PanelSize panelSize)
     {
         return panelSize switch
@@ -24,6 +33,8 @@ internal static class PanelSizeCatalog
         Get(PanelSize.ExtraLarge)
     ];
 }
+
+internal sealed partial record PanelResizeLimits(double MinWidth, double MinHeight, double MaxWidth, double MaxHeight);
 
 internal sealed record PanelSizeMetrics(
     string Id,

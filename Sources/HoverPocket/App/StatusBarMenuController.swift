@@ -28,6 +28,11 @@ final class StatusBarMenuController: NSObject {
         configureButton()
         configureMenu()
         observeSettings()
+        AssetCaptureController.shared.$recording.sink { [weak self] recording in
+            self?.statusItem.button?.title = recording ? " ●" : ""
+            self?.statusItem.button?.contentTintColor = recording ? .systemRed : nil
+            self?.statusItem.button?.toolTip = recording ? "HoverPocket — 画面収録中（\(AssetCaptureController.shared.preferences.recordingShortcut)で停止）" : "HoverPocket"
+        }.store(in: &cancellables)
     }
 
     private func configureButton() {
@@ -40,6 +45,10 @@ final class StatusBarMenuController: NSObject {
     private func configureMenu() {
         let menu = NSMenu()
         menu.addItem(menuItem(title: settings.text(.openHoverPocket), action: #selector(openPanel)))
+        menu.addItem(menuItem(title: "素材ライブラリを開く", action: #selector(openAssets)))
+        menu.addItem(menuItem(title: "スクリーンショットを撮影", action: #selector(captureScreenshot)))
+        menu.addItem(menuItem(title: "収録を開始／停止して保存", action: #selector(toggleRecording)))
+        menu.addItem(menuItem(title: "撮影・収録の設定…", action: #selector(captureSettings)))
         menu.addItem(menuItem(title: settings.text(.settings), action: #selector(openSettings), keyEquivalent: ","))
         menu.addItem(menuItem(title: settings.text(.checkForUpdates), action: #selector(checkForUpdates)))
         menu.addItem(.separator())
@@ -84,6 +93,11 @@ final class StatusBarMenuController: NSObject {
     @objc private func openPanel() {
         onOpenPanel()
     }
+
+    @objc private func openAssets() { AssetLibraryRuntime.shared.showOrganizer() }
+    @objc private func captureScreenshot() { Task { await AssetCaptureController.shared.screenshot(folder: nil) } }
+    @objc private func toggleRecording() { Task { await AssetCaptureController.shared.toggleRecording(folder: nil) } }
+    @objc private func captureSettings() { AssetCaptureController.shared.showSettings() }
 
     @objc private func openSettings() {
         onOpenSettings()

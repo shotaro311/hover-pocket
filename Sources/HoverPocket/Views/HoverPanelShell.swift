@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 
 struct HoverPanelShell: View {
     let hoverState: HoverState
@@ -6,22 +7,39 @@ struct HoverPanelShell: View {
     @ObservedObject var settings: AppSettings
     @ObservedObject var stickyReminders = StickyReminderController.shared
     @ObservedObject private var voiceRuntime = VoiceLaneRuntime.shared
+    @ObservedObject private var chat = CodexChatController.shared
+    @ObservedObject private var assets = AssetLibraryRuntime.shared
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let onOpenSettings: () -> Void
     let onClosePanel: () -> Void
     let onExternalDragStarted: () -> Void
 
+    @State private var resizeStart: CGSize?
+
     var body: some View {
-        let baseline = PanelLayout.panelTotalSize(for: settings.panelSize)
-        let voiceHeight = VoiceLaneGeometry.height(
-            panelSizeRawValue: settings.panelSize.rawValue,
-            mode: voiceRuntime.snapshot.mode
-        )
+        GeometryReader { viewport in
+        let normal = PanelLayout.panelTotalSize(for: settings.panelSize)
+        let voiceHeight = assets.fullscreen ? 0 : chat.panelHeight
+        let custom = settings.customPanelSize.map { PanelLayout.clampManualSize($0,
+            additionalHeight: CGFloat(voiceHeight) + store.attachmentMetrics.contentTop, available: viewport.size) }
+        let selectedSize = assets.fullscreen ? assets.panelSize : (custom ?? assets.panelSize)
+        let effectiveSize = selectedSize.map { CGSize(width: min($0.width, viewport.size.width),
+            height: min(max($0.height, CGFloat(voiceHeight) + store.attachmentMetrics.contentTop + 200), viewport.size.height)) }
+        let baseline = effectiveSize.map { CGSize(width: $0.width,
+            height: max(200, $0.height - CGFloat(voiceHeight) - store.attachmentMetrics.contentTop)) } ?? normal
 
-        ZStack(alignment: .top) {
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .fill(Color(red: 0.02, green: 0.02, blue: 0.025))
-
+        Group {
             VStack(spacing: 0) {
+                ZStack {
+                    if store.effectivePanelAttachmentStyle == .coverMenu && store.providerActive {
+                        PanelTopBarView(providerStore: store.providerStore, settings: settings,
+                                        metrics: store.attachmentMetrics)
+                            .transition(.opacity)
+                    }
+                }
+                .frame(height: store.attachmentMetrics.headerHeight)
+                .animation(reduceMotion ? nil : .easeOut(duration: 0.14), value: store.effectivePanelAttachmentStyle)
+
                 VStack(spacing: 0) {
                     ProviderHeaderView(
                         providerStore: store.providerStore,
@@ -54,26 +72,46 @@ struct HoverPanelShell: View {
                 }
                 .frame(width: baseline.width, height: baseline.height)
 
-                VoiceLaneHostView(runtime: voiceRuntime, settings: settings)
+                if !assets.fullscreen { VoiceLaneHostView(runtime: voiceRuntime, settings: settings, onOpenSettings: onOpenSettings) }
             }
-            .opacity(store.contentVisible ? 1 : 0)
-            .scaleEffect(store.contentVisible ? 1 : 0.92, anchor: .top)
-            .offset(y: store.contentVisible ? 0 : -14)
         }
         .frame(
             width: baseline.width,
-            height: baseline.height + CGFloat(voiceHeight)
+            height: baseline.height + CGFloat(voiceHeight) + store.attachmentMetrics.contentTop
         )
-        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .stroke(Color.white.opacity(0.08), lineWidth: 1)
-        )
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .overlay(alignment: .bottomTrailing) {
+            if !assets.fullscreen {
+                Image(systemName: "line.3.horizontal.decrease")
+                    .font(.system(size: 11)).rotationEffect(.degrees(-45))
+                    .foregroundStyle(.secondary).frame(width: 22, height: 22).contentShape(Rectangle())
+                    .help(settings.appLanguage == .japanese ? "ドラッグしてサイズを変更" : "Drag to resize")
+                    .accessibilityLabel(settings.appLanguage == .japanese ? "パネルのサイズを変更" : "Resize panel")
+                    .gesture(DragGesture(minimumDistance: 0, coordinateSpace: .global)
+                        .onChanged { value in
+                            if resizeStart == nil {
+                                resizeStart = CGSize(width: baseline.width, height: baseline.height + CGFloat(voiceHeight) + store.attachmentMetrics.contentTop)
+                                settings.panelResizing = true
+                            }
+                            guard let start = resizeStart else { return }
+                            let screen = NSScreen.screens.first { $0.frame.contains(NSEvent.mouseLocation) } ?? NSScreen.main
+                            let work = screen?.visibleFrame.size
+                            settings.customPanelSize = PanelLayout.clampManualSize(
+                                CGSize(width: start.width + value.translation.width * 2, height: start.height + value.translation.height),
+                                additionalHeight: CGFloat(voiceHeight) + store.attachmentMetrics.contentTop, available: work)
+                        }.onEnded { _ in
+                            settings.panelResizing = false; settings.persistPanelSize(); resizeStart = nil
+                            hoverState.onExit()
+                        })
+                    .padding(3)
+            }
+        }
         .onDisappear {
             voiceRuntime.detachPanel()
         }
         .onHover { inside in
             inside ? hoverState.onEnter() : hoverState.onExit()
+        }
         }
     }
 }
@@ -83,6 +121,8 @@ private struct StickyReminderAlertView: View {
     @ObservedObject var reminders: StickyReminderController
     let language: AppLanguage
     @State private var couldNotStop = false
+
+    @State private var resizeStart: CGSize?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 5) {

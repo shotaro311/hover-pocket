@@ -134,7 +134,7 @@ enum PersonalToolVerificationCommand {
             try check(Bundle.hoverPocketResources.bundleURL.path.hasPrefix(Bundle.main.bundleURL.path + "/"), "packaged resources do not depend on checkout")
         }
         let schemas = try runtime.sessionTools()
-        try check(schemas.count == 25, "all tools exposed")
+        try check(schemas.count == 25 + LibraryVoiceOperation.allCases.count, "all tools exposed")
         try check(clipboardReads == 0, "no passive clipboard access")
         try check(
             !succeeded(

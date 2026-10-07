@@ -1,0 +1,7 @@
+{
+  "count" : 2,
+  "passed" : [
+    "new process reads persisted assets",
+    "new process original hashes"
+  ]
+}

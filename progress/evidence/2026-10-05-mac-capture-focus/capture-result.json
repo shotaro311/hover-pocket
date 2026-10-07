@@ -1,0 +1,37 @@
+{
+  "audio" : [
+    {
+      "audioTracks" : 1,
+      "duration" : 2.1366666666666667,
+      "microphone" : false,
+      "status" : "passed",
+      "system" : true,
+      "systemSamplesCaptured" : true
+    },
+    {
+      "audioTracks" : 1,
+      "duration" : 2.1383333333333332,
+      "microphone" : true,
+      "status" : "passed",
+      "system" : false,
+      "systemSamplesCaptured" : false
+    },
+    {
+      "audioTracks" : 1,
+      "duration" : 2.1166666666666667,
+      "microphone" : true,
+      "status" : "passed",
+      "system" : true,
+      "systemSamplesCaptured" : true
+    }
+  ],
+  "duration" : 3.0333333333333332,
+  "height" : 388,
+  "presentation" : [
+    "inactive app capture presents a focused overlay",
+    "overlay survives application deactivation",
+    "Escape cancels and releases the capture session"
+  ],
+  "status" : "passed",
+  "width" : 640
+}

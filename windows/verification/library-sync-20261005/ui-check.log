@@ -1,0 +1,6 @@
+UI verify: WebView2 host + bridge + provider registry + settings
+PASS cold top-edge open: panel_visible_before_webview_ready=true, dispatch_ms=39.4
+PASS sync settings: default-off, selected folder/create, persisted enable/pause/resume
+PASS sync settings: conflicting versions visible, received-version button resolves and converges
+PASS sync settings: English labels and settings-only bridge boundary
+PASS sync UI evidence: C:\Users\shotaro\AppData\Local\Temp\HoverPocketSyncVerify-ui-cb26a3a5d21841f687e6e36bb50cb97e

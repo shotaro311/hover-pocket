@@ -25,11 +25,26 @@ internal enum BridgeSurface
     Settings
 }
 
-internal sealed class PanelBridgeController : IDisposable
+internal sealed partial class PanelBridgeController : IDisposable
 {
     public HoverPocket.Assets.AssetStore AssetLibrary { get; }
     internal ClipboardHistoryStore ClipboardHistoryForVerify => _clipboardBridgeController.StoreForVerify;
     public Func<string, string?, Task>? AssetCaptureRequested { get; set; }
+    internal HoverPocket.Shell.Capture.CaptureController? VoiceCapture { get; set; }
+    internal Func<string?, CancellationToken, Task<bool>>? VoiceLibraryRequested { get; set; }
+    internal Func<Task>? ChatRequested { get; set; }
+    internal Func<System.Windows.Window?>? ChatApprovalOwner { get; set; }
+    private readonly ICodexVoiceDynamicToolRuntime _chatTools;
+    internal CodexChatCoordinator CreateChatCoordinator() => CodexChatRuntime.Create(
+        Path.Combine(_settingsStore.RootDirectory, "CodexVoice"), _chatTools);
+    internal async Task LoginChatAsync(CancellationToken token)
+    {
+        using var login = new CodexVoiceAccountLogin();
+        using var cancellation = token.Register(login.Cancel);
+        await login.StartAsync(Path.Combine(_settingsStore.RootDirectory, "CodexVoice"), token);
+        while (login.Status == "waiting") await Task.Delay(150, token);
+        if (login.Status != "succeeded") throw new CodexAppServerProtocolException("chat_login_failed");
+    }
     public HoverPocket.Shell.Providers.Assets.AssetPlaybackOwner AssetPlayback { get; } = new();
     private readonly ProviderRegistry _providerRegistry;
     private readonly UserSettingsStore _settingsStore;
@@ -53,6 +68,7 @@ internal sealed class PanelBridgeController : IDisposable
     private readonly PocketAppRuntimeActivationRegistry? _generatedPocketApps;
     private readonly ICodexGenerationSandboxProvisioner _codexGenerationSandboxProvisioner;
     private readonly VoiceProviderCoordinator _voiceCoordinator;
+    private readonly CodexVoiceAccountLogin _voiceLogin = new();
     private readonly IOpenAIRealtimeCredentialStore _openAIRealtimeCredentialStore;
     private readonly bool _externalIntegrationsEnabled;
     private readonly VoiceE2EReceiptStore? _voiceE2EReceiptStore;
@@ -111,6 +127,12 @@ internal sealed class PanelBridgeController : IDisposable
         AssetLibrary = new HoverPocket.Assets.AssetStore(string.Equals(Path.GetFullPath(settingsStore.RootDirectory), Path.GetFullPath(productionSettingsRoot), StringComparison.OrdinalIgnoreCase)
             ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "HoverPocket", "AssetLibrary")
             : Path.Combine(settingsStore.RootDirectory, "AssetLibrary"), HoverPocket.Shell.Providers.Assets.AssetRecycle.MoveAsync);
+        if (externalIntegrationsEnabled)
+        {
+            _assetSync = new HoverPocket.Assets.AssetSyncRunner(AssetLibrary);
+            if (string.Equals(Path.GetFullPath(settingsStore.RootDirectory), Path.GetFullPath(productionSettingsRoot), StringComparison.OrdinalIgnoreCase))
+                _pairing = new Sync.DevicePairingService(AssetLibrary);
+        }
         _weatherStore = new WeatherStore(Path.Combine(settingsStore.RootDirectory, "weather"));
         _startupRegistration = startupRegistration ?? new RunKeyStartupRegistrationService();
         _updaterService = updaterService ?? new UpdaterService();
@@ -134,6 +156,9 @@ internal sealed class PanelBridgeController : IDisposable
             stickyStore,
             new LiveControlsCapabilityDataSource(_controlsBridgeController));
         _timerBridgeHandlers.AlertFired += OnTimerAlertFired;
+        var voiceLibrary = new VoiceLibraryCapabilities(AssetLibrary, () => VoiceCapture, System.Windows.Application.Current.Dispatcher,
+            (id, token) => VoiceLibraryRequested?.Invoke(id, token) ?? Task.FromResult(false));
+        voiceLibrary.Register(_capabilityHandlers);
         _timerBridgeHandlers.AlertChanged += OnTimerAlertChanged;
         CurrentSettings = UserSettingsStore.NormalizeForBootstrap(settings, providerRegistry.ProviderIds);
         CapabilityDataGovernanceController? capabilityDataGovernance = null;
@@ -145,7 +170,7 @@ internal sealed class PanelBridgeController : IDisposable
             var auditLog = new CapabilityBrokerAuditLog(brokerRoot);
             capabilityDataGovernance = new CapabilityDataGovernanceController(ledger, auditLog);
             _ = capabilityDataGovernance.ApplyRetention(CurrentSettings.CapabilityDataRetentionPeriod);
-            capabilityRegistry = new CapabilityRegistry(_capabilityHandlers);
+            capabilityRegistry = new CapabilityRegistry(_capabilityHandlers, PocketCapabilityDescriptors.BuiltIn.Concat(VoiceLibraryCapabilities.Descriptors));
             _capabilityBroker = new CapabilityBroker(
                 capabilityRegistry,
                 ledger,
@@ -162,13 +187,6 @@ internal sealed class PanelBridgeController : IDisposable
             _todayFocusTextAdapter = null;
         }
         _capabilityDataGovernance = capabilityDataGovernance;
-        var voiceTools = _capabilityBroker is null
-            ? null
-            : new CodexVoiceCapabilityRuntime(
-                _capabilityBroker,
-                RequestVoiceTimerApprovalAsync,
-                () => CurrentSettings.VoiceCalendarAccessGranted,
-                CapabilityTimeZoneId);
         IOpenAIRealtimeCapabilityRuntime openAIRealtimeTools = capabilityRegistry is null || _capabilityBroker is null
             ? new UnavailableOpenAIRealtimeCapabilityRuntime()
             : new OpenAIRealtimeCapabilityRuntime(
@@ -177,10 +195,20 @@ internal sealed class PanelBridgeController : IDisposable
                 RequestVoiceCalendarCreateApprovalAsync,
                 () => CurrentSettings.VoiceCalendarAccessGranted,
                 CapabilityTimeZoneId);
+        ICodexVoiceDynamicToolRuntime codexTools = new CodexRealtimeCapabilityAdapter(openAIRealtimeTools);
+        if (capabilityRegistry is not null && _capabilityBroker is not null)
+            codexTools = new CodexNativeCapabilityRuntime(codexTools, capabilityRegistry, _capabilityBroker, RequestVoiceNativeApprovalAsync, voiceLibrary);
+        _chatTools = capabilityRegistry is null || _capabilityBroker is null ? codexTools
+            : new CodexNativeCapabilityRuntime(new CodexRealtimeCapabilityAdapter(new OpenAIRealtimeCapabilityRuntime(
+                new BrokerOpenAIRealtimeCapabilityAuthority(capabilityRegistry, _capabilityBroker),
+                RequestVoiceTimerApprovalAsync, RequestVoiceCalendarCreateApprovalAsync,
+                () => CurrentSettings.VoiceCalendarAccessGranted, CapabilityTimeZoneId, origin: CapabilityOrigin.Text)),
+                capabilityRegistry, _capabilityBroker, RequestVoiceNativeApprovalAsync, voiceLibrary, CapabilityOrigin.Text);
         _voiceCoordinator = new VoiceProviderCoordinator(
             CurrentSettings.VoiceEnabled,
             CurrentSettings.VoiceProviderId,
-            () => voiceCoordinator ?? CodexVoiceRuntimeComposition.Create(false, voiceTools),
+            () => voiceCoordinator ?? CodexVoiceRuntimeComposition.Create(false, codexTools,
+                Path.Combine(settingsStore.RootDirectory, "CodexVoice"), reuseExistingLogin: false, () => CurrentSettings.Language == AppLanguage.English),
             () => new OpenAIRealtimeVoiceCoordinator(
                 false,
                 _openAIRealtimeCredentialStore,
@@ -190,6 +218,7 @@ internal sealed class PanelBridgeController : IDisposable
         _resolvedVoiceLaneMode = VoicePanelGeometry.PreferredMode(CurrentSettings);
         _voiceCoordinator.SnapshotChanged += OnVoiceSnapshotChanged;
         _voiceCoordinator.TransportSignal += OnVoiceTransportSignal;
+        _voiceLogin.Changed += OnVoiceLoginChanged;
         RecordVoiceE2EReceipt(_voiceCoordinator.Snapshot);
         _aiNativeExecutionLease = CurrentSettings.AiNativeEnabled
             ? new PocketAppActivationLease()
@@ -385,6 +414,7 @@ internal sealed class PanelBridgeController : IDisposable
         Register(
             "app.getState",
             (_, _) => Task.FromResult<object?>(BuildState(surface)));
+        RegisterUx(Register, surface);
         Register("app.ready", (_, _) => Task.FromResult<object?>(new { ok = true }));
         Register("diagnostics.echo", (parameters, _) => Task.FromResult<object?>(DeserializeObject(parameters)));
         Register("settings.setPanelSize", SetPanelSizeAsync);
@@ -413,6 +443,7 @@ internal sealed class PanelBridgeController : IDisposable
         Register("updates.check", CheckForUpdatesAsync);
         if (surface == BridgeSurface.Panel)
         {
+            RegisterChat(Register);
             Register("provider.select", SelectProviderAsync);
             Register(
                 "voice.requestMicrophone",
@@ -443,6 +474,13 @@ internal sealed class PanelBridgeController : IDisposable
         }
         if (surface == BridgeSurface.Settings)
         {
+            foreach (var method in new[] { "status", "invite", "join", "approve", "cancel", "remove" })
+                Register("pairing." + method, (p, token) => PairingRequest(method, p, token));
+            Register("settings.openCapture", async (_, _) => { if (AssetCaptureRequested is not { } capture) throw new InvalidOperationException("撮影を利用できません。"); await capture("settings", null); return new { opened = true }; });
+            Register("assetSync.status", async (_, token) => await AssetLibrary.GetSyncStatusAsync(token));
+            Register("assetSync.configure", ConfigureAssetSyncAsync);
+            Register("assetSync.enable", EnableAssetSyncAsync);
+            Register("assetSync.resolve", ResolveAssetSyncAsync);
             Register("settings.setVoiceEnabled", SetVoiceEnabledAsync);
             Register("settings.setVoiceProvider", SetVoiceProviderAsync);
             Register(
@@ -459,6 +497,9 @@ internal sealed class PanelBridgeController : IDisposable
                     voiceOpenAIKeyDeleteDecision,
                     cancellationToken));
             Register("settings.setVoiceLayout", SetVoiceLayoutAsync);
+            Register("settings.retryVoice", RetryVoiceAsync);
+            Register("settings.loginVoice", LoginVoiceAsync);
+            Register("settings.cancelVoiceLogin", (_, _) => { _voiceLogin.Cancel(); return Task.FromResult<object?>(BuildState(BridgeSurface.Settings)); });
             Register(
                 "settings.setVoiceCalendarAccess",
                 (parameters, cancellationToken) => SetVoiceCalendarAccessAsync(
@@ -540,6 +581,9 @@ internal sealed class PanelBridgeController : IDisposable
         }
 
         _disposed = true;
+        if (_assetSync is not null) _ = _assetSync.DisposeAsync();
+        _pairing?.Dispose();
+        if (_inlineChat is not null) _ = _inlineChat.DisposeAsync();
         _timerBridgeHandlers.AlertFired -= OnTimerAlertFired;
         _timerBridgeHandlers.AlertChanged -= OnTimerAlertChanged;
         _timerBridgeHandlers.Dispose();
@@ -554,6 +598,7 @@ internal sealed class PanelBridgeController : IDisposable
         _voiceCoordinator.TransportSignal -= OnVoiceTransportSignal;
         _voiceE2EReceiptStore?.RecordMediaEvent(VoiceE2EMediaEventKind.SafeClose);
         _voiceCoordinator.Dispose();
+        _voiceLogin.Dispose();
         _aiNativeExecutionLease?.Invalidate();
         _pocketAppHostController?.Dispose();
         _pocketAppGenerationController?.Dispose();
@@ -613,6 +658,9 @@ internal sealed class PanelBridgeController : IDisposable
                 voiceEnabled = CurrentSettings.VoiceEnabled,
                 voiceProviderId = CurrentSettings.VoiceProviderId,
                 voiceOpenAIKeyConfigured = VoiceOpenAIKeyConfiguredForPublicState(),
+                voiceAvailability = ToVoiceAvailabilityWireValue(_voiceCoordinator.Snapshot.Availability),
+                voiceErrorCode = _voiceCoordinator.Snapshot.LastErrorCode,
+                voiceLoginStatus = _voiceLogin.Status,
                 voiceCalendarAccessGranted = CurrentSettings.VoiceCalendarAccessGranted,
                 voiceLaneLayout = ToWireValue(CurrentSettings.VoiceLaneLayout),
                 clipboardPrivateMode = CurrentSettings.ClipboardPrivateMode,
@@ -637,11 +685,12 @@ internal sealed class PanelBridgeController : IDisposable
                 headerHeight = PanelSizeCatalog.HeaderHeight,
                 aiLaneHeight = PanelSizeCatalog.AiLaneHeight,
                 voiceLaneHeight,
+                chatHeight = ChatHeight,
                 voiceLaneMode = ToWireValue(_resolvedVoiceLaneMode),
                 width = metrics.Width,
                 providerHeight = metrics.ProviderHeight,
                 baselineHeight = metrics.TotalHeight,
-                totalHeight = metrics.TotalHeight + voiceLaneHeight,
+                totalHeight = metrics.TotalHeight + voiceLaneHeight + ChatHeight,
                 sizes = PanelSizeCatalog.All.Select(size => new
                 {
                     id = size.Id,
@@ -958,10 +1007,10 @@ internal sealed class PanelBridgeController : IDisposable
     private async Task<object?> SetPanelSizeAsync(JsonElement? parameters, CancellationToken cancellationToken)
     {
         var panelSize = ParsePanelSize(ReadRequiredString(parameters, "panelSize"));
-        if (CurrentSettings.PanelSize != panelSize)
+        if (CurrentSettings.PanelSize != panelSize || CurrentSettings.PanelWidthDips is not null || CurrentSettings.PanelHeightDips is not null)
         {
             var updated = CurrentSettings.Clone();
-            updated.PanelSize = panelSize;
+            updated.PanelSize = panelSize; updated.PanelWidthDips = null; updated.PanelHeightDips = null;
             SaveSettings(updated);
         }
 
@@ -1460,6 +1509,7 @@ internal sealed class PanelBridgeController : IDisposable
             var previousResolvedMode = _resolvedVoiceLaneMode;
             var updated = CurrentSettings.Clone();
             updated.VoiceEnabled = enabled;
+            if (!enabled) _voiceLogin.Cancel();
             if (enabled)
             {
                 _resolvedVoiceLaneMode = VoicePanelGeometry.PreferredMode(updated);
@@ -1473,7 +1523,7 @@ internal sealed class PanelBridgeController : IDisposable
                 await _voiceCoordinator.SetFeatureEnabledAsync(
                     enabled,
                     enabled ? cancellationToken : CancellationToken.None);
-                if (enabled
+                if (enabled && CurrentSettings.VoiceProviderId != VoiceProviderIds.CodexAppServer
                     && _voiceCoordinator.Snapshot.Availability != CodexVoiceAvailability.Ready)
                 {
                     throw new CodexAppServerProtocolException("voice_provider_unavailable");
@@ -1521,6 +1571,7 @@ internal sealed class PanelBridgeController : IDisposable
             var previousResolvedMode = _resolvedVoiceLaneMode;
             var updated = CurrentSettings.Clone();
             updated.VoiceProviderId = providerId;
+            _voiceLogin.Cancel();
             try
             {
                 await _voiceCoordinator.SetProviderAsync(providerId, CancellationToken.None);
@@ -1530,7 +1581,7 @@ internal sealed class PanelBridgeController : IDisposable
                     await _voiceCoordinator.SetFeatureEnabledAsync(false, CancellationToken.None);
                     _resolvedVoiceLaneMode = VoiceLaneMode.Disabled;
                 }
-                else if (updated.VoiceEnabled
+                else if (updated.VoiceEnabled && providerId != VoiceProviderIds.CodexAppServer
                     && _voiceCoordinator.Snapshot.Availability != CodexVoiceAvailability.Ready)
                 {
                     throw new CodexAppServerProtocolException("voice_provider_unavailable");
@@ -1551,6 +1602,57 @@ internal sealed class PanelBridgeController : IDisposable
         {
             _voiceSettingsTransitionGate.Release();
         }
+    }
+
+    private async Task<object?> RetryVoiceAsync(JsonElement? parameters, CancellationToken cancellationToken)
+    {
+        await _voiceSettingsTransitionGate.WaitAsync(cancellationToken);
+        try
+        {
+            if (CurrentSettings.VoiceEnabled && _voiceLogin.Status != "waiting")
+                await _voiceCoordinator.RestartSelectedProviderAsync(cancellationToken);
+            return await PublishStateAsync(cancellationToken);
+        }
+        finally { _voiceSettingsTransitionGate.Release(); }
+    }
+
+    private async Task<object?> LoginVoiceAsync(JsonElement? parameters, CancellationToken cancellationToken)
+    {
+        if (!_externalIntegrationsEnabled || CurrentSettings.VoiceProviderId != VoiceProviderIds.CodexAppServer || !CurrentSettings.VoiceEnabled)
+            throw new CodexAppServerProtocolException("voice_runtime_not_ready");
+        await _voiceSettingsTransitionGate.WaitAsync(cancellationToken);
+        try
+        {
+            await _voiceCoordinator.SetFeatureEnabledAsync(false, CancellationToken.None);
+            await _voiceLogin.StartAsync(Path.Combine(_settingsStore.RootDirectory, "CodexVoice"), cancellationToken);
+            return await PublishStateAsync(cancellationToken);
+        }
+        finally { _voiceSettingsTransitionGate.Release(); }
+    }
+
+    private void OnVoiceLoginChanged(object? sender, EventArgs e)
+    {
+        if (_disposed) return;
+        _ = RefreshVoiceAfterLoginAsync();
+    }
+
+    private async Task RefreshVoiceAfterLoginAsync()
+    {
+        try
+        {
+            await _voiceSettingsTransitionGate.WaitAsync();
+            try
+            {
+                if (_disposed) return;
+                if (_voiceLogin.Status != "waiting" && CurrentSettings.VoiceEnabled
+                    && CurrentSettings.VoiceProviderId == VoiceProviderIds.CodexAppServer)
+                    await _voiceCoordinator.SetFeatureEnabledAsync(true);
+            }
+            finally { _voiceSettingsTransitionGate.Release(); }
+            await PostStateEventOnUiThreadAsync("voice.stateChanged");
+        }
+        catch (Exception) when (_disposed) { }
+        catch (Exception) { await PostStateEventOnUiThreadAsync("voice.stateChanged"); }
     }
 
     private async Task<bool> RollbackVoiceProviderTransitionAsync(
@@ -2043,6 +2145,18 @@ internal sealed class PanelBridgeController : IDisposable
         return await PublishStateAsync(cancellationToken);
     }
 
+    private async Task<bool> RequestVoiceNativeApprovalAsync(VoiceNativeApproval request, CancellationToken cancellationToken)
+    {
+        return await _voiceTimerApprovalCoordinator.RequestAsync(new VoiceTimerApprovalRequest(request.Title, 0),
+            async (_, token) =>
+            {
+                var owner = ChatApprovalOwner?.Invoke() ?? _voiceApprovalOwner?.Invoke();
+                if (owner is null) return false;
+                return await VoiceTimerApprovalDialog.ShowContentAsync(owner, request.Title, request.Details,
+                    CurrentSettings.Language == AppLanguage.English, token).ConfigureAwait(false);
+            }, cancellationToken).ConfigureAwait(false);
+    }
+
     private async Task<bool> RequestVoiceTimerApprovalAsync(
         VoiceTimerApprovalRequest request,
         CancellationToken cancellationToken)
@@ -2068,7 +2182,7 @@ internal sealed class PanelBridgeController : IDisposable
         CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        var owner = _voiceApprovalOwner?.Invoke();
+        var owner = ChatApprovalOwner?.Invoke() ?? _voiceApprovalOwner?.Invoke();
         if (owner is null)
         {
             return false;
@@ -2085,7 +2199,7 @@ internal sealed class PanelBridgeController : IDisposable
         CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        var owner = _voiceApprovalOwner?.Invoke();
+        var owner = ChatApprovalOwner?.Invoke() ?? _voiceApprovalOwner?.Invoke();
         if (owner is null)
         {
             return false;
@@ -2218,6 +2332,7 @@ internal sealed class PanelBridgeController : IDisposable
 
     public async Task NotifyPanelClosedAsync()
     {
+        if (_inlineChat is not null) { _inlineChat.Focused = false; _inlineChat.MenuOpen = false; }
         if (_assetDropPreviousProvider is not null) await FinishAssetDropAsync(false);
         _panelOpen = false;
         _voiceCoordinator.SetMuted(true);

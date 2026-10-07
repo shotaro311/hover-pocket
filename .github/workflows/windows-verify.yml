@@ -5,12 +5,14 @@ on:
     branches: ["main"]
     paths:
       - "windows/**"
+      - "shared/pairing-helper/**"
       - "contracts/voice/**"
       - "script/verify_voice_foundation.py"
       - ".github/workflows/windows-verify.yml"
   pull_request:
     paths:
       - "windows/**"
+      - "shared/pairing-helper/**"
       - "contracts/pocket/v1/**"
       - "contracts/voice/**"
       - "script/verify_voice_foundation.py"
@@ -34,6 +36,16 @@ jobs:
         uses: actions/setup-dotnet@v5
         with:
           dotnet-version: 10.0.x
+
+      - name: Setup Rust for secure device pairing
+        shell: pwsh
+        run: |
+          rustup toolchain install 1.92.0 --profile minimal --no-self-update
+          rustup override set 1.92.0
+
+      - name: Verify dedicated library pairing configuration
+        shell: pwsh
+        run: dotnet run --project windows/tests/Pairing --configuration Release
 
       - name: Prepare pinned Codex CLI for confinement canary
         shell: pwsh
@@ -214,6 +226,9 @@ jobs:
             -ExpectedUpgradeCode "{9E28ABD6-A496-472E-98AB-AE8D70C27B48}"
       - name: Verify weather model, cache, and settings
         run: dotnet run --project .\windows\tests\Weather.Core\Weather.Core.csproj --configuration Release
+
+      - name: Verify isolated library synchronization and storage
+        run: .\windows\script\verify_asset_sync.ps1
 
       - name: Verify settings UI modules
         run: |

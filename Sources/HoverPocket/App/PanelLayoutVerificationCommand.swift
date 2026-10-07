@@ -5,6 +5,7 @@ enum PanelLayoutVerificationCommand {
     @MainActor
     static func run() -> Never {
         _ = NSApplication.shared
+        NSApplication.shared.appearance = NSAppearance(named: .darkAqua)
         seedCalculatorHistory()
 
         var lines: [String] = []
@@ -36,6 +37,11 @@ enum PanelLayoutVerificationCommand {
             }
         let persistenceCompatibility = verifySettingsPersistence()
         let settingsWindowCompatibility = verifySettingsWindowLayout()
+        let isolatedSettings = SettingsCategory.available(externalIntegrationsEnabled: false)
+        let settingsIsolation = !isolatedSettings.contains(.library) && !isolatedSettings.contains(.capture)
+            && isolatedSettings.contains(.ai) && isolatedSettings.contains(.general)
+        if !settingsIsolation { failures.append("settings-external-integrations-isolation") }
+        lines.append("settings_external_integrations_isolation=\(settingsIsolation ? "ok" : "failed")")
 
         if !panelSizeCompatibility {
             failures.append("panel-size-compatibility")
@@ -86,6 +92,7 @@ enum PanelLayoutVerificationCommand {
                         actions: actions
                     )
                     .environment(\.panelTextSize, textSize)
+                    .environment(\.providerViewport, contentSize)
                     .frame(width: contentSize.width, height: contentSize.height)
 
                     let host = NSHostingView(rootView: view)
@@ -101,6 +108,57 @@ enum PanelLayoutVerificationCommand {
             }
         }
 
+        let manual = PanelLayout.manualSizeLimits()
+        let sizes = [manual.minimum, manual.maximum, CGSize(width: manual.maximum.width, height: manual.minimum.height),
+                     CGSize(width: manual.minimum.width, height: manual.maximum.height), CGSize(width: 640, height: 470)]
+        let clampedMinimum = PanelLayout.clampManualSize(CGSize(width: 1, height: 1), additionalHeight: 126)
+        let clampedMaximum = PanelLayout.clampManualSize(CGSize(width: 90000, height: 90000), additionalHeight: 126)
+        if clampedMinimum != CGSize(width: 520, height: 498) || clampedMaximum != CGSize(width: 880, height: 756) {
+            failures.append("manual-size-limits")
+        }
+        var manualCases = 0
+        let evidence = FileManager.default.temporaryDirectory.appendingPathComponent("HoverPocket-ManualLayout-" + UUID().uuidString)
+        try? FileManager.default.createDirectory(at: evidence, withIntermediateDirectories: true)
+        for (index, size) in sizes.enumerated() {
+            let viewport = CGSize(width: size.width, height: size.height - 55)
+            let metrics = CalendarPreviewMetrics(viewport: viewport)
+            let detailWidth = viewport.width - metrics.outerHorizontalPadding * 2 - metrics.paneSpacing * 2 - 1 - metrics.calendarWidth
+            if abs(metrics.dayHeight / metrics.dayWidth - 0.875) > 0.001 || detailWidth < 180 {
+                failures.append("calendar-manual-\(index)")
+            }
+            for textSize in PanelTextSizeOption.allCases {
+                let configuration = makeSettings(panelSize: .small, textSize: textSize)
+                for provider in providers {
+                    let preview = provider.manifest.id.rawValue == "google-calendar"
+                        ? AnyView(GoogleCalendarPreviewView(isActive: false, settings: configuration.settings, showsCalendarForLayoutVerification: true))
+                        : provider.makePreview(snapshot: nil, state: .idle,
+                            actions: ProviderActions(isPreviewActive: false, settings: configuration.settings))
+                    let view = preview
+                        .environment(\.panelTextSize, textSize).environment(\.providerViewport, viewport)
+                        .frame(width: viewport.width, height: viewport.height)
+                    let host = NSHostingView(rootView: view)
+                    host.frame = CGRect(origin: .zero, size: viewport); host.layoutSubtreeIfNeeded()
+                    let fitting = host.fittingSize
+                    if !fitting.width.isFinite || !fitting.height.isFinite || fitting.width > viewport.width + 1 || fitting.height > viewport.height + 1 {
+                        failures.append("manual-\(index)-\(provider.manifest.id.rawValue)-\(textSize.rawValue)")
+                    }
+                    if textSize == .medium, let bitmap = host.bitmapImageRepForCachingDisplay(in: host.bounds) {
+                        let window = NSWindow(contentRect: CGRect(origin: .zero, size: viewport), styleMask: .borderless, backing: .buffered, defer: false)
+                        window.appearance = NSAppearance(named: .darkAqua)
+                        window.contentView = host
+                        RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+                        host.layoutSubtreeIfNeeded()
+                        host.displayIfNeeded()
+                        host.cacheDisplay(in: host.bounds, to: bitmap)
+                        try? bitmap.representation(using: .png, properties: [:])?.write(to: evidence.appendingPathComponent("\(provider.manifest.id.rawValue)-\(index).png"))
+                        window.contentView = nil
+                    }
+                    manualCases += 1
+                }
+                cleanupSettingsSuite(configuration.suiteName)
+            }
+        }
+        lines.append("manual_layout_cases=\(manualCases) minimum=520x372 maximum=880x630 mixed_dimensions=true calendar_proportions=true evidence=\(evidence.path)")
         lines.insert("panel_layout_verify=\(failures.isEmpty ? "ok" : "failed")", at: 0)
         lines.insert("panel_layout_cases=\(layoutCaseCount)", at: 1)
         if !failures.isEmpty {
@@ -166,6 +224,33 @@ enum PanelLayoutVerificationCommand {
         defaults.removePersistentDomain(forName: suiteName)
         defer {
             defaults.removePersistentDomain(forName: suiteName)
+        }
+
+        let initial = AppSettings(defaults: defaults)
+        guard initial.panelAttachmentStyle == .preserveMenu,
+              !initial.automaticallyCoverMenuOnNoNotchDisplays else { return false }
+        for style in PanelAttachmentStyle.allCases {
+            AppSettings(defaults: defaults).panelAttachmentStyle = style
+            guard let independent = UserDefaults(suiteName: suiteName),
+                  independent.string(forKey: "panelAttachmentStyle") == style.rawValue,
+                  AppSettings(defaults: independent).panelAttachmentStyle == style else { return false }
+        }
+        defaults.set("future-unknown-style", forKey: "panelAttachmentStyle")
+        guard AppSettings(defaults: defaults).panelAttachmentStyle == .preserveMenu else { return false }
+
+        for automatic in [false, true] {
+            for style in PanelAttachmentStyle.allCases {
+                let settings = AppSettings(defaults: defaults)
+                settings.panelAttachmentStyle = style
+                settings.automaticallyCoverMenuOnNoNotchDisplays = automatic
+                guard let independent = UserDefaults(suiteName: suiteName),
+                      independent.bool(forKey: "automaticallyCoverMenuOnNoNotchDisplays") == automatic else { return false }
+                let reloaded = AppSettings(defaults: independent)
+                guard reloaded.automaticallyCoverMenuOnNoNotchDisplays == automatic,
+                      reloaded.panelAttachmentStyle == style,
+                      reloaded.resolvedPanelAttachmentStyle(hasNotch: true) == style,
+                      reloaded.resolvedPanelAttachmentStyle(hasNotch: false) == (automatic ? .coverMenu : style) else { return false }
+            }
         }
 
         for panelSize in PanelSizeOption.allCases {

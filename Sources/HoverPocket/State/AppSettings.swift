@@ -1,5 +1,6 @@
 import Combine
 import Foundation
+import CoreGraphics
 
 protocol AppSettingsDefaultsStoring: AnyObject {
     func set(_ value: Any?, forKey defaultName: String)
@@ -66,6 +67,17 @@ final class EphemeralAppSettingsDefaults: AppSettingsDefaultsStoring, @unchecked
 
 @MainActor
 final class AppSettings: ObservableObject {
+    @Published var panelResizing = false
+    @Published var customPanelSize: CGSize? {
+        didSet { if !panelResizing { persistPanelSize() } }
+    }
+    func persistPanelSize() {
+        defaults.set(customPanelSize.map { Double($0.width) }, forKey: "customPanelWidth")
+        defaults.set(customPanelSize.map { Double($0.height) }, forKey: "customPanelHeight")
+    }
+    @Published var chatModel: String { didSet { defaults.set(chatModel, forKey: "chatModel") } }
+    @Published var chatEffort: String { didSet { defaults.set(chatEffort, forKey: "chatEffort") } }
+    @Published var shortcuts: [String: String] { didSet { defaults.set(shortcuts, forKey: "shortcuts") } }
     @Published var codexVoiceSelection: String {
         didSet { defaults.set(codexVoiceSelection, forKey: "codexVoiceSelection") }
     }
@@ -94,6 +106,7 @@ final class AppSettings: ObservableObject {
 
     @Published var panelSize: PanelSizeOption {
         didSet {
+            customPanelSize = nil
             defaults.set(panelSize.rawValue, forKey: Self.panelSizeKey)
         }
     }
@@ -102,6 +115,18 @@ final class AppSettings: ObservableObject {
         didSet {
             defaults.set(panelTextSize.rawValue, forKey: Self.panelTextSizeKey)
         }
+    }
+
+    @Published var panelAttachmentStyle: PanelAttachmentStyle {
+        didSet { defaults.set(panelAttachmentStyle.rawValue, forKey: Self.panelAttachmentStyleKey) }
+    }
+
+    @Published var automaticallyCoverMenuOnNoNotchDisplays: Bool {
+        didSet { defaults.set(automaticallyCoverMenuOnNoNotchDisplays, forKey: Self.automaticallyCoverMenuOnNoNotchDisplaysKey) }
+    }
+
+    func resolvedPanelAttachmentStyle(hasNotch: Bool) -> PanelAttachmentStyle {
+        automaticallyCoverMenuOnNoNotchDisplays && !hasNotch ? .coverMenu : panelAttachmentStyle
     }
 
     @Published var weatherLocation: WeatherLocation {
@@ -255,6 +280,8 @@ final class AppSettings: ObservableObject {
     private static let displayPlacementModeKey = "displayPlacementMode"
     private static let panelSizeKey = "panelSize"
     private static let panelTextSizeKey = "panelTextSize"
+    private static let panelAttachmentStyleKey = "panelAttachmentStyle"
+    private static let automaticallyCoverMenuOnNoNotchDisplaysKey = "automaticallyCoverMenuOnNoNotchDisplays"
     private static let weatherLocationKey = "weatherLocation"
     private static let weatherRegionIDKey = "weatherRegionID"
     private static let weatherTemperatureUnitKey = "weatherTemperatureUnit"
@@ -282,6 +309,14 @@ final class AppSettings: ObservableObject {
 
     init(defaults: any AppSettingsDefaultsStoring = UserDefaults.standard) {
         self.defaults = defaults
+        if let w = defaults.object(forKey: "customPanelWidth") as? Double,
+           let h = defaults.object(forKey: "customPanelHeight") as? Double, w.isFinite, h.isFinite {
+            let limits = PanelLayout.manualSizeLimits()
+            customPanelSize = CGSize(width: min(limits.maximum.width, max(limits.minimum.width, w)), height: max(limits.minimum.height, h))
+        }
+        chatModel = defaults.string(forKey: "chatModel") ?? CodexAppServerPocketGenerator.model
+        chatEffort = defaults.string(forKey: "chatEffort") ?? "medium"
+        shortcuts = defaults.object(forKey: "shortcuts") as? [String: String] ?? AppShortcutBindings.defaults
         self.disabledPocketLibraries = Set(defaults.stringArray(forKey: "disabledPocketLibraries") ?? [])
         self.pocketToolReasoningEffort = defaults.string(forKey: "pocketToolReasoningEffort") ?? "medium"
         let languageRawValue = defaults.string(forKey: Self.appLanguageKey)
@@ -292,6 +327,9 @@ final class AppSettings: ObservableObject {
         self.panelSize = panelSizeRawValue.flatMap(PanelSizeOption.init(rawValue:)) ?? .medium
         let panelTextSizeRawValue = defaults.string(forKey: Self.panelTextSizeKey)
         self.panelTextSize = panelTextSizeRawValue.flatMap(PanelTextSizeOption.init(rawValue:)) ?? .small
+        self.panelAttachmentStyle = defaults.string(forKey: Self.panelAttachmentStyleKey)
+            .flatMap(PanelAttachmentStyle.init(rawValue:)) ?? .preserveMenu
+        self.automaticallyCoverMenuOnNoNotchDisplays = defaults.bool(forKey: Self.automaticallyCoverMenuOnNoNotchDisplaysKey)
         if let weatherLocationData = defaults.data(forKey: Self.weatherLocationKey),
            let weatherLocation = try? JSONDecoder().decode(
                WeatherLocation.self,

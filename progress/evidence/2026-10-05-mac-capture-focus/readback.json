@@ -1,0 +1,27 @@
+{
+  "build": "663",
+  "bundleId": "local.codex.hover-pocket.asset-dev",
+  "executableSha256": "06f8332e5935be7f8b5215a089e571e5cfe96502fc2216c0e28df2cf4ab2e547",
+  "before": {
+    "screenCaptureAuthorized": true,
+    "captureBusy": true,
+    "appActive": false,
+    "overlayVisibleProperty": true,
+    "overlayKeyWindow": false,
+    "overlayHidesOnDeactivate": true
+  },
+  "nativeUI": "capture button opened the titled capture window and the editor; user operated the app during verification",
+  "savedScreenshotReadback": {
+    "assets": 1,
+    "quickCheck": "ok",
+    "latestIsScreenshot": true,
+    "format": "png",
+    "sizeMatches": true,
+    "sha256Matches": true,
+    "pngDimensions": [
+      3024,
+      1898
+    ]
+  },
+  "rawUserCaptureIncludedInEvidence": false
+}

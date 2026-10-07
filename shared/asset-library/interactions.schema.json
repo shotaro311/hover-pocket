@@ -1,0 +1,197 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hoverpocket.app/schemas/library-interactions-v1.json",
+  "title": "HoverPocket library interaction extensions v1",
+  "oneOf": [
+    {
+      "type": "object",
+      "properties": {
+        "method": {
+          "const": "assets.update"
+        },
+        "params": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/organize"
+            },
+            {
+              "$ref": "#/$defs/undo"
+            }
+          ]
+        }
+      },
+      "required": [
+        "method",
+        "params"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "method": {
+          "const": "assets.capture"
+        },
+        "params": {
+          "$ref": "#/$defs/capture"
+        }
+      },
+      "required": [
+        "method",
+        "params"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "method": {
+          "const": "assets.preview"
+        },
+        "result": {
+          "$ref": "#/$defs/audioPreview"
+        }
+      },
+      "required": [
+        "method",
+        "result"
+      ],
+      "additionalProperties": false
+    }
+  ],
+  "$defs": {
+    "destination": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "folder"
+            },
+            "folderId": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "kind",
+            "folderId"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "enum": [
+                "trash",
+                "favorite",
+                "unfiled"
+              ]
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "organize": {
+      "type": "object",
+      "properties": {
+        "ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "minItems": 1,
+          "uniqueItems": true
+        },
+        "operation": {
+          "const": "organize"
+        },
+        "sourceFolderId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "destination": {
+          "$ref": "#/$defs/destination"
+        }
+      },
+      "required": [
+        "ids",
+        "operation",
+        "destination"
+      ],
+      "additionalProperties": false
+    },
+    "undo": {
+      "type": "object",
+      "properties": {
+        "operation": {
+          "const": "undoOrganize"
+        },
+        "undoToken": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "operation",
+        "undoToken"
+      ],
+      "additionalProperties": false
+    },
+    "capture": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "enum": [
+            "screenshot",
+            "recording",
+            "cameraPhoto",
+            "cameraVideo",
+            "audio"
+          ]
+        },
+        "folderId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "additionalProperties": false
+    },
+    "audioPreview": {
+      "type": "object",
+      "properties": {
+        "audioUrl": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "audioUrl"
+      ],
+      "additionalProperties": true
+    }
+  }
+}

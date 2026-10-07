@@ -58,10 +58,6 @@ struct PocketAppGenerationSettingsView: View {
             .foregroundStyle(.secondary)
             .fixedSize(horizontal: false, vertical: true)
 
-            libraryControls
-
-            workspaceBackupControls
-
             HStack {
                 Text("GPT-6 Astra")
                 Picker("推論の強さ", selection: $settings.pocketToolReasoningEffort) {
@@ -79,8 +75,11 @@ struct PocketAppGenerationSettingsView: View {
                 .font(.caption).foregroundStyle(.secondary)
             if let status = controller.generatorStatus { Text(status).font(.caption).foregroundStyle(.orange) }
 
+            Text(localized(japanese: "作りたいツール・直したい点", english: "Describe the tool or changes"))
+                .font(.caption).foregroundStyle(.secondary)
             TextEditor(text: $requestText)
                 .font(.system(size: 11))
+                .accessibilityLabel(localized(japanese: "ツールへの依頼", english: "Tool request"))
                 .frame(minHeight: 72, maxHeight: 110)
                 .overlay(
                     RoundedRectangle(cornerRadius: 7, style: .continuous)
@@ -239,6 +238,9 @@ struct PocketAppGenerationSettingsView: View {
                     .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
                 }
             }
+            Divider()
+            libraryControls
+            workspaceBackupControls
         }
         .confirmationDialog("「\(removalTarget.map(controller.packageTitle) ?? "ツール")」を削除", isPresented: Binding(
             get: { removalTarget != nil }, set: { if !$0 { removalTarget = nil } }

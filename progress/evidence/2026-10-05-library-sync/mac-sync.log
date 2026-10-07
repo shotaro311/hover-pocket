@@ -1,0 +1,48 @@
+PASS wire fixture asset-japanese
+PASS wire fixture folder
+PASS wire fixture trash
+PASS wire fixture restore
+PASS wire fixture unsupported-version
+PASS wire fixture wrong-group
+PASS wire fixture self-parent
+PASS wire fixture duplicate-parent
+PASS wire fixture bad-hash
+PASS wire fixture negative-size
+PASS wire fixture invalid-extension
+PASS wire fixture duplicate-folder
+PASS wire fixture asset-category-mixed
+PASS wire fixture missing-null
+PASS wire fixture unknown-field
+PASS original, parent/child folder and tag arrive
+PASS received original SHA matches
+PASS name and favorite round trip
+PASS trash propagates
+PASS restoration into folder propagates
+PASS unsent simultaneous changes remain on both devices
+PASS conflict never overwrites local edit
+PASS remote edit chain offers only its latest conflict
+PASS remote choice merges both histories
+PASS local choice merges both histories
+PASS repeated receipt creates no echo events
+PASS paused device retains changes locally
+PASS reconnect sends retained changes
+PASS empty trash never deletes remote original
+PASS remote restore recovers locally purged original from retained transport
+PASS received category deletion does not echo membership edits
+PASS same content keeps local asset ID
+PASS out of order child waits for missing parent
+PASS metadata arriving before blob stays pending
+PASS reordered history converges after blob arrives
+PASS full delayed replay retains final value
+PASS changed group stops sync
+PASS corrupt blob never becomes a library original
+PASS snapshot rollback requires sync pause
+PASS symlink transport rejected
+PASS existing data retained through rejection cases
+PASS snapshot restore keeps latest sync history and stays paused
+PASS snapshot rollback restores data without rewinding sync ancestry
+PASS unused sync remains available after ordinary DB recovery
+PASS recovered library without sync history can join
+PASS pre-sync snapshot cannot erase recovery latch
+PASS damaged sync history cannot resume automatically
+library_sync_verification=ok checks=47

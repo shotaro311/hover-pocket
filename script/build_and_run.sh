@@ -232,6 +232,11 @@ if [[ "${1:-}" != "--build-only" && "$VOICE_E2E_BUILD" != "1" && "$VOICE_E2E_BUI
   fi
 fi
 
+# Prefer the rustup toolchain as a unit (cargo and rustc must agree).
+if [[ -x "$HOME/.cargo/bin/cargo" ]]; then
+  export PATH="$HOME/.cargo/bin:$PATH"
+fi
+cargo build --release --locked --manifest-path "$ROOT_DIR/shared/pairing-helper/Cargo.toml" --target-dir "$ROOT_DIR/.build/pairing"
 swift build -c "$HOVERPOCKET_SWIFT_CONFIGURATION"
 
 if [[ "$VOICE_E2E_BUILD" == "1" || "$VOICE_E2E_BUILD" == "true" ]]; then
@@ -245,8 +250,20 @@ fi
 mkdir -p "$BUNDLE_DIR/Contents/MacOS" "$BUNDLE_DIR/Contents/Frameworks" "$BUNDLE_DIR/Contents/Resources"
 cp ".build/$HOVERPOCKET_SWIFT_CONFIGURATION/$PRODUCT_NAME" "$EXECUTABLE_PATH"
 chmod +x "$EXECUTABLE_PATH"
+cp "$ROOT_DIR/.build/pairing/release/hoverpocket-pairing" "$BUNDLE_DIR/Contents/MacOS/hoverpocket-pairing"
+mkdir -p "$BUNDLE_DIR/Contents/Resources/ThirdParty/pairing-helper"
+cp "$ROOT_DIR/shared/pairing-helper/"{LICENSE.txt,NOTICE.md,THIRD-PARTY-LICENSES.html} "$BUNDLE_DIR/Contents/Resources/ThirdParty/pairing-helper/"
 ditto "$ROOT_DIR/.build/$HOVERPOCKET_SWIFT_CONFIGURATION/HoverPocket_HoverPocket.bundle" "$BUNDLE_DIR/Contents/Resources/HoverPocket_HoverPocket.bundle"
 install_app_icon
+
+# The Windows and Mac asset panes use the same interaction code and data contract.
+mkdir -p "$BUNDLE_DIR/Contents/Resources/AssetUI/providers/assets" "$BUNDLE_DIR/Contents/Resources/AssetLibrary"
+ditto "$ROOT_DIR/Sources/HoverPocket/Resources/AssetUI" "$BUNDLE_DIR/Contents/Resources/AssetUI"
+cp "$ROOT_DIR/windows/ui/providers/assets/"*.js "$ROOT_DIR/windows/ui/providers/assets/"*.css "$BUNDLE_DIR/Contents/Resources/AssetUI/providers/assets/"
+python3 "$ROOT_DIR/script/bundle_asset_ui.py" "$BUNDLE_DIR/Contents/Resources/AssetUI/app.js"
+mkdir -p "$BUNDLE_DIR/Contents/Resources/AssetLibrary/sync-v1"
+cp "$ROOT_DIR/shared/asset-library/sync-v1/002-sync.sql" "$BUNDLE_DIR/Contents/Resources/AssetLibrary/sync-v1/"
+cp "$ROOT_DIR/shared/asset-library/001-initial.sql" "$ROOT_DIR/shared/asset-library/case-fold.json" "$ROOT_DIR/shared/asset-library/manifest.schema.json" "$BUNDLE_DIR/Contents/Resources/AssetLibrary/"
 
 SPARKLE_FRAMEWORK_PATH="$ROOT_DIR/.build/$HOVERPOCKET_SWIFT_CONFIGURATION/Sparkle.framework"
 if [[ -d "$SPARKLE_FRAMEWORK_PATH" ]]; then
@@ -263,6 +280,9 @@ fi
 # スクリプト。macOS 15.4+ ではこれがないと再生/停止・シークが効かない。
 ADAPTER_DYLIB_PATH="$ROOT_DIR/.build/$HOVERPOCKET_SWIFT_CONFIGURATION/libMediaRemoteAdapter.dylib"
 ADAPTER_RUN_SCRIPT="$ROOT_DIR/.build/$HOVERPOCKET_SWIFT_CONFIGURATION/MediaRemoteAdapter_MediaRemoteAdapter.bundle/run.pl"
+if [[ ! -f "$ADAPTER_RUN_SCRIPT" ]]; then
+  ADAPTER_RUN_SCRIPT="$ROOT_DIR/.build/$HOVERPOCKET_SWIFT_CONFIGURATION/MediaRemoteAdapter_MediaRemoteAdapter.bundle/Contents/Resources/run.pl"
+fi
 if [[ -f "$ADAPTER_DYLIB_PATH" && -f "$ADAPTER_RUN_SCRIPT" ]]; then
   cp "$ADAPTER_DYLIB_PATH" "$BUNDLE_DIR/Contents/Frameworks/libMediaRemoteAdapter.dylib"
   cp "$ADAPTER_RUN_SCRIPT" "$BUNDLE_DIR/Contents/Resources/mediaremote-adapter.pl"
@@ -273,7 +293,8 @@ elif [[ "$HOVERPOCKET_SWIFT_CONFIGURATION" == "release" ]]; then
   echo "error: Release mediaremote-adapter artifacts not found" >&2
   exit 1
 else
-  echo "warning: mediaremote-adapter artifacts not found; media commands will not work" >&2
+  echo "error: mediaremote-adapter artifacts not found; app cannot launch" >&2
+  exit 1
 fi
 
 cat > "$BUNDLE_DIR/Contents/Info.plist" <<PLIST
@@ -315,7 +336,7 @@ ${SPARKLE_PLIST}  <key>SUEnableInstallerLauncherService</key>
   <key>NSMicrophoneUsageDescription</key>
   <string>ホバーポケット uses the microphone for Voice conversations with OpenAI Realtime or the local Codex app-server, and for the mirror microphone check.</string>
   <key>NSLocalNetworkUsageDescription</key>
-  <string>ホバーポケット uses local network access only to establish WebRTC Voice connections. It does not browse for nearby devices.</string>
+  <string>ホバーポケット uses local network access to establish WebRTC Voice connections and connect to the local Syncthing sync service. It does not browse for nearby devices.</string>
   <key>NSLocationUsageDescription</key>
   <string>ホバーポケット uses your location only when you choose Current Location for the weather forecast.</string>
   <key>NSLocationWhenInUseUsageDescription</key>
@@ -340,6 +361,7 @@ if [[ -n "$CODESIGN_IDENTITY" ]]; then
   if [[ -f "$ENTITLEMENTS_PATH" ]]; then
     codesign_args+=(--entitlements "$ENTITLEMENTS_PATH")
   fi
+  codesign "${codesign_args[@]}" "$BUNDLE_DIR/Contents/MacOS/hoverpocket-pairing" >/dev/null
   codesign "${codesign_args[@]}" "$BUNDLE_DIR" >/dev/null
   echo "Signed $APP_NAME.app with $CODESIGN_IDENTITY"
 else

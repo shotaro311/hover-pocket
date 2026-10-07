@@ -36,9 +36,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var voiceTerminationTask: Task<Void, Never>?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        if !CommandLine.arguments.contains(where: { $0.hasPrefix("--verify") }) && HoverPocketRuntimeEnvironment.shared.externalIntegrationsEnabled {
+            AssetLibrarySyncController.shared.start()
+        }
         NSApp.setActivationPolicy(.accessory)
         configureAINativeRuntimeIfEnabled()
         observeAINativeRuntimeSetting()
+        if !HoverPocketRuntimeEnvironment.shared.isIsolatedVoiceE2E { AssetCaptureController.shared.start() }
         hoverWindowController.connectAppController()
         configureVoiceRuntime()
         observeVoiceRuntimeSettings()
@@ -307,7 +311,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         guard voiceTerminationTask == nil else { return .terminateLater }
+        for editor in AssetLibraryRuntime.shared.editorSessions where !editor.cancel() { return .terminateCancel }
         voiceTerminationTask = Task { @MainActor [weak self] in
+            await LibraryDevicePairingController.shared.shutdown()
+            if AssetCaptureController.shared.recording { await AssetCaptureController.shared.stopRecording() }
             await self?.voiceConfigurationTask?.value
             await CodexVoiceAccountLoginController.shared.shutdown()
             await VoiceLaneRuntime.shared.shutdown()

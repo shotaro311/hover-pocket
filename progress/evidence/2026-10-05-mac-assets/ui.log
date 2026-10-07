@@ -1,0 +1,37 @@
+PASS Windows interaction suite in WKWebView: nil
+PASS native bridge renders persisted assets: ファイル
+↓ 降順
+▧
+検証画像 編集.png
+7.3 KB
+☆
+▶
+検証動画.mp4
+9.5 KB
+☆
+PDF
+検証.pdf
+11.1 KB
+☆
+▧
+検証画像.png
+5.0 KB
+☆
+TXT
+新しい名前.txt
+19 B
+★
+素材を選ぶと詳細が表示されます。
+5件
+PASS native image preview
+PASS editor failed save retains annotations and permits retry
+PASS editor saves once and returns to preview
+PASS editor preserves original image hash
+PASS preview close invalidates UI
+PASS native MP4 playback and seeking
+PASS native fullscreen entered
+PASS fullscreen exit preserves player and seek time
+PASS preview close releases player source within 100ms
+PASS native PDF page switching
+PASS 20 animated notch preview and fullscreen cycles
+asset_verification=ok checks=58

@@ -19,7 +19,7 @@ using WpfColor = System.Windows.Media.Color;
 
 namespace HoverPocket.Shell.Windows;
 
-internal sealed class HoverShellController : IDisposable
+internal sealed partial class HoverShellController : IDisposable
 {
     public static readonly TimeSpan CloseDelay = TimeSpan.FromMilliseconds(60);
     public static readonly TimeSpan PollingInterval = TimeSpan.FromMilliseconds(120);
@@ -62,6 +62,14 @@ internal sealed class HoverShellController : IDisposable
     private bool _panelExpectedVisible;
     private bool _previewFocusDismissed;
     private AssetOrganizerWindow? _assetOrganizer;
+    private AssetDropOverlayWindow? _assetDropOverlay;
+    internal AssetDropOverlayWindow? DropOverlayForVerify => _assetDropOverlay;
+    private async Task OpenChatAsync()
+    {
+        await ShowPanelAsync(ResolveLayoutForPointer());
+        _panel.BeginKeyboardInteraction();
+    }
+    private void OnChatLayoutChanged() => _dispatcher.BeginInvoke(() => ResyncDisplayLayout(animateVisiblePanel: true));
     private bool _assetDragActive;
     private int _assetDragRevision;
     private async void OnAssetDragChanged(bool active)
@@ -86,6 +94,16 @@ internal sealed class HoverShellController : IDisposable
         _assetOrganizer = new AssetOrganizerWindow(_panelBridgeController, _applicationData.RootDirectory);
         _assetOrganizer.Closed += (_, _) => _assetOrganizer = null;
         _assetOrganizer.Show(); _assetOrganizer.Activate();
+    }
+    internal async Task<bool> OpenAssetLibraryForVoiceAsync(string? assetId, CancellationToken token)
+    {
+        if (_assetOrganizer is null)
+        {
+            _assetOrganizer = new AssetOrganizerWindow(_panelBridgeController, _applicationData.RootDirectory) { ShowActivated = false };
+            _assetOrganizer.Closed += (_, _) => _assetOrganizer = null;
+            _assetOrganizer.Show();
+        }
+        return await _assetOrganizer.ShowForVoiceAsync(assetId, token);
     }
     private bool _captureOrganizerVisible;
     private bool _captureSuppressed;
@@ -142,6 +160,9 @@ internal sealed class HoverShellController : IDisposable
             voiceE2EReceiptStore: voiceE2EReceiptStore,
             isolatedVoiceE2EDefaults: isolatedVoiceE2EDefaults);
         _panelBridgeController.SettingsChanged += OnPanelSettingsChanged;
+        _panelBridgeController.ChatRequested = OpenChatAsync;
+        _panelBridgeController.ChatApprovalOwner = () => _panel;
+        _panelBridgeController.ChatLayoutChanged += OnChatLayoutChanged;
         _panelBridgeController.SettingsOpenRequested += OnSettingsOpenRequested;
         _panelBridgeController.TimerAlertFired += OnTimerAlertFired;
         _panelBridgeController.TimerAlertChanged += OnTimerAlertChanged;
@@ -168,7 +189,7 @@ internal sealed class HoverShellController : IDisposable
             var pointer = GetPointerPosition();
             var inside = IsPointerInHoverRegion(pointer, out var hoveredLayout);
             TraceHover("close-delay", pointer, inside, hoveredLayout, inside ? "keep-open" : "close");
-            if (!_timerAlertActive && !_panel.AssetLayout.PinOnly && !_assetDragActive && !inside)
+            if (!_timerAlertActive && !KeepPanelForVoice && !_panel.AssetLayout.PinOnly && !_assetDragActive && !inside)
             {
                 _ = HidePanelAsync();
             }
@@ -320,6 +341,8 @@ internal sealed class HoverShellController : IDisposable
 
         _panel.Win32MessageReceived -= OnWindowWin32MessageReceived;
         _assetOrganizer?.Close();
+        _assetDropOverlay?.Close();
+        _panelBridgeController.ChatLayoutChanged -= OnChatLayoutChanged;
         _panelBridgeController.SettingsChanged -= OnPanelSettingsChanged;
         _panelBridgeController.SettingsOpenRequested -= OnSettingsOpenRequested;
         _panelBridgeController.TimerAlertFired -= OnTimerAlertFired;
@@ -350,7 +373,7 @@ internal sealed class HoverShellController : IDisposable
         DisplaySurfaceLayout? layout,
         bool bypassFullscreenSuppression = false)
     {
-        if (_captureSuppressed) return;
+        if (_captureSuppressed || _assetDropOverlay?.IsVisible == true) return;
         if (bypassFullscreenSuppression) _previewFocusDismissed = false;
         if (!bypassFullscreenSuppression
             && _pointerOverrideForVerify is null
@@ -472,10 +495,12 @@ internal sealed class HoverShellController : IDisposable
         _settingsWindow.Activate();
     }
 
+    private bool KeepPanelForVoice => _panel.IsVisible && (_panelBridgeController.KeepPanelForChat || _manualResizing
+        || _panel.OwnedWindows.OfType<Window>().Any(window => window.IsVisible));
     private void PollPointer()
     {
-        if (_captureSuppressed) return;
-        if (_panel.AssetLayout.PinOnly || _assetDragActive) { _closeDelayTimer.Stop(); return; }
+        if (_captureSuppressed || _assetDropOverlay?.IsVisible == true) return;
+        if (_panel.AssetLayout.PinOnly || _assetDragActive || KeepPanelForVoice) { _closeDelayTimer.Stop(); return; }
         var pointer = GetPointerPosition();
         if (_previewFocusDismissed)
         {
@@ -582,6 +607,16 @@ internal sealed class HoverShellController : IDisposable
 
     private WindowPlacement EffectivePanelTarget(DisplaySurfaceLayout layout)
     {
+        var custom = _interactivePanelSize ?? (_panelBridgeController.CurrentSettings.PanelWidthDips is { } savedWidth && _panelBridgeController.CurrentSettings.PanelHeightDips is { } savedHeight ? new System.Windows.Size(savedWidth, savedHeight) : (System.Windows.Size?)null);
+        if (!_panel.AssetLayout.Fullscreen && custom is { } customBounds)
+        {
+            var monitor = layout.Monitor; var top = layout.PanelTarget.DipRect.Top;
+            var bounded = ResizeLimits(layout).Clamp(customBounds);
+            var width = Math.Min(bounded.Width, monitor.WorkArea.Width / monitor.ScaleX);
+            var height = Math.Min(bounded.Height, monitor.WorkArea.Bottom / monitor.ScaleY - top);
+            var left = Math.Clamp(layout.PanelTarget.DipRect.Left + (layout.PanelTarget.DipRect.Width - width) / 2, monitor.WorkArea.Left / monitor.ScaleX, monitor.WorkArea.Right / monitor.ScaleX - width);
+            return new WindowPlacement(new Rect(left, top, width, height), new PhysicalRect((int)Math.Round(left * monitor.ScaleX), layout.PanelTarget.PhysicalRect.Top, (int)Math.Round(width * monitor.ScaleX), (int)Math.Round(height * monitor.ScaleY)));
+        }
         if (_panel.AssetLayout is { Active: true } asset && (!asset.PinOnly || asset.Width > 0 && asset.Height > 0 || asset.Fullscreen || asset.Organizer))
         {
             var monitor = layout.Monitor;
@@ -601,14 +636,22 @@ internal sealed class HoverShellController : IDisposable
             var left = Math.Clamp(normal.Left + (normal.Width - width) / 2, monitor.WorkArea.Left / monitor.ScaleX, monitor.WorkArea.Right / monitor.ScaleX - width);
             return new WindowPlacement(new System.Windows.Rect(left, normal.Top, width, height), new PhysicalRect((int)Math.Round(left * monitor.ScaleX), layout.PanelTarget.PhysicalRect.Top, (int)Math.Round(width * monitor.ScaleX), (int)Math.Round(height * monitor.ScaleY)));
         }
+        var baseTarget = layout.PanelTarget;
+        var chatHeight = _panelBridgeController.ChatHeight;
+        var withChat = new WindowPlacement(
+            new Rect(baseTarget.DipRect.Left, baseTarget.DipRect.Top, baseTarget.DipRect.Width, baseTarget.DipRect.Height + chatHeight),
+            new PhysicalRect(baseTarget.PhysicalRect.Left, baseTarget.PhysicalRect.Top, baseTarget.PhysicalRect.Width, baseTarget.PhysicalRect.Height + (int)Math.Round(chatHeight * layout.Monitor.ScaleY)));
         var target = VoicePanelGeometry.ExtendDownward(
-            layout.PanelTarget,
+            withChat,
             layout.Monitor,
             _panelBridgeController.CurrentSettings.PanelSize,
-            _panelBridgeController.PreferredRuntimeVoiceLaneMode,
+            _panelBridgeController.VoiceSnapshot.RealtimeAttached ? _panelBridgeController.PreferredRuntimeVoiceLaneMode : VoiceLaneMode.Disabled,
             out var resolvedMode);
         _panelBridgeController.SetResolvedVoiceLaneMode(resolvedMode);
-        return target;
+        var availableHeight = Math.Max(1, layout.Monitor.WorkArea.Bottom - target.PhysicalRect.Top);
+        if (target.PhysicalRect.Height <= availableHeight) return target;
+        return new WindowPlacement(new Rect(target.DipRect.Left, target.DipRect.Top, target.DipRect.Width, availableHeight / layout.Monitor.ScaleY),
+            new PhysicalRect(target.PhysicalRect.Left, target.PhysicalRect.Top, target.PhysicalRect.Width, availableHeight));
     }
 
     private static bool IsInsideInflatedPlacement(
@@ -706,12 +749,28 @@ internal sealed class HoverShellController : IDisposable
         accessSurface.CanImportAssets = () => _panelBridgeController.AssetsVisible;
         accessSurface.UpdateAppearance(_panelBridgeController.CurrentSettings);
         accessSurface.HoverEntered += OnAccessSurfaceHoverEntered;
-        accessSurface.AssetDragChanged += OnAssetDragChanged;
+        accessSurface.AssetDragChanged += active =>
+        {
+            if (!active || !_panelBridgeController.AssetsVisible) return;
+            _assetDropOverlay ??= new AssetDropOverlayWindow(_panelBridgeController.AssetLibrary, _panel.ReceiveAssetPayloadAsync);
+            _assetDropOverlay.ShowAt(accessSurface);
+            _closeDelayTimer.Stop(); _ = HidePanelAsync();
+        };
         accessSurface.AssetDropped += async data =>
         {
             if (!_panelBridgeController.AssetsVisible) return;
-            await _panelBridgeController.BeginAssetDropAsync(); await ShowPanelAsync(ResolveLayoutForPointer());
-            await _panelBridgeController.FinishAssetDropAsync(true); await _panel.ReceiveAssetDropAsync(data);
+            try
+            {
+                var payload = Providers.Assets.AssetDropPayload.Capture(data, _panelBridgeController.AssetLibrary.Root);
+                _assetDropOverlay ??= new AssetDropOverlayWindow(_panelBridgeController.AssetLibrary, _panel.ReceiveAssetPayloadAsync);
+                _assetDropOverlay.ShowAt(accessSurface);
+                await _assetDropOverlay.ImportAsync(payload, null);
+            }
+            catch (Exception ex)
+            {
+                _assetDropOverlay ??= new AssetDropOverlayWindow(_panelBridgeController.AssetLibrary, _panel.ReceiveAssetPayloadAsync);
+                _assetDropOverlay.ShowAt(accessSurface); _assetDropOverlay.ShowFailure(ex is ArgumentException or IOException ? ex.Message : "取り込めませんでした。元のデータは保持しています。");
+            }
         };
         accessSurface.Win32MessageReceived += OnWindowWin32MessageReceived;
         accessSurface.EnsureHandle();
@@ -748,6 +807,7 @@ internal sealed class HoverShellController : IDisposable
 
     private void AttachPanelWindow(PanelWindow panel)
     {
+        panel.UserResize += OnUserResize;
         panel.AssetDragChanged += OnAssetDragChanged;
         panel.AssetOrganizerRequested += OpenAssetLibraryFromUser;
         panel.AssetPreviewDismissRequested += () =>
@@ -994,7 +1054,7 @@ internal sealed class HoverShellController : IDisposable
 
     private void OnAccessSurfaceHoverEntered(object? sender, EventArgs e)
     {
-        if (_previewFocusDismissed) return;
+        if (_previewFocusDismissed || _assetDropOverlay?.IsVisible == true) return;
         if (!_panel.IsVisible && IsTopEdgeSuppressed())
         {
             return;
@@ -1323,7 +1383,8 @@ internal sealed class HoverShellController : IDisposable
             return;
         }
 
-        var panelSizeChanged = _lastAppliedSettings.PanelSize != settings.PanelSize
+        try { _panelBridgeController.VoiceCapture?.ApplyShortcuts(settings.Shortcuts); } catch (ArgumentException ex) { AppDiagnostics.Record("shortcuts.registration.failed", ex); }
+        var panelSizeChanged = _lastAppliedSettings.PanelWidthDips != settings.PanelWidthDips || _lastAppliedSettings.PanelHeightDips != settings.PanelHeightDips || _lastAppliedSettings.PanelSize != settings.PanelSize
             || _lastAppliedSettings.PanelAttachmentStyle != settings.PanelAttachmentStyle
             || _lastAppliedSettings.AutomaticScreenEdgeAttachment != settings.AutomaticScreenEdgeAttachment
             || _lastAppliedSettings.ReduceMotion != settings.ReduceMotion;

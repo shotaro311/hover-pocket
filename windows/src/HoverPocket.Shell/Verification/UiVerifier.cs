@@ -36,8 +36,20 @@ internal sealed class UiVerifier
                 _failures.Add("webview: UI did not report ready within 8s");
             }
 
+            if (ready && Environment.GetEnvironmentVariable("HOVERPOCKET_SYNC_VERIFY_ONLY") == "1")
+                return await AssetSyncVerifier.RunAsync(_controller);
             if (ready && Environment.GetEnvironmentVariable("HOVERPOCKET_RESPONSE_VERIFY_ONLY") == "1")
                 return await ProviderResponseVerifier.RunAsync(_controller.Panel.WebView!);
+            if (ready && Environment.GetEnvironmentVariable("HOVERPOCKET_LIBRARY_EXTENSIONS_VERIFY_ONLY") == "1")
+                return await LibraryExtensionsVerifier.RunAsync(_controller);
+            if (ready && Environment.GetEnvironmentVariable("HOVERPOCKET_VOICE_LIBRARY_VERIFY_ONLY") == "1")
+                return await VoiceLibraryVerifier.RunAsync(_controller);
+            if (ready && Environment.GetEnvironmentVariable("HOVERPOCKET_CHAT_PANEL_VERIFY_ONLY") == "1")
+                return await CodexChatVerifier.RunPanelAsync(_controller);
+            if (ready && Environment.GetEnvironmentVariable("HOVERPOCKET_RESIZE_VERIFY_ONLY") == "1")
+                return await PanelResizeVerifier.RunAsync(_controller);
+            if (ready && Environment.GetEnvironmentVariable("HOVERPOCKET_INLINE_CHAT_LIVE_VERIFY_ONLY") == "1")
+                return await InlineChatPanelVerifier.RunLiveAsync(_controller);
             if (ready && Environment.GetEnvironmentVariable("HOVERPOCKET_CLIPBOARD_LOAD_VERIFY_ONLY") == "1")
                 return await ClipboardLoadVerifier.RunAsync(_controller);
             if (ready && Environment.GetEnvironmentVariable("HOVERPOCKET_PREVIEW_MOTION_VERIFY_ONLY") == "1")

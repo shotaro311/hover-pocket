@@ -1,0 +1,19 @@
+UI verify: WebView2 host + bridge + provider registry + settings
+PASS cold top-edge open: panel_visible_before_webview_ready=true, dispatch_ms=32.7
+MEASURE draft host: matched=True, focus=True; UI={"active":"TEXTAREA","status":"Enterで送信","value":"未送信の下書き"}
+PASS inline chat: typed entry works with voice off and starts no runtime until Send
+PASS inline chat: focused text input prevents hover auto-hide
+PASS inline chat: IME confirm, trailing Enter and Shift+Enter never submit
+PASS inline chat: Enter sends once through the existing runtime
+PASS inline chat: stream preserves input node, composition/caret and renders replies as selectable plain text
+PASS inline chat: responding prevents hover auto-hide after input blur
+PASS inline chat: small composer/stop fit viewport and long replies scroll internally
+PASS inline chat: extraLarge composer/stop fit viewport and long replies scroll internally
+PASS inline chat: manual hide keeps conversation, running response and draft
+PASS inline chat: hover reopens the manually hidden panel during a response
+PASS inline chat: Stop interrupts the same response once and preserves follow-up draft
+PASS inline chat: history resumes only the owned conversation and restores its draft
+PASS inline chat: reply text can be selected for copy
+PASS inline chat: chat keyboard input cannot trigger library trash, undo or preview shortcuts
+PASS inline chat: Escape hides the panel without losing draft
+PASS inline chat panel: direct entry, IME guard, stream/caret, bounded layout, pin/hide/reopen, stop, new/history, voice-off and single runtime

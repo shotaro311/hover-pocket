@@ -21,6 +21,7 @@ namespace HoverPocket.Shell.Capture;
 internal sealed class ScreenshotSelectionWindow : Window
 {
     private readonly BitmapSource _screen;
+    private readonly bool _selectionOnly;
     private readonly DrawingRect _bounds;
     private readonly DrawingRect[] _windows;
     private readonly Canvas _overlay = new() { Background = Brushes.Transparent };
@@ -36,11 +37,12 @@ internal sealed class ScreenshotSelectionWindow : Window
     public BitmapSource? Result { get; private set; }
     public Exception? Error { get; private set; }
     internal ScreenshotEditorView? EditorForVerify => _editor;
-    internal Int32Rect RegionForVerify => _region;
+    internal Int32Rect Region => _region;
     internal DrawingRect[] WindowsForVerify => _windows;
 
-    public ScreenshotSelectionWindow(BitmapSource screenshot, DrawingRect bounds, Func<BitmapSource, EditedScreenshot, Task>? save = null)
+    public ScreenshotSelectionWindow(BitmapSource screenshot, DrawingRect bounds, Func<BitmapSource, EditedScreenshot, Task>? save = null, bool selectionOnly = false)
     {
+        _selectionOnly = selectionOnly;
         _screen = screenshot; _bounds = bounds; _save = save; _windows = ReadWindows(bounds);
         WindowStyle = WindowStyle.None; ResizeMode = ResizeMode.NoResize; Topmost = true; ShowInTaskbar = false;
         Title = "撮影・編集 — HoverPocket"; Background = Brushes.Black; Cursor = Cursors.Cross;
@@ -120,6 +122,7 @@ internal sealed class ScreenshotSelectionWindow : Window
         {
             _region = rect ?? new(0, 0, _screen.PixelWidth, _screen.PixelHeight);
             var original = _region == new Int32Rect(0, 0, _screen.PixelWidth, _screen.PixelHeight) ? _screen : Crop(_screen, _region);
+            if (_selectionOnly) { Result = original; DialogResult = true; return; }
             _editor = new ScreenshotEditorView(original, captureOverlay: true);
             _editor.SaveAsync = result => _save?.Invoke(original, result) ?? Task.CompletedTask;
             _editor.Finished += result => { if (result is not null) Result = result.Image; Dispatcher.BeginInvoke(new Action(Close)); };

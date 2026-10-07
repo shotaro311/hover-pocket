@@ -1,0 +1,10 @@
+{
+  "scope": "asset UI verification cleanup uses the shared Voice detach path",
+  "evidenceRoot": "/var/folders/mv/0d7m444d25d_q88sj2wfntj80000gn/T/HoverPocket-Assets-dv242j",
+  "bundleId": "local.codex.hover-pocket.asset-dev",
+  "build": "662",
+  "executableSha256": "933d1886d61ba7ac61285676629e06e754afd61f8938be93862d7f48ccb888ed",
+  "voiceContractCases": 42,
+  "assetSuiteExitCode": 0,
+  "voiceFoundationExitCode": 0
+}

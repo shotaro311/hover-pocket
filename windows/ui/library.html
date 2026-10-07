@@ -4,7 +4,7 @@
 import {request} from './js/bridge.js';
 import {renderAssetsProvider} from './providers/assets/assets.js';
 const settings=await request('assets.language'); document.documentElement.lang=settings.language;
-renderAssetsProvider({container:document.querySelector('#library'),request,state:{organizer:true,settings}});
+window.hpLibrary=renderAssetsProvider({container:document.querySelector('#library'),request,state:{organizer:true,settings}});
 if(innerWidth>=800) document.querySelector('.assets-root').classList.add('show-sidebar');
 window.__hoverPocketReady=true;
 </script></body></html>

@@ -1,0 +1,13 @@
+{
+  "result": "passed",
+  "windowsInviteMacJoin": true,
+  "macInviteWindowsJoin": true,
+  "generatedAssetsEach": 2,
+  "originalShaMatches": true,
+  "independentMetadataMatches": true,
+  "scopedUnlinkPreservesGlobalDevice": true,
+  "mediaTransport": "SSH tunnel to isolated loopback Syncthing",
+  "pairingTransport": "public TLS rendezvous, encrypted test identities, explicitly authorized",
+  "productionLibraryUsed": false,
+  "codesPersisted": false
+}

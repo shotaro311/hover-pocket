@@ -1,9 +1,93 @@
 ---
 project_slug: hover-menu-preview
-updated: 2026-10-04
+updated: 2026-10-06
 updated_by: codex
-status: windows-0.2.10-installed; public-windows-0.2.10; reported-freeze-incident-unconfirmed-reproduced-preview-races-fixed; published-macos-644; macos-asset-library-pending
+status: chat-duplicate-windows-57816-running; macos-676-71460-running; reply-normalization-and-live-ui-verified; original-trigger-unconfirmed; macos-recording-permission-pending
 ---
+
+## 2026-10-06 チャットの二重表示を防ぐ処理
+
+- 同じターンの同じ返信を複数IDで受け取った場合の重複と、確定後の遅延文字列を防止。Macも確定通知で本文を更新する。別ターンの同じ回答は維持する。画像の症状の発生条件は未特定。
+- Windowsのコア25・実パネル40項目、Macの会話37項目が成功。Windowsの同じ入力の実接続と画面では返信1件を確認。Windows57816とMac676／71460を起動。[調査・修正・検証・readback](2026-10/2026-10-06_hover-pocket-chat-duplicate.md)。
+
+## 2026-10-06 モデル選択が反映されない問題
+
+- Windowsで実クリックの途中にメニューが閉じ、選択が取り消される問題を修正。再表示後の名称、保存値、次の送信要求へのモデル／推論の反映を確認した。
+- Windowsの会話39項目、Macの選択／保存を含む会話33項目が成功。修正版Windows56640を起動し、Mac675／67480の稼働を確認。[原因・検証・readback](2026-10/2026-10-06_hover-pocket-model-selection.md)。
+
+## 2026-10-06 モデル・推論メニューの自動収納
+
+- モデル／推論の選択中にパネルが閉じる問題を両OSで修正。メニュー表示中だけ保持し、選択・取消・フォーカス解除後は通常のホバー収納へ戻す。Windowsは選択肢をパネル内へ収める。
+- Windowsの会話37項目・全UI、Macの実メニュー選択／取消・100回開閉・会話・配置128＋160条件が成功。Windows90728とMac開発版675／67480を起動。[修正・検証・readback](2026-10/2026-10-06_hover-pocket-model-menu.md)。
+
+## 2026-10-06 ライブラリ・AIのUIUXレビューと改善
+
+- 両OSのライブラリに空表示・検索0件の案内、絞り込み解除、読み込み失敗時の再読み込みを追加。AIのエラーから設定への導線、下書き保持、推論名称を改善し、Macの履歴選択と自作ツール画面の順序も整理した。
+- 共通ライブラリUI62項目、Windowsの全UI・会話・サイズ70条件、Macの保存54・UI77・会話・配置128＋160条件が成功。Windows44216とMac開発版674／65973を起動。[レビュー・変更・検証](2026-10/2026-10-06_hover-pocket-library-ai-ux.md)。
+
+## 2026-10-06 自由サイズの上下限と配置
+
+- 最小を旧Small、最大を旧Extra Largeの約15%増へ制限。ドラッグ中もカレンダーの日付比率と左右の幅、各画面のカード・一覧・スクロールを表示領域へ合わせる。最小Controlsの隠れた操作とMac本文の余白による切れも修正した。
+- Windowsの70条件と既存全UI・会話、Macの128＋160条件と100回開閉等が成功。修正版Windows71160とMac開発版673／62003を起動した。[変更・検証・readback](2026-10/2026-10-06_hover-pocket-resize-layout.md)。前回のMac実録画はOS許可待ち。
+
+## 2026-10-06 会話UI・キー設定・範囲録画・自由サイズ
+
+- WindowsとMacへ履歴サイドバー、入力／音声／送信、モデル／推論、進行表示、会話中のホバー収納、8操作のキー設定、範囲収録、右下のサイズ変更を実装した。音声文字起こし専用は現行接続で非対応のため理由付きで無効。
+- Windowsは修正版69504が起動し、会話・モデル／推論・キー保存・実範囲動画・全UI検査が成功。Macは開発版672が起動し、会話と100回開閉等が成功。Macの実録画はOSの画面収録許可待ち。変更は独立worktreeに未コミットで保持。[変更と検証の記録](2026-10/2026-10-06_hover-pocket-conversation-ux.md) / [共通仕様](../docs/requirement/conversation-ux-20261006.md)。
+
+## 2026-10-06 設定画面と端末のコード接続
+
+- Mac開発版671とWindows候補に、6カテゴリの設定、短期コードの表示/入力、相手の明示承認、端末一覧/解除を実装。両OSの共通helperとWindowsの停止状態復旧修正を開発ブランチへ統合した。
+- 模擬API・接続状態・取消と既存機能の検査に加え、公開TLS仲介で両方向のコード接続が成功。隔離SyncthingとSSH転送で生成素材2件の往復・原本SHA一致・専用共有だけの解除を両端末で確認。Mac実画面の日本語/英語、署名とライセンス同梱を確認した。
+- 実19素材の原本・DB内容とEagle共有を保持。既存同期は39ファイル・need0・errors0。Mac/Windows候補は開発版で、main統合・公開配信は未実施。大量素材の速度・長期運用は別受入。[Macの記録](2026-10/2026-10-06_hover-pocket-mac-pairing.md) / [Windowsの記録](2026-10/2026-10-06_hover-pocket-windows-settings-pairing.md)。
+
+## 2026-10-05 Eagle方式のMac・Windows素材同期
+
+- 各端末のDBを保持し、Syncthingの専用フォルダで原本と変更記録を交換する同期を実装。Mac開発版668の「設定 → データと履歴」に新規接続・参加・停止・再開・競合解決を追加し、初期状態はオフ。
+- Macの同期47検査、既存機能の回帰検査、実SyncthingでMac→Windows→Macの素材・分類・名前・お気に入り・ゴミ箱/復元と原本SHA一致を確認。Windows担当の同期102項目・保存/復旧120項目と設定UI検査も成功。Mac `d8f97c8` とWindows `c66c0a8` を統合PR #44へ集約。統合コード `7a148b5` のMac/Windows CIと3 OS契約比較は全成功。
+- ユーザー承認後、専用共有を追加して両端末の実ライブラリ同期を有効化。Mac3件・Windows16件を保全し、双方19件（通常14/ゴミ箱5）、原本全SHAと同期対象情報の一致、保留/競合0を確認。Mac開発版668・Windows開発版c66c0a8が稼働。既存Eagle共有は保持。[実装・検証記録](2026-10/2026-10-05_hover-pocket-library-sync.md) / [使い方](../docs/usage/asset-library-sync.md)。
+
+## 2026-10-05 チャットをパネル内へ統合
+
+- Mac開発版667に下部の常設入力欄、同じパネル内の返信/履歴、Enter送信・Shift+Enter改行・停止・新規会話を実装。別チャット画面を廃止した。
+- 4サイズ・100回開閉と入力/IMEを検査し、実パネルの返信・会話再開・停止・Esc収納後の下書き保持を確認。Windows担当の `678c2ae` を取り込み、同じパネルでの実返信とUI検査記録を読み戻した。両OSを統合PR #44へpushし、最終CIはPRのchecksで確認する。[作業記録](2026-10/2026-10-05_hover-pocket-inline-chat.md)。
+
+## 2026-10-05 ライブラリ操作・撮影・チャットの拡張
+
+- Mac/Windowsにフォルダ・ゴミ箱へのドラッグ整理/復元/Undo、外部取り込みパネル、カメラ写真/動画/録音、音声プレビュー、通常Codex chatを実装し、[統合Draft PR #44](https://github.com/shotaro311/hover-pocket/pull/44)へcommit/push。Windows担当の[PR #47](https://github.com/shotaro311/hover-pocket/pull/47)も含む。
+- Mac開発版666を起動。保存54・UI70・chat9・AI Library53と既存検査、実Codex応答と再起動後の会話再開を確認。Windowsは保存120、実drag移動/Undo/復元・外部取り込み・chat実接続を担当端末で確認。統合検査の旧参照を修正し、Mac/Windows CIと3 OS契約比較が成功した。
+- 音声入力専用は検証したChatGPTログイン経路で未対応のため理由付き無効。Macの人の実ドラッグ、物理camera/mic収録等は未受入。Windows通常版を維持し、公開版・mainは更新していない。[仕様・検証・残る受入](2026-10/2026-10-05_hover-pocket-library-extensions.md)。
+
+## 2026-10-05 MacにAIの素材ライブラリ操作を追加
+
+- Windows作業版の11操作に対応する検索・プレビュー・名前変更・お気に入り・分類・フォルダ作成・撮影・収録をMac開発版665へ追加。承認前の撮影対象固定、音声確認、再送と古い停止依頼の防止、保存結果の読み戻しを実装した。
+- 実装 `a9a6bb7` をpushし、remote/PRのSHA一致とMac・Windows CI成功を確認。PR #44はDraft。
+- AI操作52項目、素材保存40・UI58・再開2、既存AI操作・Broker、レイアウト128と100回開閉が通過。665を開発アプリへ起動し直した。現在の音声Providerはオフ。実マイク・外部Realtime接続による今回の機能の発話確認、Windows実機、公開・main統合は未実施。[検証と引き継ぎ](2026-10/2026-10-05_hover-pocket-mac-library-voice.md) / [共通操作仕様](../docs/requirement/asset-library-voice.md)。
+
+## 2026-10-05 Macのノッチ接合部の段差を修正
+
+- 曲線の起点を左右2pt内側へずらす処理を外し、ノッチの縁へ1物理ピクセル重ねる形に修正。開発版664を起動した。
+- 旧コードで失敗する左右端の回帰検証、実描画の隙間・横線0ピクセル、4サイズ・100回開閉・レイアウト128ケース等が通過。現在は外部画面のみのため、物理ノッチとの見た目は内蔵画面での確認が残る。[作業記録](2026-10/2026-10-05_hover-pocket-mac-notch-alignment.md)。
+
+## 2026-10-05 Macの撮影画面が開かない問題を修正
+
+- 撮影画面がアプリの非アクティブ状態で隠れ、キー入力を受け取らない問題を修正。開発版663を起動し、素材画面の撮影ボタンから撮影・編集画面が開くことを確認した。
+- 背面からの開始、非アクティブ時の表示保持、Esc取消の3条件と、保存40項目・UI58項目・再開2項目・既存機能100回反復が通過。利用中ライブラリへ保存されたPNG1件のサイズ・SHA・DB整合性も別経路で確認した。[作業記録](2026-10/2026-10-05_hover-pocket-mac-capture-focus.md)。
+
+## 2026-10-05 Mac / Windowsのリファクタリング
+
+- Mac側は表示先画面・負荷計測・WebView/ドラッグ・DB行変換を責務ごとに分離した。前回の素材実装を土台コミット `7931f8e`、整理を `57e097d` へ保存し、`codex/macos-asset-library-0210` へpush。[Draft PR #44](https://github.com/shotaro311/hover-pocket/pull/44)で確認できる。
+- 保存40項目、UI58項目、再開2項目、既存機能と100回反復、アニメーションの途中反転30回等が通過。元2,099ファイルと原本・Windows互換出力を独立readbackした。
+- Windows側はS311-winのCodexが保存・検索・分類・復旧と動画配信処理を整理。保存97項目、選択操作45項目、動画・編集・削除復元等の実機検査、Debug/Releaseビルドを通した。コード `2c65c4e` と記録 `3e7ba7c` を `codex/windows-refactor-20261005` へpush。[Draft PR #45](https://github.com/shotaro311/hover-pocket/pull/45)。
+- 両OSのリモートSHA一致をMac側から確認し、Windows差分・検証記録も取得して確認した。元の未コミット変更と音声開発を保持。公開macOS版644・Windows版0.2.10とmainは更新していない。[Macと両OS送信の記録](2026-10/2026-10-05_hover-pocket-mac-refactor.md)。
+- PRのCIで素材UI検証の後片付けが共通の音声停止処理を通っていないことを検出し修正。音声契約42ケースと素材一式・100回反復・音声停止/再開を再検証した。Windows PR #45のCIは成功。Mac PRは修正後のCI結果をPR上で確認する。
+
+## 2026-10-05 Mac素材ライブラリのローカル実装
+
+- Windows 0.2.10の共有UI・保存契約へMacの保存、画像/動画/PDF、注釈、撮影、音声付き収録を接続した。開発ビルド662、作業ブランチ `codex/macos-asset-library-0210`。公開macOS版は644のまま。
+- 保存39項目、UI58項目（共通JS45項目を含む）、別プロセス再開2項目、短い音声3モードの実収録、上端パネル20回、既存パネル100回の検査が通過。独立したSQLite/ファイルSHA・署名のreadbackも通過。
+- 元checkoutの2,099ファイルは変更・欠落0。作業を別worktreeへ保持し、既存の液体アニメーション差分を引き継いだ。実装完了時は未コミットだったが、その後の依頼で `7931f8e` として保存・pushした。公開・同期・本番アプリの置換は未実施。
+- 外部への実ドロップ、撮影画面の全手操作、複数画面、長時間収録、両OS実機往復は未受入。次はドラッグ・撮影の手操作確認。[詳細と根拠](2026-10/2026-10-05_hover-pocket-mac-assets.md) / [使い方](../docs/usage/macos-asset-library.md)。
 
 ## 2026-10-04 Windows 0.2.10 本番配信完了
 
@@ -1773,3 +1857,4 @@ status: windows-0.2.10-installed; public-windows-0.2.10; reported-freeze-inciden
 - 2026-06-03: 上部 pill の位置を画面上端へ合わせ、余白 0pt に調整。
 - 2026-06-02: Prototype app を `/Users/shotaro/code/share/hover-menu-preview` に移行し、開発用 Git repository と `.gitignore` を用意。
 - 2026-06-02: 共通進捗管理を初期化。
+

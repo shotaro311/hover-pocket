@@ -1,0 +1,56 @@
+{
+  "baseline": {
+    "files": 2099,
+    "changed": [],
+    "missing": [],
+    "archiveSha256": "a73ec31f8ad39b616067d97f8d5f59feffbbc711667daba13d67f1750bb1cccc"
+  },
+  "libraries": {
+    "library": {
+      "schema": 1,
+      "rows": 6,
+      "originalHashes": "passed",
+      "quickCheck": "ok",
+      "foreignKeyCheck": "ok"
+    },
+    "restored": {
+      "schema": 1,
+      "rows": 4,
+      "originalHashes": "passed",
+      "quickCheck": "ok",
+      "foreignKeyCheck": "ok"
+    },
+    "windows-fixture": {
+      "schema": 1,
+      "rows": 1,
+      "originalHashes": "passed",
+      "quickCheck": "ok",
+      "foreignKeyCheck": "ok"
+    }
+  },
+  "windowsFixtureRoundtrip": "all assets, categories, canonical query fields and original hash match",
+  "bundledResources": {
+    "assets.js": "0bf65a786095d52a4251905695ac4a5765d1659b03688232ec6c22b50da64aff",
+    "assets.css": "0666c04c957b13ce8eca271d8fa139cc9ca6105888de35e6c145a2fa3a216984",
+    "locale.js": "cf880209263f198b3c74a45111c71e89e3377db0227efa3ed10c7636e49e3ee7",
+    "001-initial.sql": "a0ac5e8773c7cb8fb176fa625cfed2517dc368151595f808cd0a9b48bdb5feb8",
+    "case-fold.json": "f5bbd123d49b0688f627a5fcf32e1e3ba2fd0393a157b94ae22d3bc5332aafe2",
+    "manifest.schema.json": "0a75e40e0a121aec4686b528afcd71588e830c941de3625f3382b54cb38de3af"
+  },
+  "bundle": {
+    "id": "local.codex.hover-pocket.asset-dev",
+    "build": "662",
+    "codesign": "passed",
+    "executableSHA256": "8d8aefd103c21948677a786d338e888a23a31ea24ad713e5ec65c189f1cf71cb"
+  },
+  "testRoot": "/var/folders/mv/0d7m444d25d_q88sj2wfntj80000gn/T/HoverPocket-Assets-IYD2tw",
+  "manualExternalDrop": "not accepted: copy prepared but drag tool did not complete native drop",
+  "limitations": [
+    "no Windows physical roundtrip",
+    "no multiple-display acceptance",
+    "no permission denial or device removal acceptance",
+    "no long recording sync acceptance",
+    "no 10000-item benchmark",
+    "no public release acceptance"
+  ]
+}

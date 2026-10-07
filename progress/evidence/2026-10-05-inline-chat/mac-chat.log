@@ -1,0 +1,23 @@
+PASS chat: active response holds the hover panel
+PASS chat: draft does not submit or execute
+PASS chat: foreign thread is ignored
+PASS chat: old turn is ignored
+PASS chat: streaming deltas append once
+PASS chat: completion enables the composer
+PASS chat: editing holds the hover panel
+PASS chat: focus release allows automatic hiding
+PASS chat: collapsing preserves draft and conversation
+PASS chat: history restores with its thread
+PASS chat: stop rejects late events and preserves the conversation for resume
+PASS chat: new conversation clears local view
+PASS chat: history is owner readable only
+PASS chat panel: small compact, history, and short display fit
+PASS chat panel: medium compact, history, and short display fit
+PASS chat panel: large compact, history, and short display fit
+PASS chat panel: extraLarge compact, history, and short display fit
+PASS chat panel: Shift Return inserts a newline without submitting
+PASS chat panel: Japanese IME composition is active
+PASS chat panel: Return during IME composition never submits
+PASS chat panel: Return after composition submits exactly once
+PASS chat panel: Escape requests hiding without losing the draft
+chat_verification=ok evidence=/var/folders/mv/0d7m444d25d_q88sj2wfntj80000gn/T/HoverPocket-ChatVerify-05F16CF6-09F0-4C4A-B191-79A2F19AE02F

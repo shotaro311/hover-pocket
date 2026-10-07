@@ -10,6 +10,12 @@ internal sealed class UserSettings
 
     public PanelSize PanelSize { get; set; } = PanelSize.Medium;
 
+    public double? PanelWidthDips { get; set; }
+    public double? PanelHeightDips { get; set; }
+    public string? ChatModel { get; set; }
+    public string? ChatEffort { get; set; }
+    public Dictionary<string, string> Shortcuts { get; set; } = new() { ["panel"] = "Ctrl+Alt+H", ["chat"] = "Ctrl+Alt+C", ["library"] = "Ctrl+Alt+L", ["settings"] = "Ctrl+Alt+O", ["voice"] = "Ctrl+Alt+V", ["regionRecording"] = "Ctrl+Alt+Shift+G" };
+
     public PanelTextSize TextSize { get; set; } = PanelTextSize.Medium;
 
     public ProviderSwitchingMode SwitchingMode { get; set; } = ProviderSwitchingMode.Click;
@@ -67,6 +73,7 @@ internal sealed class UserSettings
         return new UserSettings
         {
             DisplayPlacement = DisplayPlacement,
+            PanelWidthDips = PanelWidthDips, PanelHeightDips = PanelHeightDips, ChatModel = ChatModel, ChatEffort = ChatEffort, Shortcuts = new(Shortcuts),
             PanelSize = PanelSize,
             TextSize = TextSize,
             WeatherLocation = WeatherLocation,

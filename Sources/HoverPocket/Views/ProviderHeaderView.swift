@@ -8,6 +8,8 @@ struct ProviderHeaderView: View {
     let onOpenSettings: () -> Void
     let onClosePanel: () -> Void
     @State private var draggingPluginID: PluginID?
+    @Namespace private var selectionAnimation
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         HStack(spacing: 10) {
@@ -41,6 +43,9 @@ struct ProviderHeaderView: View {
                 .disabled(!appUpdater.canCheckForUpdates)
             }
 
+            Button { CodexChatController.shared.show(settings: settings) } label: { Image(systemName: "text.bubble") }
+                .buttonStyle(IconButtonStyle(selected: false)).help("Codex チャット")
+
             Button {
                 onOpenSettings()
             } label: {
@@ -68,6 +73,7 @@ struct ProviderHeaderView: View {
         ForEach(providerStore.visibleManifests) { manifest in
             ProviderIconButton(
                 manifest: manifest,
+                selectionAnimation: selectionAnimation,
                 language: settings.appLanguage,
                 isSelected: providerStore.selectedPluginID == manifest.id,
                 isDragging: draggingPluginID == manifest.id,
@@ -100,12 +106,14 @@ struct ProviderHeaderView: View {
                 )
             )
         }
-        .animation(.interactiveSpring(response: 0.24, dampingFraction: 0.86), value: providerStore.visibleManifests)
+        .animation(reduceMotion ? nil : .spring(response: 0.28, dampingFraction: 0.86), value: providerStore.selectedPluginID)
+        .animation(reduceMotion ? nil : .interactiveSpring(response: 0.24, dampingFraction: 0.86), value: providerStore.visibleManifests)
     }
 }
 
 private struct ProviderIconButton: View {
     let manifest: PluginManifest
+    let selectionAnimation: Namespace.ID
     let language: AppLanguage
     let isSelected: Bool
     let isDragging: Bool
@@ -125,7 +133,14 @@ private struct ProviderIconButton: View {
         } label: {
             Image(systemName: manifest.symbolName)
         }
-        .buttonStyle(IconButtonStyle(selected: isSelected))
+        .buttonStyle(IconButtonStyle(selected: isSelected, drawsSelection: false))
+        .background {
+            if isSelected {
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .fill(Color.white.opacity(0.12))
+                    .matchedGeometryEffect(id: "providerSelection", in: selectionAnimation)
+            }
+        }
         .help(manifest.title(language: language))
         .opacity(isDragging ? 0.46 : 1)
         .overlay(

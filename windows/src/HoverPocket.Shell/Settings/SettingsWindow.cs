@@ -36,9 +36,9 @@ internal sealed class SettingsWindow : Window
         _externalIntegrationsEnabled = externalIntegrationsEnabled;
         _webViewDataDirectory = webViewDataDirectory;
         ApplyLanguage(_bridgeController.CurrentSettings.Language);
-        Width = 620;
+        Width = 940;
         Height = 720;
-        MinWidth = 520;
+        MinWidth = 600;
         MinHeight = 560;
         WindowStartupLocation = WindowStartupLocation.CenterScreen;
         ShowInTaskbar = false;
@@ -48,7 +48,9 @@ internal sealed class SettingsWindow : Window
         _bridgeController.SettingsChanged += OnSettingsChanged;
         Closed += (_, _) =>
         {
+            try { _bridgeController.VoiceCapture?.SuspendShortcuts(false); } catch (ArgumentException ex) { AppDiagnostics.Record("shortcuts.restore.failed", ex); }
             _bridgeController.SettingsChanged -= OnSettingsChanged;
+            _bridgeController.CancelDevicePairing();
             _bridgeAttachment?.Dispose();
         };
     }

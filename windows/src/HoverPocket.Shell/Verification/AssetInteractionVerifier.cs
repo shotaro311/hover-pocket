@@ -1,4 +1,4 @@
-﻿using System.Runtime.InteropServices;
+using System.Runtime.InteropServices;
 using System.Text.Json;
 using System.Windows;
 using System.Windows.Controls;
@@ -33,6 +33,8 @@ internal static class AssetInteractionVerifier
         await UntilAsync(async () => await web.ExecuteScriptAsync($$"""!!document.querySelector('[data-asset-id="{{imageId}}"]')""") == "true");
         var original = (await store.GetAsync(imageId))!;
         var originalBytes = await File.ReadAllBytesAsync(store.ReadOriginalPath(original));
+        await web.ExecuteScriptAsync($$"""(()=>{const input=document.querySelector('.assets-search');input.value={{JsonSerializer.Serialize(original.Name)}};input.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true}));})()""");
+        await UntilAsync(async () => await web.ExecuteScriptAsync("document.querySelectorAll('.assets-card').length===1 && document.querySelector('.assets-summary').textContent.startsWith('1')") == "true");
         if (Environment.GetEnvironmentVariable("HOVERPOCKET_VERIFY_LOG") is { Length: > 0 } dropdownLog)
         {
             foreach (var selector in new[] { ".assets-format", ".assets-sort-by" })
@@ -98,8 +100,11 @@ internal static class AssetInteractionVerifier
             catch (TimeoutException) { throw new TimeoutException($"Native header: active={controller.Panel.IsActive}, animating={controller.Panel.IsAnimating}; " + await web.ExecuteScriptAsync("({clicks:window.__editorHeaderClicks,focus:document.activeElement.tagName,pressed:document.querySelector('[data-size-id][aria-pressed=true]').dataset.sizeId,hit:window.__surfaceClickTarget})")); }
             await ClickSurfaceAsync(web, web.CoreWebView2, $"[data-size-id='{previousSize}']");
             await UntilAsync(async () => await web.ExecuteScriptAsync($"document.querySelector('[data-size-id={previousSize}]').getAttribute('aria-pressed')==='true'") == "true");
+            await UntilAsync(() => Task.FromResult(!controller.Panel.IsAnimating));
+            await UntilAsync(async () => await web.ExecuteScriptAsync("!document.querySelector('[data-refresh]').disabled") == "true");
             await ClickSurfaceAsync(web, web.CoreWebView2, "[data-refresh]");
-            await UntilAsync(async () => await web.ExecuteScriptAsync("window.__editorHeaderClicks===3") == "true");
+            try { await UntilAsync(async () => await web.ExecuteScriptAsync("window.__editorHeaderClicks===3") == "true"); }
+            catch (TimeoutException) { throw new TimeoutException("Native header refresh: " + await web.ExecuteScriptAsync("({clicks:window.__editorHeaderClicks,focus:document.activeElement.tagName,hit:window.__surfaceClickTarget,refreshDisabled:document.querySelector('[data-refresh]').disabled})")); }
             if (!editor!.IsVisible || controller.Panel.LiquidTargetForVerify != previewBounds || !controller.Panel.AssetLayout.PinOnly)
                 failures.Add("assets: shell header interaction dismissed or resized inline editing");
             VerifyConsole.WriteLine("PASS inline header: original header visible above editor, native size/refresh clicks, editing and bounds preserved");
@@ -154,7 +159,7 @@ internal static class AssetInteractionVerifier
         try { await UntilAsync(async () => (await store.GetAsync(imageId))!.Trashed); }
         catch (TimeoutException) { throw new TimeoutException($"Native trash did not archive: {controller.Panel.DragStateForVerify}; {controller.Panel.DragTraceForVerify}; " + await web.ExecuteScriptAsync("window.__dragEvents")); }
         if (!File.Exists(store.ReadOriginalPath(original))) failures.Add("assets: drag trash removed original file");
-        await web.ExecuteScriptAsync("import('/js/bridge.js').then(({request})=>request('assets.undo'))");
+        await web.ExecuteScriptAsync("document.body.dispatchEvent(new KeyboardEvent('keydown',{key:'z',ctrlKey:true,bubbles:true}))");
         await UntilAsync(async () => !(await store.GetAsync(imageId))!.Trashed);
         if (!(await File.ReadAllBytesAsync(store.ReadOriginalPath(original))).SequenceEqual(originalBytes)) failures.Add("assets: drag undo changed original");
         VerifyConsole.WriteLine("PASS native drag: outside target preserves item, bottom target archives, undo restores identical original bytes");
@@ -182,11 +187,29 @@ internal static class AssetInteractionVerifier
             await NativeDropAsync(organizer.WebSurfaceForVerify, libraryWeb, () => organizer.InternalAssetDragForVerify, imageId, intoTrash: true);
             try { await UntilAsync(async () => (await store.GetAsync(imageId))!.Trashed); }
             catch (TimeoutException) { throw new TimeoutException($"Organizer trash: {organizer.DragStateForVerify}; {organizer.DragTraceForVerify}; " + await libraryWeb.ExecuteScriptAsync("({events:window.__dragEvents,status:document.querySelector('.assets-status').textContent})")); }
-            await libraryWeb.ExecuteScriptAsync("import('/js/bridge.js').then(({request})=>request('assets.undo'))");
+            await libraryWeb.ExecuteScriptAsync("document.body.dispatchEvent(new KeyboardEvent('keydown',{key:'z',ctrlKey:true,bubbles:true}))");
             await UntilAsync(async () => !(await store.GetAsync(imageId))!.Trashed);
             if (!(await File.ReadAllBytesAsync(store.ReadOriginalPath(original))).SequenceEqual(originalBytes)) failures.Add("assets: organizer trash/undo changed source");
             VerifyConsole.WriteLine("PASS organizer native drag: outside target unchanged, DOM trash target archives, undo restores original bytes");
-            await UntilAsync(async () => await libraryWeb.ExecuteScriptAsync($$"""!!document.querySelector('[data-asset-id="{{imageId}}"]')""") == "true");
+            var fromFolder = await store.AddCategoryAsync("folder", "Native source folder");
+            var toFolder = await store.AddCategoryAsync("folder", "Native destination folder");
+            await store.OrganizeAsync([imageId], null, new("folder", fromFolder));
+            await UntilAsync(async () => await libraryWeb.ExecuteScriptAsync($$"""!!document.querySelector('[data-folder-id="{{toFolder}}"]')""") == "true");
+            await libraryWeb.ExecuteScriptAsync($$"""document.querySelector('.assets-root').classList.add('show-sidebar');document.querySelector('[data-folder-id="{{fromFolder}}"]')?.click()""");
+            await NativeDropAsync(organizer.WebSurfaceForVerify, libraryWeb, () => organizer.InternalAssetDragForVerify, imageId, false, $"[data-folder-id='{toFolder}']");
+            await UntilAsync(async () => (await store.GetAsync(imageId))!.FolderIds.Contains(toFolder));
+            if ((await store.GetAsync(imageId))!.FolderIds.Contains(fromFolder)) failures.Add("assets: native folder move kept source membership");
+            await libraryWeb.ExecuteScriptAsync("document.body.dispatchEvent(new KeyboardEvent('keydown',{key:'z',ctrlKey:true,bubbles:true}))");
+            await UntilAsync(async () => (await store.GetAsync(imageId))!.FolderIds.Contains(fromFolder));
+            await store.UpdateAsync([imageId], "trash");
+            await libraryWeb.ExecuteScriptAsync("document.querySelector('[data-drop-kind=trash]')?.click()");
+            await NativeDropAsync(organizer.WebSurfaceForVerify, libraryWeb, () => organizer.InternalAssetDragForVerify, imageId, false, $"[data-folder-id='{toFolder}']");
+            await UntilAsync(async () => !(await store.GetAsync(imageId))!.Trashed);
+            var restored = (await store.GetAsync(imageId))!;
+            if (!restored.FolderIds.Contains(fromFolder) || !restored.FolderIds.Contains(toFolder)) failures.Add("assets: trash-to-folder lost former membership");
+            await libraryWeb.ExecuteScriptAsync("window.__recentReady=false;const recentObserver=new MutationObserver(()=>{window.__recentReady=true;recentObserver.disconnect()});recentObserver.observe(document.querySelector('.assets-sidebar'),{childList:true});document.querySelector('.assets-sidebar button')?.click()");
+            VerifyConsole.WriteLine("PASS native sidebar: folder-to-folder move and Undo, trash-to-folder restores former memberships and adds destination");
+            await UntilAsync(async () => await libraryWeb.ExecuteScriptAsync($$"""window.__recentReady && !!document.querySelector('[data-asset-id="{{imageId}}"]')""") == "true");
             var bounds = new Size(organizer.ActualWidth, organizer.ActualHeight);
             await libraryWeb.ExecuteScriptAsync($$"""document.querySelector('[data-asset-id="{{imageId}}"]')?.dispatchEvent(new MouseEvent('dblclick',{bubbles:true}));""");
             await UntilAsync(async () => await libraryWeb.ExecuteScriptAsync("!!document.querySelector('.assets-edit-image') && !document.querySelector('.assets-edit-image').disabled") == "true");
@@ -203,20 +226,23 @@ internal static class AssetInteractionVerifier
 
     }
 
-    private static async Task NativeDropAsync(FrameworkElement surface, CoreWebView2 web, Func<bool> dragActive, string id, bool intoTrash)
+    private static async Task NativeDropAsync(FrameworkElement surface, CoreWebView2 web, Func<bool> dragActive, string id, bool intoTrash, string? targetSelector = null)
     {
         await UntilAsync(async () => await web.ExecuteScriptAsync($$"""!!document.querySelector('[data-asset-id="{{id}}"]')""") == "true");
-        await web.ExecuteScriptAsync($$"""(()=>{const card=document.querySelector('[data-asset-id="{{id}}"]');const search=document.querySelector('.assets-search');search.value=card.querySelector('.assets-card-name').title;search.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true}));})()""");
-        await UntilAsync(async () => await web.ExecuteScriptAsync("document.querySelectorAll('.assets-card').length===1 && document.querySelector('.assets-summary').textContent.startsWith('1')") == "true");
+        await web.ExecuteScriptAsync($$"""(()=>{window.__dragQueryReady=false;const observer=new MutationObserver(()=>{window.__dragQueryReady=true;observer.disconnect();});observer.observe(document.querySelector('.assets-sidebar'),{childList:true});const card=document.querySelector('[data-asset-id="{{id}}"]');const search=document.querySelector('.assets-search');search.value=card.querySelector('.assets-card-name').title;search.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true}));})()""");
+        await UntilAsync(async () => await web.ExecuteScriptAsync("window.__dragQueryReady && document.querySelectorAll('.assets-card').length===1 && document.querySelector('.assets-summary').textContent.startsWith('1')") == "true");
         await web.ExecuteScriptAsync($$"""document.querySelector('[data-asset-id="{{id}}"]')?.click()""");
-        await UntilAsync(async () => await web.ExecuteScriptAsync("!!document.querySelector('.assets-selection button') && document.querySelector('.assets-preview').hidden") == "true");
+        await UntilAsync(async () => await web.ExecuteScriptAsync($$"""document.querySelector('[data-asset-id="{{id}}"]')?.getAttribute('aria-selected')==='true' && document.querySelector('.assets-preview').hidden""") == "true");
         await web.ExecuteScriptAsync("window.__dragEvents=[];for(const name of ['dragstart','dragover','drop'])document.addEventListener(name,event=>{if(window.__dragEvents.length<30)window.__dragEvents.push([name,event.clientX,event.clientY])},{capture:true})");
         await web.ExecuteScriptAsync($$"""document.querySelector('[data-asset-id="{{id}}"]')?.scrollIntoView({block:'center'})""");
         if (Window.GetWindow(surface) is PanelWindow panelWindow)
             await UntilAsync(() => Task.FromResult(panelWindow.IsVisible && !panelWindow.IsAnimating && panelWindow.RevealForVerify == 1));
         await Task.Delay(80);
         var card = await RectAsync(web, $"[data-asset-id='{id}']");
-        var rawTarget = await web.ExecuteScriptAsync(intoTrash
+        if (targetSelector is not null) await web.ExecuteScriptAsync($"document.querySelector({JsonSerializer.Serialize(targetSelector)}).scrollIntoView({{block:'nearest'}})");
+        var rawTarget = await web.ExecuteScriptAsync(targetSelector is not null
+            ? $"JSON.stringify(document.querySelector({JsonSerializer.Serialize(targetSelector)}).getBoundingClientRect().toJSON())"
+            : intoTrash
             ? "(()=>{const target=document.querySelector('.assets-trash-drop');target.hidden=false;const bounds=target.getBoundingClientRect().toJSON();target.hidden=true;return JSON.stringify(bounds)})()"
             : "JSON.stringify(document.querySelector('.assets-search').getBoundingClientRect().toJSON())");
         using var targetJson = JsonDocument.Parse(JsonSerializer.Deserialize<string>(rawTarget)!); var bounds = targetJson.RootElement;
@@ -258,6 +284,7 @@ internal static class AssetInteractionVerifier
 
     private static async Task ClickSurfaceAsync(FrameworkElement surface, CoreWebView2 web, string selector, bool rightButton = false)
     {
+        await UntilAsync(async () => await web.ExecuteScriptAsync($"!!document.querySelector({JsonSerializer.Serialize(selector)})") == "true");
         await web.ExecuteScriptAsync($"document.querySelector({JsonSerializer.Serialize(selector)}).scrollIntoView({{block:'nearest',inline:'nearest'}})");
         if (Window.GetWindow(surface) is PanelWindow panel) await UntilAsync(() => Task.FromResult(!panel.IsAnimating && panel.RevealForVerify == 1));
         await Task.Delay(100);

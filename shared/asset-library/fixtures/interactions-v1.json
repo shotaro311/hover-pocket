@@ -1,0 +1,82 @@
+{
+  "valid": [
+    {
+      "method": "assets.update",
+      "params": {
+        "ids": [
+          "fixture-a",
+          "fixture-b"
+        ],
+        "operation": "organize",
+        "sourceFolderId": "folder-a",
+        "destination": {
+          "kind": "folder",
+          "folderId": "folder-b"
+        }
+      }
+    },
+    {
+      "method": "assets.update",
+      "params": {
+        "ids": [
+          "fixture-a"
+        ],
+        "operation": "organize",
+        "sourceFolderId": null,
+        "destination": {
+          "kind": "trash"
+        }
+      }
+    },
+    {
+      "method": "assets.update",
+      "params": {
+        "operation": "undoOrganize",
+        "undoToken": "host-issued-opaque-token"
+      }
+    },
+    {
+      "method": "assets.capture",
+      "params": {
+        "kind": "audio",
+        "folderId": null
+      }
+    },
+    {
+      "method": "assets.preview",
+      "result": {
+        "audioUrl": "hp-asset://fixture/lease/file"
+      }
+    }
+  ],
+  "invalid": [
+    {
+      "method": "assets.update",
+      "params": {
+        "ids": [],
+        "operation": "organize",
+        "destination": {
+          "kind": "trash"
+        }
+      }
+    },
+    {
+      "method": "assets.update",
+      "params": {
+        "ids": [
+          "fixture-a"
+        ],
+        "operation": "organize",
+        "destination": {
+          "kind": "folder"
+        }
+      }
+    },
+    {
+      "method": "assets.capture",
+      "params": {
+        "kind": "autoRecord"
+      }
+    }
+  ]
+}

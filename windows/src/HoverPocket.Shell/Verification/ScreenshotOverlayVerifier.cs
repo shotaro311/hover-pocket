@@ -24,7 +24,7 @@ internal static class ScreenshotOverlayVerifier
         {
             window.Show(); await Task.Delay(150);
             window.Hover(new Point(window.ActualWidth / 2, window.ActualHeight / 2));
-            var expected = window.RegionForVerify;
+            var expected = window.Region;
             if (expected.Width <= 0 || expected.Height <= 0 || !window.WindowsForVerify.Any(r => r.Contains(bounds.Left + bounds.Width / 2, bounds.Top + bounds.Height / 2))) failures.Add("screenshot hover did not identify generated app window");
             var monitor = new System.Drawing.Rectangle(-1920, 0, 1920, 1080);
             if (ScreenshotSelectionWindow.TargetAt(new(-1800, 800), [], monitor) != monitor) failures.Add("screenshot empty desktop did not select its monitor");

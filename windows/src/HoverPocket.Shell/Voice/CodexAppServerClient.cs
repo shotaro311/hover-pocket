@@ -91,7 +91,9 @@ internal sealed class CodexAppServerClient : IAsyncDisposable
         string executablePath,
         IReadOnlyList<string> arguments,
         TimeSpan requestTimeout,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        IReadOnlyDictionary<string, string>? environment = null,
+        string? workingDirectory = null)
     {
         cancellationToken.ThrowIfCancellationRequested();
         if (string.IsNullOrWhiteSpace(executablePath))
@@ -106,12 +108,22 @@ internal sealed class CodexAppServerClient : IAsyncDisposable
             CreateNoWindow = true,
             RedirectStandardInput = true,
             RedirectStandardOutput = true,
-            RedirectStandardError = true
+            RedirectStandardError = true,
+            // JSON-RPC is UTF-8 even when the Windows GUI process uses the system code page.
+            StandardInputEncoding = new UTF8Encoding(false),
+            StandardOutputEncoding = new UTF8Encoding(false),
+            StandardErrorEncoding = new UTF8Encoding(false)
         };
         foreach (var argument in arguments)
         {
             startInfo.ArgumentList.Add(argument);
         }
+        if (environment is not null)
+        {
+            startInfo.Environment.Clear();
+            foreach (var (key, value) in environment) startInfo.Environment[key] = value;
+        }
+        if (workingDirectory is not null) startInfo.WorkingDirectory = workingDirectory;
 
         var process = new Process
         {
@@ -205,8 +217,13 @@ internal sealed class CodexAppServerClient : IAsyncDisposable
         }
     }
 
-    public Task<JsonElement> InitializeAsync(JsonElement parameters, CancellationToken cancellationToken) =>
-        SendRequestAsync("initialize", parameters, cancellationToken);
+    public async Task<JsonElement> InitializeAsync(JsonElement parameters, CancellationToken cancellationToken)
+    {
+        var result = await SendRequestAsync("initialize", parameters, cancellationToken).ConfigureAwait(false);
+        // app-server does not deliver realtime notifications until this handshake is complete.
+        await WriteLineAsync("{\"method\":\"initialized\"}", cancellationToken).ConfigureAwait(false);
+        return result;
+    }
 
     public async Task<JsonElement> SendRequestAsync(
         string method,
@@ -379,17 +396,21 @@ internal sealed class CodexAppServerClient : IAsyncDisposable
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
         }
-        catch (JsonException)
+        catch (JsonException exception)
         {
+            HoverPocket.Shell.Services.AppDiagnostics.Record("codex.transport.invalid_json", exception);
         }
-        catch (IOException)
+        catch (IOException exception)
         {
+            HoverPocket.Shell.Services.AppDiagnostics.Record("codex.transport.io_failed", exception);
         }
-        catch (InvalidOperationException)
+        catch (InvalidOperationException exception)
         {
+            HoverPocket.Shell.Services.AppDiagnostics.Record("codex.transport.invalid_operation", exception);
         }
-        catch (CodexAppServerProtocolException)
+        catch (CodexAppServerProtocolException exception)
         {
+            HoverPocket.Shell.Services.AppDiagnostics.Record("codex.transport." + VoiceTextSafety.SanitizeErrorCode(exception.Code), exception);
         }
         finally
         {

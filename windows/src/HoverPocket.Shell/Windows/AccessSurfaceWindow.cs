@@ -65,7 +65,7 @@ internal sealed class AccessSurfaceWindow : NoActivateWindow
         root.Children.Add(_surface);
         Content = root;
         AllowDrop = true;
-        DragOver += (_, args) => { args.Effects = CanImportAssets?.Invoke() == true ? System.Windows.DragDropEffects.Copy : System.Windows.DragDropEffects.None; args.Handled = true; if (args.Effects != System.Windows.DragDropEffects.None) AssetDragChanged?.Invoke(true); };
+        DragOver += (_, args) => { args.Effects = CanImportAssets?.Invoke() == true && Providers.Assets.AssetDropPayload.Supports(args.Data) ? System.Windows.DragDropEffects.Copy : System.Windows.DragDropEffects.None; args.Handled = true; if (args.Effects != System.Windows.DragDropEffects.None) AssetDragChanged?.Invoke(true); };
         DragLeave += (_, _) => AssetDragChanged?.Invoke(false);
         Drop += (_, args) => { args.Handled = true; AssetDropped?.Invoke(args.Data); AssetDragChanged?.Invoke(false); };
 

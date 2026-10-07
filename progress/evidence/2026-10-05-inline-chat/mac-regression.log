@@ -1,0 +1,154 @@
+PASS voice-foundation contract: 42 geometry/state cases, root scope, default-off, legacy lane negative regression, internal scroll, accessibility, Windows explicit-origin microphone, fenced Realtime transport, AN3-B2 Calendar/Timer Broker slice, AN3-B3A OpenAI Realtime BYOK gates, AN3-B3B macOS Realtime security gates, and explicit Codex model tool readback
+asset_verification=ok checks=54
+asset_verification=ok checks=70
+asset_verification=ok checks=2
+PASS chat: active response holds the hover panel
+PASS chat: draft does not submit or execute
+PASS chat: foreign thread is ignored
+PASS chat: old turn is ignored
+PASS chat: streaming deltas append once
+PASS chat: completion enables the composer
+PASS chat: editing holds the hover panel
+PASS chat: focus release allows automatic hiding
+PASS chat: collapsing preserves draft and conversation
+PASS chat: history restores with its thread
+PASS chat: stop rejects late events and preserves the conversation for resume
+PASS chat: new conversation clears local view
+PASS chat: history is owner readable only
+PASS chat panel: small compact, history, and short display fit
+PASS chat panel: medium compact, history, and short display fit
+PASS chat panel: large compact, history, and short display fit
+PASS chat panel: extraLarge compact, history, and short display fit
+PASS chat panel: Shift Return inserts a newline without submitting
+PASS chat panel: Japanese IME composition is active
+PASS chat panel: Return during IME composition never submits
+PASS chat panel: Return after composition submits exactly once
+chat_verification=ok evidence=/var/folders/mv/0d7m444d25d_q88sj2wfntj80000gn/T/HoverPocket-ChatVerify-678F71EE-0702-4239-AD63-2334C4C1CCAE
+PASS all 11 library tools exposed
+PASS all 11 tools reach Codex bridge
+PASS empty search text accepted
+PASS isolated search is read only
+PASS query size bounded
+PASS internal capture token cannot be supplied by AI
+PASS blank name rejected
+PASS arbitrary file paths rejected
+PASS denied approval writes nothing
+PASS rejected folder absent in database
+PASS folder created after approval
+PASS call replay does not execute or approve twice
+PASS normalized folder names reuse existing folder
+PASS window candidates available
+PASS recording defaults honor system setting and keep microphone off
+PASS approved screenshot saved
+PASS approval binds the original blue window despite foreground change
+PASS PNG dimensions, name, folder and hash verified
+PASS screenshot replay creates no second image
+PASS missing window never falls back to screen
+PASS ambiguous window rejected
+PASS changed target during approval rejected
+PASS favorite is an explicit state, not a toggle
+PASS favorite can be cleared
+PASS classification preserves existing folder memberships
+PASS rename preserves extension
+PASS metadata edits preserve original file hash
+PASS search returns updated metadata
+PASS favorite search obeys false state
+PASS AI result contains metadata only
+PASS AI opens image in actual library WebView
+PASS preview image decoded
+PASS real window recording starts
+PASS second start does not replace active recording
+PASS recording status reads active recorder
+PASS stop saves without confirmation
+PASS saved MP4 is playable and contains no microphone/system audio
+PASS saved MP4 frame decodes
+PASS AI opens video preview
+PASS AI video preview does not autoplay
+PASS subsequent recording starts
+PASS old stop replay cannot stop a new recording
+PASS stale recording identity rejected
+PASS new recording stops with its own identity
+PASS cancelled session cannot write
+PASS real voice confirmation waits without a native dialog
+PASS same utterance cannot approve its own library change
+PASS next spoken reply approves and verifies library write
+PASS spoken confirmation replay returns the saved result
+PASS second library change waits for confirmation
+PASS spoken cancellation leaves library unchanged
+PASS Codex dynamic tool request executes library search through Broker
+PASS typed library requests retain text origin in Broker readback
+PASS library voice: 53 checks; isolated PNG/MP4, approval, replay, target binding, metadata and real preview
+PASS personal tools: 42 assertions; isolated stores, no live Calendar or media writes
+PASS voice-only confirmation: 23 checks; independent normal/delete settings, no native presenter, speech approval/cancel, replay, session/revision/expiry binding, real isolated writes and readback
+capability_sticky_reminder_v2=ok
+capability_verify=ok
+capability_handlers=21
+capability_calculator_evaluate=ok
+capability_controls_readback=ok
+capability_timer_lifecycle=ok
+capability_sticky_upsert=ok
+capability_sticky_lifecycle=ok
+capability_calendar_readback=ok
+broker_verify=ok
+broker_registry_descriptors=53
+broker_available_handlers=21
+broker_calculator_evaluate=ok
+broker_controls_os_readback=ok
+broker_sticky_lifecycle=ok
+broker_approval_presentation=ok
+broker_today_focus=ok
+broker_pocket_app=ok
+broker_pocket_app_declared_tests=4
+broker_pocket_app_layout_cases=16
+broker_concurrent_duplicate=ok
+broker_retention_governance=ok
+broker_negative_cases=12
+broker_golden_plan_digest=sha256:d098ea1b5f9f70e91486fd53229e7ddb68f73a9952ab94f17eed27cdeeb6413f
+panel_layout_verify=ok
+panel_layout_cases=128
+panel_size_compatibility=ok
+panel_text_size_compatibility=ok
+panel_settings_persistence=ok
+settings_window_layout=ok
+panel_dimensions=small:520x372,medium:600x430,large:680x488,extraLarge:760x546
+calculator_layout_small=height:310.0/317.0,mainWidth:368.0,fits:true
+calculator_layout_medium=height:359.0/375.0,mainWidth:422.0,fits:true
+calculator_layout_large=height:428.0/433.0,mainWidth:430.0,fits:true
+calculator_layout_extraLarge=height:428.0/491.0,mainWidth:430.0,fits:true
+clipboard_verify=ok
+clipboard_favorite_text_after_clear=1
+clipboard_favorite_image_after_clear=1
+clipboard_regular_image_removed=true
+clipboard_legacy_decode_default_favorite=true
+timer_verify=ok
+timer_defaults=ok
+timer_formatting=ok
+timer_progress=ok
+timer_lifecycle=ok
+timer_pin=ok
+timer_storage_isolation=ok
+timer_draft_migration=ok
+timer_stopwatch=ok
+timer_concurrency=ok
+timer_icon_identity=ok
+timer_layout_side_by_side=true
+timer_layout_compact=true
+timer_entry_widths=small:157.3,medium:184.0,large:210.7,extraLarge:237.3
+PASS chat panel: small inline resize, editing hold, manual hide, draft retained, no extra window
+PASS chat panel: medium inline resize, editing hold, manual hide, draft retained, no extra window
+PASS chat panel: large inline resize, editing hold, manual hide, draft retained, no extra window
+PASS chat panel: extraLarge inline resize, editing hold, manual hide, draft retained, no extra window
+panel_soak_verify=ok
+panel_soak_iterations=100
+panel_soak_provider_switches=100
+panel_soak_recovery_cycles=5
+panel_soak_animated_transition_cycles=3
+panel_soak_warm_open_max_ms=63.773
+panel_soak_windows=3->3
+panel_soak_threads=15->7,max=16
+panel_soak_rss_mib=110.047->112.484
+panel_soak_rss_growth_limit_mib=64
+panel_soak_sockets=0->0
+panel_soak_children=0->0
+PASS panel soak: Voice OFF, 100 open/close, local provider switching, recovery, and bounded resources
+Evidence: /var/folders/mv/0d7m444d25d_q88sj2wfntj80000gn/T/HoverPocket-Assets-ikIN4B

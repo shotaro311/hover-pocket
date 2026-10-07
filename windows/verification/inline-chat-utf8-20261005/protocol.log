@@ -1,0 +1,20 @@
+PASS chat: real process preserves Japanese/emoji JSON under a Shift-JIS host without a UTF-8 BOM
+PASS chat: idle starts no server
+PASS chat: history owned by app server
+PASS chat: explicit exact text send
+PASS chat: foreign and stale stream ignored
+PASS chat: root/turn/tool fences
+PASS chat: stream final replaces delta once
+PASS chat: index stores no transcript
+PASS chat: corrupt history fails safely
+PASS chat: history resume renders saved messages
+PASS chat: stop cancels pending approval and interrupts turn
+PASS chat: late tool cannot act after stop
+PASS chat: new chat clears view
+PASS chat: changed capability grants require a new thread
+PASS chat: unowned history rejected
+PASS chat: stop during connection sends no turn
+PASS chat: inline draft pins panel without starting AI or microphone
+PASS chat: manual hide preserves draft without keeping panel open
+PASS chat: failed connection restores the unsent draft without a phantom user message
+PASS chat verify: explicit send, stream/final, owned history, cancellation, root/turn fences, late-tool denial, inline draft and cleanup

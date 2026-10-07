@@ -651,14 +651,29 @@ internal sealed class VoiceFoundationVerifier
             || !startParameters.TryGetProperty("dynamicTools", out var tools)
             || tools.ValueKind != JsonValueKind.Array
             || tools.GetArrayLength() != 1
-            || !startParameters.TryGetProperty("dynamicToolsOnly", out var dynamicOnly)
-            || dynamicOnly.ValueKind != JsonValueKind.True
+            || startParameters.TryGetProperty("dynamicToolsOnly", out _)
+            || !startParameters.TryGetProperty("selectedCapabilityRoots", out var roots)
+            || roots.GetArrayLength() != 0
             || !startParameters.TryGetProperty("environments", out var environments)
             || environments.ValueKind != JsonValueKind.Array
             || environments.GetArrayLength() != 0)
         {
             _failures.Add("app-server dynamic tool request/response did not stay on the active Voice root");
         }
+        var captureCall = new { threadId = started.ThreadId, turnId = "capture-turn", callId = "capture-notice",
+            tool = "capture_screenshot_save", arguments = new { windowTitle = "private fixture title" } };
+        harness.PushServerRequest(7101, "item/tool/call", captureCall);
+        await WaitUntilAsync(() => coordinator.Snapshot.Transcript.Any(item => item.Id.StartsWith("native-operation-")), cancellationToken);
+        var notice = coordinator.Snapshot.Transcript.Single(item => item.Id.StartsWith("native-operation-"));
+        harness.PushServerRequest(7102, "item/tool/call", captureCall);
+        await WaitUntilAsync(() => harness.ServerResponses.Any(item => item.GetProperty("id").GetInt64() == 7102), cancellationToken);
+        await Task.Delay(25, cancellationToken);
+        if (notice.RootSessionId != started.ThreadId || !notice.IsFinal || notice.Text.Contains("private fixture title")
+            || coordinator.Snapshot.Transcript.Count(item => item.Id.StartsWith("native-operation-")) != 1
+            || harness.RequestedMethods.Any(method => method is "thread/realtime/appendSpeech" or "thread/realtime/appendText")
+            || CodexVoiceCoordinator.CompletionNotice("library_search", true) is not null
+            || CodexVoiceCoordinator.CompletionNotice("capture_screenshot_save", false)!.Contains("保存しました"))
+            _failures.Add("tool completion notice leaked content, duplicated, or claimed an unverified result");
         runtime.BlockNext = true;
         harness.PushServerRequest(
             7002,

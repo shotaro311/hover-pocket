@@ -1,0 +1,471 @@
+{
+  "groupId": "11111111-1111-4111-8111-111111111111",
+  "cases": [
+    {
+      "name": "asset-japanese",
+      "valid": true,
+      "event": {
+        "version": 1,
+        "groupId": "11111111-1111-4111-8111-111111111111",
+        "revision": "33333333-3333-4333-8333-333333333333",
+        "deviceId": "22222222-2222-4222-8222-222222222222",
+        "entityType": "asset",
+        "entityId": "e80b71cd14d3cbd65f4173abcbfcf01a545dbca32a72d575108b553a648cc96f",
+        "parents": [],
+        "deleted": false,
+        "asset": {
+          "id": "44444444-4444-4444-8444-444444444444",
+          "name": "日本語の素材.txt",
+          "extension": "txt",
+          "kind": "other",
+          "sha256": "e80b71cd14d3cbd65f4173abcbfcf01a545dbca32a72d575108b553a648cc96f",
+          "sizeBytes": 8,
+          "createdAt": "2026-10-05T00:00:00.000Z",
+          "favorite": true,
+          "trashed": false,
+          "internetOrigin": true,
+          "folderIds": [
+            "55555555-5555-4555-8555-555555555555"
+          ],
+          "tagIds": []
+        },
+        "category": null
+      }
+    },
+    {
+      "name": "folder",
+      "valid": true,
+      "event": {
+        "version": 1,
+        "groupId": "11111111-1111-4111-8111-111111111111",
+        "revision": "33333333-3333-4333-8333-333333333333",
+        "deviceId": "22222222-2222-4222-8222-222222222222",
+        "entityType": "folder",
+        "entityId": "55555555-5555-4555-8555-555555555555",
+        "parents": [],
+        "deleted": false,
+        "asset": null,
+        "category": {
+          "id": "55555555-5555-4555-8555-555555555555",
+          "name": "フォルダ",
+          "parentId": null
+        }
+      }
+    },
+    {
+      "name": "trash",
+      "valid": true,
+      "event": {
+        "version": 1,
+        "groupId": "11111111-1111-4111-8111-111111111111",
+        "revision": "33333333-3333-4333-8333-333333333333",
+        "deviceId": "22222222-2222-4222-8222-222222222222",
+        "entityType": "asset",
+        "entityId": "e80b71cd14d3cbd65f4173abcbfcf01a545dbca32a72d575108b553a648cc96f",
+        "parents": [],
+        "deleted": false,
+        "asset": {
+          "id": "44444444-4444-4444-8444-444444444444",
+          "name": "日本語の素材.txt",
+          "extension": "txt",
+          "kind": "other",
+          "sha256": "e80b71cd14d3cbd65f4173abcbfcf01a545dbca32a72d575108b553a648cc96f",
+          "sizeBytes": 8,
+          "createdAt": "2026-10-05T00:00:00.000Z",
+          "favorite": true,
+          "trashed": true,
+          "internetOrigin": true,
+          "folderIds": [
+            "55555555-5555-4555-8555-555555555555"
+          ],
+          "tagIds": []
+        },
+        "category": null
+      }
+    },
+    {
+      "name": "restore",
+      "valid": true,
+      "event": {
+        "version": 1,
+        "groupId": "11111111-1111-4111-8111-111111111111",
+        "revision": "33333333-3333-4333-8333-333333333333",
+        "deviceId": "22222222-2222-4222-8222-222222222222",
+        "entityType": "asset",
+        "entityId": "e80b71cd14d3cbd65f4173abcbfcf01a545dbca32a72d575108b553a648cc96f",
+        "parents": [
+          "66666666-6666-4666-8666-666666666666"
+        ],
+        "deleted": false,
+        "asset": {
+          "id": "44444444-4444-4444-8444-444444444444",
+          "name": "日本語の素材.txt",
+          "extension": "txt",
+          "kind": "other",
+          "sha256": "e80b71cd14d3cbd65f4173abcbfcf01a545dbca32a72d575108b553a648cc96f",
+          "sizeBytes": 8,
+          "createdAt": "2026-10-05T00:00:00.000Z",
+          "favorite": true,
+          "trashed": false,
+          "internetOrigin": true,
+          "folderIds": [
+            "55555555-5555-4555-8555-555555555555"
+          ],
+          "tagIds": []
+        },
+        "category": null
+      }
+    },
+    {
+      "name": "unsupported-version",
+      "valid": false,
+      "event": {
+        "version": 2,
+        "groupId": "11111111-1111-4111-8111-111111111111",
+        "revision": "33333333-3333-4333-8333-333333333333",
+        "deviceId": "22222222-2222-4222-8222-222222222222",
+        "entityType": "asset",
+        "entityId": "e80b71cd14d3cbd65f4173abcbfcf01a545dbca32a72d575108b553a648cc96f",
+        "parents": [],
+        "deleted": false,
+        "asset": {
+          "id": "44444444-4444-4444-8444-444444444444",
+          "name": "日本語の素材.txt",
+          "extension": "txt",
+          "kind": "other",
+          "sha256": "e80b71cd14d3cbd65f4173abcbfcf01a545dbca32a72d575108b553a648cc96f",
+          "sizeBytes": 8,
+          "createdAt": "2026-10-05T00:00:00.000Z",
+          "favorite": true,
+          "trashed": false,
+          "internetOrigin": true,
+          "folderIds": [
+            "55555555-5555-4555-8555-555555555555"
+          ],
+          "tagIds": []
+        },
+        "category": null
+      }
+    },
+    {
+      "name": "wrong-group",
+      "valid": false,
+      "event": {
+        "version": 1,
+        "groupId": "22222222-2222-4222-8222-222222222222",
+        "revision": "33333333-3333-4333-8333-333333333333",
+        "deviceId": "22222222-2222-4222-8222-222222222222",
+        "entityType": "asset",
+        "entityId": "e80b71cd14d3cbd65f4173abcbfcf01a545dbca32a72d575108b553a648cc96f",
+        "parents": [],
+        "deleted": false,
+        "asset": {
+          "id": "44444444-4444-4444-8444-444444444444",
+          "name": "日本語の素材.txt",
+          "extension": "txt",
+          "kind": "other",
+          "sha256": "e80b71cd14d3cbd65f4173abcbfcf01a545dbca32a72d575108b553a648cc96f",
+          "sizeBytes": 8,
+          "createdAt": "2026-10-05T00:00:00.000Z",
+          "favorite": true,
+          "trashed": false,
+          "internetOrigin": true,
+          "folderIds": [
+            "55555555-5555-4555-8555-555555555555"
+          ],
+          "tagIds": []
+        },
+        "category": null
+      }
+    },
+    {
+      "name": "self-parent",
+      "valid": false,
+      "event": {
+        "version": 1,
+        "groupId": "11111111-1111-4111-8111-111111111111",
+        "revision": "33333333-3333-4333-8333-333333333333",
+        "deviceId": "22222222-2222-4222-8222-222222222222",
+        "entityType": "asset",
+        "entityId": "e80b71cd14d3cbd65f4173abcbfcf01a545dbca32a72d575108b553a648cc96f",
+        "parents": [
+          "33333333-3333-4333-8333-333333333333"
+        ],
+        "deleted": false,
+        "asset": {
+          "id": "44444444-4444-4444-8444-444444444444",
+          "name": "日本語の素材.txt",
+          "extension": "txt",
+          "kind": "other",
+          "sha256": "e80b71cd14d3cbd65f4173abcbfcf01a545dbca32a72d575108b553a648cc96f",
+          "sizeBytes": 8,
+          "createdAt": "2026-10-05T00:00:00.000Z",
+          "favorite": true,
+          "trashed": false,
+          "internetOrigin": true,
+          "folderIds": [
+            "55555555-5555-4555-8555-555555555555"
+          ],
+          "tagIds": []
+        },
+        "category": null
+      }
+    },
+    {
+      "name": "duplicate-parent",
+      "valid": false,
+      "event": {
+        "version": 1,
+        "groupId": "11111111-1111-4111-8111-111111111111",
+        "revision": "33333333-3333-4333-8333-333333333333",
+        "deviceId": "22222222-2222-4222-8222-222222222222",
+        "entityType": "asset",
+        "entityId": "e80b71cd14d3cbd65f4173abcbfcf01a545dbca32a72d575108b553a648cc96f",
+        "parents": [
+          "22222222-2222-4222-8222-222222222222",
+          "22222222-2222-4222-8222-222222222222"
+        ],
+        "deleted": false,
+        "asset": {
+          "id": "44444444-4444-4444-8444-444444444444",
+          "name": "日本語の素材.txt",
+          "extension": "txt",
+          "kind": "other",
+          "sha256": "e80b71cd14d3cbd65f4173abcbfcf01a545dbca32a72d575108b553a648cc96f",
+          "sizeBytes": 8,
+          "createdAt": "2026-10-05T00:00:00.000Z",
+          "favorite": true,
+          "trashed": false,
+          "internetOrigin": true,
+          "folderIds": [
+            "55555555-5555-4555-8555-555555555555"
+          ],
+          "tagIds": []
+        },
+        "category": null
+      }
+    },
+    {
+      "name": "bad-hash",
+      "valid": false,
+      "event": {
+        "version": 1,
+        "groupId": "11111111-1111-4111-8111-111111111111",
+        "revision": "33333333-3333-4333-8333-333333333333",
+        "deviceId": "22222222-2222-4222-8222-222222222222",
+        "entityType": "asset",
+        "entityId": "e80b71cd14d3cbd65f4173abcbfcf01a545dbca32a72d575108b553a648cc96f",
+        "parents": [],
+        "deleted": false,
+        "asset": {
+          "id": "44444444-4444-4444-8444-444444444444",
+          "name": "日本語の素材.txt",
+          "extension": "txt",
+          "kind": "other",
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "sizeBytes": 8,
+          "createdAt": "2026-10-05T00:00:00.000Z",
+          "favorite": true,
+          "trashed": false,
+          "internetOrigin": true,
+          "folderIds": [
+            "55555555-5555-4555-8555-555555555555"
+          ],
+          "tagIds": []
+        },
+        "category": null
+      }
+    },
+    {
+      "name": "negative-size",
+      "valid": false,
+      "event": {
+        "version": 1,
+        "groupId": "11111111-1111-4111-8111-111111111111",
+        "revision": "33333333-3333-4333-8333-333333333333",
+        "deviceId": "22222222-2222-4222-8222-222222222222",
+        "entityType": "asset",
+        "entityId": "e80b71cd14d3cbd65f4173abcbfcf01a545dbca32a72d575108b553a648cc96f",
+        "parents": [],
+        "deleted": false,
+        "asset": {
+          "id": "44444444-4444-4444-8444-444444444444",
+          "name": "日本語の素材.txt",
+          "extension": "txt",
+          "kind": "other",
+          "sha256": "e80b71cd14d3cbd65f4173abcbfcf01a545dbca32a72d575108b553a648cc96f",
+          "sizeBytes": -1,
+          "createdAt": "2026-10-05T00:00:00.000Z",
+          "favorite": true,
+          "trashed": false,
+          "internetOrigin": true,
+          "folderIds": [
+            "55555555-5555-4555-8555-555555555555"
+          ],
+          "tagIds": []
+        },
+        "category": null
+      }
+    },
+    {
+      "name": "invalid-extension",
+      "valid": false,
+      "event": {
+        "version": 1,
+        "groupId": "11111111-1111-4111-8111-111111111111",
+        "revision": "33333333-3333-4333-8333-333333333333",
+        "deviceId": "22222222-2222-4222-8222-222222222222",
+        "entityType": "asset",
+        "entityId": "e80b71cd14d3cbd65f4173abcbfcf01a545dbca32a72d575108b553a648cc96f",
+        "parents": [],
+        "deleted": false,
+        "asset": {
+          "id": "44444444-4444-4444-8444-444444444444",
+          "name": "日本語の素材.txt",
+          "extension": "../txt",
+          "kind": "other",
+          "sha256": "e80b71cd14d3cbd65f4173abcbfcf01a545dbca32a72d575108b553a648cc96f",
+          "sizeBytes": 8,
+          "createdAt": "2026-10-05T00:00:00.000Z",
+          "favorite": true,
+          "trashed": false,
+          "internetOrigin": true,
+          "folderIds": [
+            "55555555-5555-4555-8555-555555555555"
+          ],
+          "tagIds": []
+        },
+        "category": null
+      }
+    },
+    {
+      "name": "duplicate-folder",
+      "valid": false,
+      "event": {
+        "version": 1,
+        "groupId": "11111111-1111-4111-8111-111111111111",
+        "revision": "33333333-3333-4333-8333-333333333333",
+        "deviceId": "22222222-2222-4222-8222-222222222222",
+        "entityType": "asset",
+        "entityId": "e80b71cd14d3cbd65f4173abcbfcf01a545dbca32a72d575108b553a648cc96f",
+        "parents": [],
+        "deleted": false,
+        "asset": {
+          "id": "44444444-4444-4444-8444-444444444444",
+          "name": "日本語の素材.txt",
+          "extension": "txt",
+          "kind": "other",
+          "sha256": "e80b71cd14d3cbd65f4173abcbfcf01a545dbca32a72d575108b553a648cc96f",
+          "sizeBytes": 8,
+          "createdAt": "2026-10-05T00:00:00.000Z",
+          "favorite": true,
+          "trashed": false,
+          "internetOrigin": true,
+          "folderIds": [
+            "55555555-5555-4555-8555-555555555555",
+            "55555555-5555-4555-8555-555555555555"
+          ],
+          "tagIds": []
+        },
+        "category": null
+      }
+    },
+    {
+      "name": "asset-category-mixed",
+      "valid": false,
+      "event": {
+        "version": 1,
+        "groupId": "11111111-1111-4111-8111-111111111111",
+        "revision": "33333333-3333-4333-8333-333333333333",
+        "deviceId": "22222222-2222-4222-8222-222222222222",
+        "entityType": "asset",
+        "entityId": "e80b71cd14d3cbd65f4173abcbfcf01a545dbca32a72d575108b553a648cc96f",
+        "parents": [],
+        "deleted": false,
+        "asset": {
+          "id": "44444444-4444-4444-8444-444444444444",
+          "name": "日本語の素材.txt",
+          "extension": "txt",
+          "kind": "other",
+          "sha256": "e80b71cd14d3cbd65f4173abcbfcf01a545dbca32a72d575108b553a648cc96f",
+          "sizeBytes": 8,
+          "createdAt": "2026-10-05T00:00:00.000Z",
+          "favorite": true,
+          "trashed": false,
+          "internetOrigin": true,
+          "folderIds": [
+            "55555555-5555-4555-8555-555555555555"
+          ],
+          "tagIds": []
+        },
+        "category": {
+          "id": "55555555-5555-4555-8555-555555555555",
+          "name": "bad",
+          "parentId": null
+        }
+      }
+    },
+    {
+      "name": "missing-null",
+      "valid": false,
+      "event": {
+        "version": 1,
+        "groupId": "11111111-1111-4111-8111-111111111111",
+        "revision": "33333333-3333-4333-8333-333333333333",
+        "deviceId": "22222222-2222-4222-8222-222222222222",
+        "entityType": "asset",
+        "entityId": "e80b71cd14d3cbd65f4173abcbfcf01a545dbca32a72d575108b553a648cc96f",
+        "parents": [],
+        "deleted": false,
+        "asset": {
+          "id": "44444444-4444-4444-8444-444444444444",
+          "name": "日本語の素材.txt",
+          "extension": "txt",
+          "kind": "other",
+          "sha256": "e80b71cd14d3cbd65f4173abcbfcf01a545dbca32a72d575108b553a648cc96f",
+          "sizeBytes": 8,
+          "createdAt": "2026-10-05T00:00:00.000Z",
+          "favorite": true,
+          "trashed": false,
+          "internetOrigin": true,
+          "folderIds": [
+            "55555555-5555-4555-8555-555555555555"
+          ],
+          "tagIds": []
+        }
+      }
+    },
+    {
+      "name": "unknown-field",
+      "valid": false,
+      "event": {
+        "version": 1,
+        "groupId": "11111111-1111-4111-8111-111111111111",
+        "revision": "33333333-3333-4333-8333-333333333333",
+        "deviceId": "22222222-2222-4222-8222-222222222222",
+        "entityType": "asset",
+        "entityId": "e80b71cd14d3cbd65f4173abcbfcf01a545dbca32a72d575108b553a648cc96f",
+        "parents": [],
+        "deleted": false,
+        "asset": {
+          "id": "44444444-4444-4444-8444-444444444444",
+          "name": "日本語の素材.txt",
+          "extension": "txt",
+          "kind": "other",
+          "sha256": "e80b71cd14d3cbd65f4173abcbfcf01a545dbca32a72d575108b553a648cc96f",
+          "sizeBytes": 8,
+          "createdAt": "2026-10-05T00:00:00.000Z",
+          "favorite": true,
+          "trashed": false,
+          "internetOrigin": true,
+          "folderIds": [
+            "55555555-5555-4555-8555-555555555555"
+          ],
+          "tagIds": []
+        },
+        "category": null,
+        "extra": true
+      }
+    }
+  ]
+}

@@ -1,4 +1,5 @@
 import { on, request } from "./bridge.js";
+import { chatIcon, createInlineChat } from "./inline-chat.js";
 import { renderAssetsProvider } from "../providers/assets/assets.js";
 import { labelForSize, setLanguage, t } from "./i18n.js";
 import { renderCalculatorProvider, runCalculatorUiVerify } from "../providers/calculator/calculator.js";
@@ -23,10 +24,20 @@ const providerRenderers = {
 const titleEl = document.querySelector("[data-provider-title]");
 const providerContainerEl = document.querySelector("[data-provider-container]");
 const voiceLaneEl = document.querySelector("[data-voice-lane]");
+const voiceContentEl = document.createElement("div"); voiceContentEl.className = "hp-voice-content";
+voiceLaneEl.append(voiceContentEl);
+const inlineChat = createInlineChat({ container: voiceLaneEl, request, on, toggleVoice: () => { void ((currentState?.voiceLane?.realtimeAttached || voiceTransport || voiceTransportStarting) ? endVoiceRealtime() : startVoiceRealtime()); }, toggleMute: () => { const muted = !currentState?.voiceLane?.muted; setVoiceTransportMuted(muted); void request("voice.setMuted", { muted }).then(render); } });
 const providerIconsEl = document.querySelector("[data-provider-icons]");
 const sizeSwitchEl = document.querySelector("[data-size-switch]");
 const refreshButtonEl = document.querySelector("[data-refresh]");
 const settingsButtonEl = document.querySelector("[data-settings]");
+const chatButtonEl = document.querySelector("[data-chat]");
+
+function updateResponsivePanelSize() {
+  const width = document.documentElement.clientWidth;
+  document.documentElement.dataset.panelSize = width < 560 ? "small" : width < 640 ? "medium" : width < 730 ? "large" : "extraLarge";
+}
+new ResizeObserver(updateResponsivePanelSize).observe(document.documentElement);
 
 /** @type {any} */
 let currentState = null;
@@ -46,6 +57,7 @@ let suppressProviderSelection = false;
 let voiceTransport = null;
 let pendingVoiceTransportSignal = null;
 let voiceTransportStarting = false;
+let voiceStartAttempt = 0;
 
 on("state.changed", (state) => {
   void render(state);
@@ -97,16 +109,25 @@ async function renderNow(state, options = {}) {
   currentState = state;
   document.documentElement.style.setProperty("--hp-header-height", `${state.panel.headerHeight}px`);
   document.documentElement.style.setProperty("--hp-voice-height", `${state.panel.voiceLaneHeight ?? 0}px`);
+  document.documentElement.style.setProperty("--hp-chat-height", `${state.panel.chatHeight ?? 82}px`);
   document.documentElement.dataset.textSize = state.settings.textSize;
   document.documentElement.dataset.panelAttachment = state.settings.effectivePanelAttachmentStyle;
-  document.documentElement.dataset.panelSize = state.settings.panelSize;
+  updateResponsivePanelSize();
   setLanguage(state.settings.language);
+  if (chatButtonEl) {
+    const label = state.settings.language === "en" ? "Write a message" : "メッセージを入力";
+    if (!chatButtonEl.firstElementChild) chatButtonEl.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke-width="1.8"><path d="M5 4h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H9l-5 3v-3a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z"/><path d="M7 9h10M7 13h7"/></svg>';
+    chatButtonEl.title = label;
+    chatButtonEl.setAttribute("aria-label", label);
+    chatButtonEl.onclick = () => request("chat.open");
+  }
 
   renderTitle(state);
   renderSizeSwitch(state);
   renderProviderIcons(state);
   renderProvider(state, options, providerWillRemount);
   renderVoiceLane(state);
+  inlineChat.updateLanguage(state.settings.language);
   renderCommands();
   return true;
 }
@@ -468,14 +489,17 @@ function providerRenderKey(state) {
 }
 
 function renderVoiceLane(state) {
-  voiceLaneEl.replaceChildren();
+  voiceContentEl.replaceChildren();
   voiceLaneEl.setAttribute("aria-label", t("voiceRegionLabel"));
   const lane = state.voiceLane;
+  inlineChat.updateVoice({ ...lane, starting: voiceTransportStarting }, lane?.availability === "ready" ? "" : voiceStatusText(lane));
   const mode = lane?.mode ?? "disabled";
-  voiceLaneEl.hidden = mode === "disabled";
+  voiceLaneEl.hidden = false;
+  voiceContentEl.hidden = mode === "disabled" || (!lane?.realtimeAttached && !(lane?.pendingApprovals?.length) && lane?.sessionStatus !== "stopping" && !lane?.physicalMediaConfirmationAvailable);
+  if (voiceContentEl.hidden) document.documentElement.style.setProperty("--hp-voice-height", "0px");
   voiceLaneEl.dataset.mode = mode;
-  if (voiceLaneEl.hidden) {
-    disposeLocalVoiceTransport();
+  if (voiceContentEl.hidden) {
+    if (mode === "disabled") cancelLocalVoiceTransport();
     return;
   }
 
@@ -487,23 +511,23 @@ function renderVoiceLane(state) {
 }
 
 function createVoiceMicrophoneButton(lane) {
-  const active = Boolean(lane.realtimeAttached || voiceTransport);
+  const active = Boolean(lane.realtimeAttached || voiceTransport || voiceTransportStarting);
   const microphone = voiceButton(
-    active ? t("voiceMicrophoneActive") : t("voiceStartMicrophone"),
-    active ? "●" : "◉",
-    () => { void startVoiceRealtime(); },
+    active ? t("voiceEndSession") : t("voiceStartMicrophone"),
+    active ? "■" : "◉",
+    () => { void (active ? endVoiceRealtime() : startVoiceRealtime()); },
   );
-  microphone.disabled = active
-    || lane.availability !== "ready"
-    || ["connecting", "requesting_permission", "negotiating", "stopping", "recovering"].includes(lane.sessionStatus);
+  microphone.disabled = (!active && lane.availability !== "ready") || lane.sessionStatus === "stopping";
   microphone.classList.add("hp-voice-microphone");
   return microphone;
 }
 
-function createVoiceWaveform() {
-  const waveform = document.createElement("div");
-  waveform.className = "hp-voice-waveform";
-  waveform.setAttribute("aria-hidden", "true");
+function createVoiceWaveform(lane) {
+  const active = Boolean(lane.realtimeAttached || voiceTransport || voiceTransportStarting);
+  const waveform = voiceButton(active ? t("voiceEndSession") : t("voiceStartMicrophone"), "",
+    () => { void (active ? endVoiceRealtime() : startVoiceRealtime()); });
+  waveform.classList.add("hp-voice-waveform");
+  waveform.disabled = (!active && lane.availability !== "ready") || lane.sessionStatus === "stopping";
   for (const height of [6, 12, 18, 10, 14]) {
     const bar = document.createElement("span");
     bar.style.height = `${height}px`;
@@ -515,13 +539,15 @@ function createVoiceWaveform() {
 function createVoiceMuteButton(lane) {
   const mute = voiceButton(
     lane.muted ? t("voiceUnmute") : t("voiceMute"),
-    lane.muted ? "M" : "S",
+    "",
     () => {
       const muted = !lane.muted;
       setVoiceTransportMuted(muted);
       void request("voice.setMuted", { muted }).then(render);
     },
   );
+  mute.innerHTML = chatIcon(lane.muted ? "muted" : "mic");
+  mute.title = lane.muted ? t("voiceUnmute") : t("voiceMute");
   mute.disabled = !lane.realtimeAttached;
   return mute;
 }
@@ -558,8 +584,6 @@ function renderCompactVoiceLane(lane) {
   const root = document.createElement("div");
   root.className = "hp-voice-compact";
 
-  const microphone = createVoiceMicrophoneButton(lane);
-  const waveform = createVoiceWaveform();
 
   const conversation = document.createElement("div");
   conversation.className = "hp-voice-conversation";
@@ -571,34 +595,14 @@ function renderCompactVoiceLane(lane) {
   preview.textContent = lane.transcriptPreview || t("voiceRuntimeInactive");
   conversation.append(status, preview);
 
-  const count = document.createElement("span");
-  count.className = "hp-voice-session-count";
-  count.textContent = String(lane.visibleSessionCount ?? 0);
-  count.setAttribute("aria-label", formatText("voiceSessionCount", {
-    count: lane.visibleSessionCount ?? 0,
-  }));
-
-  const mute = createVoiceMuteButton(lane);
   const physicalConfirmation = createVoicePhysicalMediaConfirmationButton(lane);
   root.classList.toggle("hp-voice-has-physical-confirmation", physicalConfirmation !== null);
-  const expand = voiceButton(
-    t("voiceExpand"),
-    "⌄",
-    () => request("voice.setLayout", { layout: "expanded" }).then(render),
-    false,
-  );
-  const end = voiceButton(
-    t("voiceEndSession"),
-    "×",
-    () => { void endVoiceRealtime(); },
-  );
-
-  root.append(microphone, waveform, conversation, count, mute);
+  root.append(conversation);
   if (physicalConfirmation) {
     root.append(physicalConfirmation);
   }
-  root.append(expand, end);
-  voiceLaneEl.append(root);
+  // Session controls live beside the chat input.
+  voiceContentEl.append(root);
 }
 
 function renderExpandedVoiceLane(lane) {
@@ -610,34 +614,14 @@ function renderExpandedVoiceLane(lane) {
   const status = document.createElement("span");
   status.className = "hp-voice-status";
   status.textContent = voiceStatusText(lane);
-  const microphone = createVoiceMicrophoneButton(lane);
-  const waveform = createVoiceWaveform();
   const spacer = document.createElement("span");
   spacer.className = "hp-voice-spacer";
-  const count = document.createElement("span");
-  count.className = "hp-voice-session-count";
-  count.textContent = String(lane.visibleSessionCount ?? 0);
-  count.setAttribute("aria-label", formatText("voiceSessionCount", {
-    count: lane.visibleSessionCount ?? 0,
-  }));
-  const mute = createVoiceMuteButton(lane);
   const physicalConfirmation = createVoicePhysicalMediaConfirmationButton(lane);
-  const collapse = voiceButton(
-    t("voiceCollapse"),
-    "⌃",
-    () => request("voice.setLayout", { layout: "compact" }).then(render),
-    true,
-  );
-  const end = voiceButton(
-    t("voiceEndSession"),
-    "×",
-    () => { void endVoiceRealtime(); },
-  );
-  toolbar.append(microphone, waveform, status, spacer, count, mute);
+  toolbar.append(status, spacer);
   if (physicalConfirmation) {
     toolbar.append(physicalConfirmation);
   }
-  toolbar.append(collapse, end);
+  // Session controls live beside the chat input.
 
   const grid = document.createElement("div");
   grid.className = "hp-voice-expanded-grid";
@@ -698,7 +682,7 @@ function renderExpandedVoiceLane(lane) {
 
   grid.append(transcript, cards);
   root.append(toolbar, grid);
-  voiceLaneEl.append(root);
+  voiceContentEl.append(root);
 }
 
 async function startVoiceRealtime(dependencies = {}) {
@@ -711,12 +695,17 @@ async function startVoiceRealtime(dependencies = {}) {
   const createAudio = dependencies.createAudio ?? (() => new Audio());
   const waitForIce = dependencies.waitForIce ?? waitForIceGatheringComplete;
   voiceTransportStarting = true;
+  const attempt = ++voiceStartAttempt;
+  const ensureCurrent = () => {
+    if (attempt !== voiceStartAttempt) throw Object.assign(new Error("voice_cancelled"), { voiceCancelled: true });
+  };
   let transport = null;
   let acquiredStream = null;
   let hostRealtimeRequestIssued = false;
   let mediaLease = null;
   try {
     const microphoneRequest = await requestBridge("voice.requestMicrophone");
+    ensureCurrent();
     if (microphoneRequest?.mediaLease != null) {
       if (typeof microphoneRequest.mediaLease !== "string"
         || !/^[0-9a-f]{32}$/.test(microphoneRequest.mediaLease)) {
@@ -738,6 +727,7 @@ async function startVoiceRealtime(dependencies = {}) {
       video: false,
     });
     acquiredStream = stream;
+    ensureCurrent();
     for (const track of stream.getAudioTracks()) {
       track.enabled = false;
     }
@@ -764,6 +754,9 @@ async function startVoiceRealtime(dependencies = {}) {
       remoteAudioPlaybackCurrent: false,
     };
     voiceTransport = transport;
+    transport.negotiationTimer = window.setTimeout(() => {
+      if (!transport.disposed && !transport.confirmed) void abortVoiceRealtime("webrtc_connection_failed", requestBridge);
+    }, 30_000);
     acquiredStream = null;
     dataChannel.addEventListener?.("message", (event) => {
       void handleVoiceRealtimeDataMessage(transport, event?.data);
@@ -800,17 +793,20 @@ async function startVoiceRealtime(dependencies = {}) {
       if (!transport.disposed && ["failed", "closed"].includes(peer.connectionState)) {
         void abortVoiceRealtime("webrtc_connection_failed", requestBridge);
       }
+      if (!transport.disposed && peer.connectionState === "connected") void confirmVoiceTransport(transport);
     });
 
     const offer = await peer.createOffer({ offerToReceiveAudio: true });
     await peer.setLocalDescription(offer);
     await waitForIce(peer, 8_000);
+    ensureCurrent();
     const localSdp = peer.localDescription?.sdp;
     if (!localSdp || peer.localDescription?.type !== "offer") {
       throw Object.assign(new Error("webrtc_offer_failed"), { voiceReason: "webrtc_offer_failed" });
     }
     hostRealtimeRequestIssued = true;
     const result = await requestBridge("voice.startRealtime", { sdp: localSdp });
+    ensureCurrent();
     if (!Number.isInteger(result?.generation)
       || typeof result?.threadId !== "string"
       || result.threadId.length === 0
@@ -828,18 +824,19 @@ async function startVoiceRealtime(dependencies = {}) {
     }
   } catch (error) {
     const reason = voiceStartFailureReason(error, hostRealtimeRequestIssued);
-    disposeLocalVoiceTransport();
+    if (attempt === voiceStartAttempt) disposeLocalVoiceTransport();
     if (acquiredStream) {
       stopVoiceMediaStream(acquiredStream);
       acquiredStream = null;
       void notifyVoiceMediaEvent({ requestBridge, mediaLease }, "microphoneStopped");
     }
+    if (attempt !== voiceStartAttempt) return;
     try {
       await requestBridge("voice.abortRealtime", { reason });
     } catch {
     }
   } finally {
-    voiceTransportStarting = false;
+    if (attempt === voiceStartAttempt) voiceTransportStarting = false;
   }
 }
 
@@ -918,28 +915,37 @@ async function applyVoiceTransportSignal(signal) {
   }
   try {
     await transport.peer.setRemoteDescription({ type: "answer", sdp: signal.sdp });
-    for (const track of transport.stream.getAudioTracks()) {
-      track.enabled = true;
-    }
-    transport.muted = false;
-    transport.audio.muted = false;
-    await playVoiceRemoteAudio(transport);
-    await transport.requestBridge("voice.confirmRealtime", {
-      generation: transport.generation,
-      threadId: transport.threadId,
-    });
+    if (transport.peer.connectionState === "connected") await confirmVoiceTransport(transport);
   } catch {
     await abortVoiceRealtime("webrtc_connection_failed", transport.requestBridge);
   }
 }
 
+async function confirmVoiceTransport(transport) {
+  if (transport.disposed || transport.confirming || transport.confirmed || !Number.isInteger(transport.generation)) return;
+  transport.confirming = true;
+  try {
+    await transport.requestBridge("voice.confirmRealtime", { generation: transport.generation, threadId: transport.threadId });
+    if (transport.disposed) return;
+    transport.confirmed = true;
+    window.clearTimeout(transport.negotiationTimer);
+    setVoiceTransportMuted(false);
+  } catch {
+    if (!transport.disposed) await abortVoiceRealtime("webrtc_connection_failed", transport.requestBridge);
+  }
+}
+
 async function endVoiceRealtime(requestBridge = request, renderState = render) {
+  voiceStartAttempt++;
+  voiceTransportStarting = false;
   disposeLocalVoiceTransport();
   const state = await requestBridge("voice.endSession");
   await renderState(state);
 }
 
 async function abortVoiceRealtime(reason, requestBridge = request) {
+  voiceStartAttempt++;
+  voiceTransportStarting = false;
   disposeLocalVoiceTransport();
   try {
     const state = await requestBridge("voice.abortRealtime", { reason });
@@ -952,12 +958,12 @@ async function abortVoiceRealtime(reason, requestBridge = request) {
 
 function synchronizeVoiceTransportMute(lane) {
   if (!lane || lane.availability === "disabled" || !lane.transportAttached) {
-    disposeLocalVoiceTransport();
+    cancelLocalVoiceTransport();
     return;
   }
   if (!lane.realtimeAttached
     && ["idle", "recoverable_failure", "blocked_failure"].includes(lane.sessionStatus)) {
-    disposeLocalVoiceTransport();
+    cancelLocalVoiceTransport();
     return;
   }
   setVoiceTransportMuted(Boolean(lane.muted));
@@ -1016,6 +1022,12 @@ async function notifyVoiceMediaEvent(transport, kind) {
   }
 }
 
+function cancelLocalVoiceTransport() {
+  voiceStartAttempt++;
+  voiceTransportStarting = false;
+  disposeLocalVoiceTransport();
+}
+
 function disposeLocalVoiceTransport() {
   pendingVoiceTransportSignal = null;
   const transport = voiceTransport;
@@ -1024,6 +1036,7 @@ function disposeLocalVoiceTransport() {
     return;
   }
   transport.disposed = true;
+  window.clearTimeout(transport.negotiationTimer);
   if (transport.microphoneCurrent) {
     transport.microphoneCurrent = false;
     void notifyVoiceMediaEvent(transport, "microphoneStopped");
@@ -1068,7 +1081,7 @@ function waitForIceGatheringComplete(peer, timeoutMs) {
   return new Promise((resolve, reject) => {
     const timeout = window.setTimeout(() => {
       peer.removeEventListener("icegatheringstatechange", onStateChanged);
-      reject(Object.assign(new Error("webrtc_offer_failed"), { voiceReason: "webrtc_offer_failed" }));
+      resolve();
     }, timeoutMs);
     function onStateChanged() {
       if (peer.iceGatheringState === "complete") {
@@ -1138,7 +1151,7 @@ async function verifyVoiceTransportHarness() {
     removeEventListener(name) { this.listeners.delete(name); }
     createOffer() { return Promise.resolve({ type: "offer", sdp: "v=0\r\no=fake-offer\r\n" }); }
     setLocalDescription(description) { this.localDescription = description; return Promise.resolve(); }
-    setRemoteDescription(description) { this.remoteDescription = description; return Promise.resolve(); }
+    setRemoteDescription(description) { this.remoteDescription = description; this.connectionState = "connected"; return Promise.resolve(); }
     close() { this.closed = true; this.connectionState = "closed"; }
   }
   const requestBridge = async (method) => {
@@ -1255,10 +1268,26 @@ async function verifyVoiceTransportHarness() {
     PeerConnection: FakePeerConnection,
     createAudio: () => audio,
   });
+  const pendingTrack = { stopped: false, stop() { this.stopped = true; } };
+  let resolvePermission;
+  const permissionPending = new Promise(resolve => { resolvePermission = resolve; });
+  const pendingCalls = [];
+  const startPending = startVoiceRealtime({
+    requestBridge: async method => { pendingCalls.push(method); return {}; },
+    mediaDevices: { getUserMedia: () => permissionPending },
+    PeerConnection: FakePeerConnection,
+    createAudio: () => audio,
+  });
+  await Promise.resolve();
+  synchronizeVoiceTransportMute({ availability: "disabled" });
+  resolvePermission({ getTracks: () => [pendingTrack], getAudioTracks: () => [pendingTrack] });
+  await startPending;
+  const pendingPermissionCancelled = pendingTrack.stopped && !pendingCalls.includes("voice.startRealtime") && !voiceTransportStarting;
   return connected
     && cleaned
     && endStoppedBeforeNative
     && failedInitializationCleaned
+    && pendingPermissionCancelled
     && !mediaRequestedWithoutPermission
     && calls.includes("voice.abortRealtime")
     && voiceTransport === null;
@@ -1457,15 +1486,22 @@ window.__hoverPocketVerify = {
         ));
         const rootBounds = controlsRoot.getBoundingClientRect();
         const sections = [...controlsRoot.querySelectorAll(":scope > .hp-controls-section")];
+        const canScroll = ["auto", "scroll"].includes(getComputedStyle(controlsRoot).overflowY);
+        const contentTop = rootBounds.top - controlsRoot.scrollTop;
+        const contentBottom = canScroll ? contentTop + controlsRoot.scrollHeight : rootBounds.bottom;
         controlsRenderedOk = !controlsRoot.classList.contains("is-error") && sections.length === 3;
         controlsLayoutOk = rootBounds.width > 0
           && rootBounds.height > 0
           && sections.every((section) => {
             const bounds = section.getBoundingClientRect();
             return bounds.left >= rootBounds.left - 1
-              && bounds.top >= rootBounds.top - 1
+              && bounds.top >= contentTop - 1
               && bounds.right <= rootBounds.right + 1
-              && bounds.bottom <= rootBounds.bottom + 1;
+              && bounds.bottom <= contentBottom + 1
+              && [...section.querySelectorAll("button,input")].every(control => {
+                const controlBounds = control.getBoundingClientRect();
+                return controlBounds.top >= bounds.top - 1 && controlBounds.bottom <= bounds.bottom + 1;
+              });
           });
         const mediaButtons = [...controlsRoot.querySelectorAll(".hp-media-commands button")];
         controlsHitAreasOk = mediaButtons.length >= 6 && mediaButtons.every((button) => {
@@ -1693,7 +1729,7 @@ window.__hoverPocketVerify = {
     const legacyAiLaneNotMountedOk = document.querySelector(".hp-ai-lane") === null
       && !document.body.textContent.includes("Codex Voice");
     const voiceDefaultOffOk = state.settings.voiceEnabled === false
-      && voiceLaneEl.hidden
+      && voiceContentEl.hidden && !voiceLaneEl.hidden && !!voiceLaneEl.querySelector('[data-chat-draft]')
       && Number(state.panel.voiceLaneHeight ?? 0) === 0;
     const voiceWebRtcHarnessOk = await verifyVoiceTransportHarness();
     const voiceFixture = {
@@ -1721,22 +1757,22 @@ window.__hoverPocketVerify = {
       voiceLane: { ...voiceFixture, mode: "compact", sessionStatus: "stopping" },
     });
     const voiceTeardownVisibleOk = !voiceLaneEl.hidden
+      && !voiceContentEl.hidden
       && voiceLaneEl.dataset.mode === "compact"
-      && voiceLaneEl.querySelector(".hp-voice-compact") !== null;
-    setLanguage("ja");
+      && voiceLaneEl.querySelector(".hp-voice-compact") !== null
+      && voiceLaneEl.querySelector("[data-chat-voice]")?.disabled === true;
+    setLanguage("ja"); inlineChat.updateLanguage("ja");
     renderVoiceLane({
       settings: { voiceEnabled: true },
       voiceLane: { ...voiceFixture, mode: "compact" },
     });
-    const japaneseCompactOk = voiceLaneEl.getAttribute("aria-label") === "音声レーン"
-      && voiceLaneEl.querySelector(".hp-voice-status")?.textContent === "利用可能 · 承認待ち"
-      && voiceLaneEl.querySelector(".hp-voice-preview")?.textContent === "マイクを押すと音声会話を開始します。"
-      && voiceLaneEl.querySelector(".hp-voice-microphone")?.getAttribute("aria-label") === "マイクを開始"
-      && voiceLaneEl.querySelector(".hp-voice-microphone")?.disabled === false
-      && voiceLaneEl.querySelector(".hp-voice-session-count")?.getAttribute("aria-label") === "セッション 1件";
+    const japaneseCompactOk = voiceContentEl.hidden
+      && voiceLaneEl.querySelector('[data-chat-voice]')?.disabled === false
+      && voiceLaneEl.querySelector('[data-chat-voice]')?.getAttribute('aria-label') === '音声会話を開始'
+      && voiceLaneEl.querySelector('.hp-chat-unavailable')?.hidden === true;
     renderVoiceLane({
       settings: { voiceEnabled: true },
-      voiceLane: { ...voiceFixture, mode: "expanded" },
+      voiceLane: { ...voiceFixture, realtimeAttached: true, mode: "expanded" },
     });
     const japaneseExpandedOk = voiceLaneEl.querySelector(".hp-voice-transcript-event")?.textContent === "あなた: 予定を確認して"
       && voiceLaneEl.querySelector(".hp-voice-session-card span")?.textContent?.startsWith("ユーザー操作待ち · 更新 ")
@@ -1746,20 +1782,18 @@ window.__hoverPocketVerify = {
       availability: "signedOut",
       safeErrorCode: "signed_out",
     }) === "サインインが必要";
-    setLanguage("en");
+    setLanguage("en"); inlineChat.updateLanguage("en");
     renderVoiceLane({
       settings: { voiceEnabled: true },
       voiceLane: { ...voiceFixture, mode: "compact" },
     });
-    const englishCompactOk = voiceLaneEl.getAttribute("aria-label") === "Voice Lane"
-      && voiceLaneEl.querySelector(".hp-voice-status")?.textContent === "Ready · Waiting for approval"
-      && voiceLaneEl.querySelector(".hp-voice-preview")?.textContent === "Press the microphone to start a Voice conversation."
-      && voiceLaneEl.querySelector(".hp-voice-microphone")?.getAttribute("aria-label") === "Start microphone"
-      && voiceLaneEl.querySelector(".hp-voice-microphone")?.disabled === false
-      && voiceLaneEl.querySelector(".hp-voice-session-count")?.getAttribute("aria-label") === "1 sessions";
+    const englishCompactOk = voiceContentEl.hidden
+      && voiceLaneEl.querySelector('[data-chat-voice]')?.disabled === false
+      && voiceLaneEl.querySelector('[data-chat-voice]')?.getAttribute('aria-label') === 'Start voice conversation'
+      && voiceLaneEl.querySelector('.hp-chat-unavailable')?.hidden === true;
     renderVoiceLane({
       settings: { voiceEnabled: true },
-      voiceLane: { ...voiceFixture, mode: "expanded" },
+      voiceLane: { ...voiceFixture, realtimeAttached: true, mode: "expanded" },
     });
     const englishExpandedOk = voiceLaneEl.querySelector(".hp-voice-transcript-event")?.textContent === "You: 予定を確認して"
       && voiceLaneEl.querySelector(".hp-voice-session-card span")?.textContent?.startsWith("Waiting for user · updated ")
@@ -1783,7 +1817,7 @@ window.__hoverPocketVerify = {
       && voiceErrorText("invalid_remote_sdp") === "The Voice connection response could not be verified"
       && voiceErrorText("installed_broker_only_tool_policy_missing")
         === "Voice was stopped because this Codex version cannot enforce Broker-only tools";
-    setLanguage(state.settings.language);
+    setLanguage(state.settings.language); inlineChat.updateLanguage(state.settings.language);
     renderVoiceLane(state);
     window.__hoverPocketVerifyStep = "complete";
 

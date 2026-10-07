@@ -171,7 +171,7 @@ enum PocketCapabilityDescriptors {
         maximumCallsPerMinute: 120
     )
 
-    static let builtIn: [PocketCapabilityDescriptor] = (PersonalToolOperation.allCases.map(\.descriptor) + [
+    static let builtIn: [PocketCapabilityDescriptor] = (LibraryVoiceOperation.allCases.map(\.descriptor) + PersonalToolOperation.allCases.map(\.descriptor) + [
         PocketAITextService.descriptor,
         descriptor(
             PocketCapabilityKeys.calculatorEvaluate,

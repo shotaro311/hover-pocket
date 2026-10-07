@@ -1,0 +1,6 @@
+UI verify: WebView2 host + bridge + provider registry + settings
+PASS cold top-edge open: panel_visible_before_webview_ready=true, dispatch_ms=42.7
+PASS inline chat: live installed model route exactly matches the app's current grants; tools=17
+PASS inline chat: live Codex returned 7 from the panel composer
+PASS inline chat: live reply stays in the same panel with voice off
+PASS inline-chat-live: composer -> real turn/start -> visible reply 7; isolated library/history; existing dedicated login; auth_copy=false; microphone=false
