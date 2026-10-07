@@ -1,9 +1,15 @@
 ---
 project_slug: hover-menu-preview
-updated: 2026-10-06
+updated: 2026-10-07
 updated_by: codex
-status: chat-duplicate-windows-57816-running; macos-676-71460-running; reply-normalization-and-live-ui-verified; original-trigger-unconfirmed; macos-recording-permission-pending
+status: windows-0.2.11-published-installed-38832; release-readback-99-and-transition-verified; mac-source-ci-passed-but-ssh-offline; mac-release-install-pending
 ---
+
+## 2026-10-07 本番反映
+
+- 両OSソースをPR #48でmainへ統合。Windows 0.2.11を公開して本番アプリへ更新し、起動・公開DLL一致・設定・自動起動・素材20件の保持を確認。公開版99項目と更新／復元CIが成功した。
+- Clipboardは通常取り込みによって30件上限の1件が入れ替わった。画像と残る履歴は一致し、更新前の履歴はバックアップへ保持している。
+- MacのソースCIは成功したが、SSHのホスト名解決／既知IP接続が復旧せず、署名・公証・公開・本番インストールは未実施。接続回復が必要。[検証・readback・残作業](2026-10/2026-10-07_hover-pocket-production-ux.md)。
 
 ## 2026-10-06 チャットの二重表示を防ぐ処理
 
@@ -1857,4 +1863,3 @@ status: chat-duplicate-windows-57816-running; macos-676-71460-running; reply-nor
 - 2026-06-03: 上部 pill の位置を画面上端へ合わせ、余白 0pt に調整。
 - 2026-06-02: Prototype app を `/Users/shotaro/code/share/hover-menu-preview` に移行し、開発用 Git repository と `.gitignore` を用意。
 - 2026-06-02: 共通進捗管理を初期化。
-
