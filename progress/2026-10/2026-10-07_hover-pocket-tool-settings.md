@@ -21,4 +21,15 @@
 
 ## 反映状況
 
-0.2.12 / Mac build678の本番反映を準備中。最終ソースでの追加検証・公開・導入後のreadbackはこの記録へ追記する。Windowsの本番生成は従来から実行条件が未充足のため未検証。Macの範囲収録のOS許可待ちは従来の未完了事項として維持する。
+- [PR #49](https://github.com/shotaro311/hover-pocket/pull/49)をmain `7c862a2`へ統合した。配布ソースは `92094bbb15eeee73cb19c61e1dbedb0ca1e93f93`。
+- [Windows 0.2.12](https://github.com/shotaro311/hover-pocket/releases/tag/win-v0.2.12)を公開・導入。本番PID22512が応答し、インストール登録と実アプリが0.2.12で一致。設定・自動起動・素材20件／DB論理hash・Clipboardは一致した。バックアップはWindows側 `artifacts/tool-settings-20261007/startup-backup-*`。
+- [Mac 0.2.12 / build678](https://github.com/shotaro311/hover-pocket/releases/tag/v0.2.12-678)を署名・公証して公開。公証ID `6d7cbba4-7c34-40d0-9065-2a75a52f05ed` はAccepted。公開ZIPを再取得して手元の署名済みZIPとの一致を確認し、/Applicationsへ適用。本番PID16728の実行パスと署名、公開版との一致を確認した。
+- Macの設定・素材20件／全DBテーブル・原本・チャット履歴は一致。Clipboardは画像20件が不変、テキスト30件のうち同じ本文の1件が起動時に最新へ移し直された。本文とお気に入り、残る29件は不変で、内容の削除はない。最初の厳密照合はID変更により失敗したが、旧IDと新IDの本文一致を独立して確認し、通常の並び替えとして最終照合 `startup-resolved-readback.json` が成功した。Mac側 `startup-backup` に以前のアプリ・設定・全ユーザーデータを保持した。
+- 最終Windows／Mac CIと3 OSの契約比較が成功。Mac配布用アプリのツール・チャット・自由サイズ160条件も成功。Windowsは100回の開閉・復旧検証、保存失敗時のFocus削除保留、配布ビルドの設定／ツール／UIモデルが成功した。
+- 両OSの公開フィード・資産99項目、MacのSparkle署名、各成果物hashと専用フィードを確認した。最初のWindows側検査はOpenSSLがPATHになく失敗し、既存のGit付属OpenSSLを検査プロセスのPATHに加えて再検査した。アプリや署名の変更はない。
+- [更新・復元・再インストールCI](https://github.com/shotaro311/hover-pocket/actions/runs/37608085661)が両OSで成功。署名済みCodex Sandbox MSIの検証は今回配布していないため対象外。
+- Windowsの本番生成は従来から実行条件が未充足のため未検証。Macの範囲収録のOS許可待ちは従来の未完了事項として維持する。
+
+最終根拠はWindows側 `final-release-*.log`、`settings-registration-verify.log`、`settings-flush-verify.log`、`shell-corrected.log`、`startup-readback.json`、`public-readback-both-final.json`。Mac側は `live-sol-generation.log`、`release-*.log`、`notarize.log`、`publish.log`、`data-readback.json`、`startup-resolved-readback.json` と `installed-process-id.txt`。
+
+最終CI: [Windows](https://github.com/shotaro311/hover-pocket/actions/runs/37607040501)、[Mac](https://github.com/shotaro311/hover-pocket/actions/runs/37607040488)、[契約比較](https://github.com/shotaro311/hover-pocket/actions/runs/37607040517)。

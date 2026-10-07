@@ -2,8 +2,14 @@
 project_slug: hover-menu-preview
 updated: 2026-10-07
 updated_by: codex
-status: windows-0.2.11-installed-38832; macos-0.2.11-677-installed-91090; signed-notarized; both-feeds-readback-99-and-release-transitions-verified
+status: windows-0.2.12-installed-22512; macos-0.2.12-678-installed-16728; tool-model-selection-and-focus-removal; both-feeds-readback-99-and-release-transitions-verified
 ---
+
+## 2026-10-07 起点設定の削除・生成モデル選択・Focus削除
+
+- 両OSの「起点表示」とB/Cアイコン設定を削除し、上端のホバー操作を維持した。自作ツールの生成モデルと推論を選択・保存できる。WindowsのFocusは記録を保持して削除・復元でき、保存に失敗した場合は削除を保留する。
+- PR #49をmainへ統合し、Windows 0.2.12とMac 0.2.12 / build678を公開・本番へ適用。Windows PID22512、Mac PID16728の起動と公開版との一致を確認した。設定・素材20件を両OSで保持。MacのClipboardは同じ文を最新に移し直した1件を除き履歴のIDも一致し、本文・お気に入りは保持されている。更新前のアプリとデータはバックアップに保持した。
+- MacではGPT-6.1 Solによる2つの実生成が成功。両OSの最終CI、公開配布物99項目、更新・復元・再インストールCIが成功。Windowsの本番生成は既存の実行条件が未充足のため未検証。[実装・検証・readback](2026-10/2026-10-07_hover-pocket-tool-settings.md)。
 
 ## 2026-10-07 本番反映
 
