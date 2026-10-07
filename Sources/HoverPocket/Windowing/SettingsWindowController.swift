@@ -78,6 +78,9 @@ final class SettingsWindowController {
         hostingController.sizingOptions = []
         window.contentViewController = hostingController
         window.setContentSize(contentSize)
+        NotificationCenter.default.publisher(for: NSWindow.willCloseNotification, object: window)
+            .sink { _ in LibraryDevicePairingController.shared.cancel() }
+            .store(in: &cancellables)
         window.center()
         return window
     }
@@ -85,9 +88,8 @@ final class SettingsWindowController {
     private func observeSettings() {
         settings.$appLanguage
             .dropFirst()
-            .sink { [weak self] _ in
-                guard let self else { return }
-                self.window?.title = self.settings.text(.settingsWindowTitle)
+            .sink { [weak self] language in
+                self?.window?.title = AppText.text(.settingsWindowTitle, language: language)
             }
             .store(in: &cancellables)
     }

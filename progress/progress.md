@@ -35,6 +35,18 @@ status: chat-duplicate-windows-57816-running; macos-676-71460-running; reply-nor
 - WindowsとMacへ履歴サイドバー、入力／音声／送信、モデル／推論、進行表示、会話中のホバー収納、8操作のキー設定、範囲収録、右下のサイズ変更を実装した。音声文字起こし専用は現行接続で非対応のため理由付きで無効。
 - Windowsは修正版69504が起動し、会話・モデル／推論・キー保存・実範囲動画・全UI検査が成功。Macは開発版672が起動し、会話と100回開閉等が成功。Macの実録画はOSの画面収録許可待ち。変更は独立worktreeに未コミットで保持。[変更と検証の記録](2026-10/2026-10-06_hover-pocket-conversation-ux.md) / [共通仕様](../docs/requirement/conversation-ux-20261006.md)。
 
+## 2026-10-06 設定画面と端末のコード接続
+
+- Mac開発版671とWindows候補に、6カテゴリの設定、短期コードの表示/入力、相手の明示承認、端末一覧/解除を実装。両OSの共通helperとWindowsの停止状態復旧修正を開発ブランチへ統合した。
+- 模擬API・接続状態・取消と既存機能の検査に加え、公開TLS仲介で両方向のコード接続が成功。隔離SyncthingとSSH転送で生成素材2件の往復・原本SHA一致・専用共有だけの解除を両端末で確認。Mac実画面の日本語/英語、署名とライセンス同梱を確認した。
+- 実19素材の原本・DB内容とEagle共有を保持。既存同期は39ファイル・need0・errors0。Mac/Windows候補は開発版で、main統合・公開配信は未実施。大量素材の速度・長期運用は別受入。[Macの記録](2026-10/2026-10-06_hover-pocket-mac-pairing.md) / [Windowsの記録](2026-10/2026-10-06_hover-pocket-windows-settings-pairing.md)。
+
+## 2026-10-05 Eagle方式のMac・Windows素材同期
+
+- 各端末のDBを保持し、Syncthingの専用フォルダで原本と変更記録を交換する同期を実装。Mac開発版668の「設定 → データと履歴」に新規接続・参加・停止・再開・競合解決を追加し、初期状態はオフ。
+- Macの同期47検査、既存機能の回帰検査、実SyncthingでMac→Windows→Macの素材・分類・名前・お気に入り・ゴミ箱/復元と原本SHA一致を確認。Windows担当の同期102項目・保存/復旧120項目と設定UI検査も成功。Mac `d8f97c8` とWindows `c66c0a8` を統合PR #44へ集約。統合コード `7a148b5` のMac/Windows CIと3 OS契約比較は全成功。
+- ユーザー承認後、専用共有を追加して両端末の実ライブラリ同期を有効化。Mac3件・Windows16件を保全し、双方19件（通常14/ゴミ箱5）、原本全SHAと同期対象情報の一致、保留/競合0を確認。Mac開発版668・Windows開発版c66c0a8が稼働。既存Eagle共有は保持。[実装・検証記録](2026-10/2026-10-05_hover-pocket-library-sync.md) / [使い方](../docs/usage/asset-library-sync.md)。
+
 ## 2026-10-05 チャットをパネル内へ統合
 
 - Mac開発版667に下部の常設入力欄、同じパネル内の返信/履歴、Enter送信・Shift+Enter改行・停止・新規会話を実装。別チャット画面を廃止した。
@@ -1845,3 +1857,4 @@ status: chat-duplicate-windows-57816-running; macos-676-71460-running; reply-nor
 - 2026-06-03: 上部 pill の位置を画面上端へ合わせ、余白 0pt に調整。
 - 2026-06-02: Prototype app を `/Users/shotaro/code/share/hover-menu-preview` に移行し、開発用 Git repository と `.gitignore` を用意。
 - 2026-06-02: 共通進捗管理を初期化。
+

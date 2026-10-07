@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 
 struct HoverPanelShell: View {
     let hoverState: HoverState
@@ -13,10 +14,18 @@ struct HoverPanelShell: View {
     let onClosePanel: () -> Void
     let onExternalDragStarted: () -> Void
 
+    @State private var resizeStart: CGSize?
+
     var body: some View {
+        GeometryReader { viewport in
         let normal = PanelLayout.panelTotalSize(for: settings.panelSize)
         let voiceHeight = assets.fullscreen ? 0 : chat.panelHeight
-        let baseline = assets.panelSize.map { CGSize(width: $0.width,
+        let custom = settings.customPanelSize.map { PanelLayout.clampManualSize($0,
+            additionalHeight: CGFloat(voiceHeight) + store.attachmentMetrics.contentTop, available: viewport.size) }
+        let selectedSize = assets.fullscreen ? assets.panelSize : (custom ?? assets.panelSize)
+        let effectiveSize = selectedSize.map { CGSize(width: min($0.width, viewport.size.width),
+            height: min(max($0.height, CGFloat(voiceHeight) + store.attachmentMetrics.contentTop + 200), viewport.size.height)) }
+        let baseline = effectiveSize.map { CGSize(width: $0.width,
             height: max(200, $0.height - CGFloat(voiceHeight) - store.attachmentMetrics.contentTop)) } ?? normal
 
         Group {
@@ -63,7 +72,7 @@ struct HoverPanelShell: View {
                 }
                 .frame(width: baseline.width, height: baseline.height)
 
-                if !assets.fullscreen { VoiceLaneHostView(runtime: voiceRuntime, settings: settings) }
+                if !assets.fullscreen { VoiceLaneHostView(runtime: voiceRuntime, settings: settings, onOpenSettings: onOpenSettings) }
             }
         }
         .frame(
@@ -71,11 +80,38 @@ struct HoverPanelShell: View {
             height: baseline.height + CGFloat(voiceHeight) + store.attachmentMetrics.contentTop
         )
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .overlay(alignment: .bottomTrailing) {
+            if !assets.fullscreen {
+                Image(systemName: "line.3.horizontal.decrease")
+                    .font(.system(size: 11)).rotationEffect(.degrees(-45))
+                    .foregroundStyle(.secondary).frame(width: 22, height: 22).contentShape(Rectangle())
+                    .help(settings.appLanguage == .japanese ? "ドラッグしてサイズを変更" : "Drag to resize")
+                    .accessibilityLabel(settings.appLanguage == .japanese ? "パネルのサイズを変更" : "Resize panel")
+                    .gesture(DragGesture(minimumDistance: 0, coordinateSpace: .global)
+                        .onChanged { value in
+                            if resizeStart == nil {
+                                resizeStart = CGSize(width: baseline.width, height: baseline.height + CGFloat(voiceHeight) + store.attachmentMetrics.contentTop)
+                                settings.panelResizing = true
+                            }
+                            guard let start = resizeStart else { return }
+                            let screen = NSScreen.screens.first { $0.frame.contains(NSEvent.mouseLocation) } ?? NSScreen.main
+                            let work = screen?.visibleFrame.size
+                            settings.customPanelSize = PanelLayout.clampManualSize(
+                                CGSize(width: start.width + value.translation.width * 2, height: start.height + value.translation.height),
+                                additionalHeight: CGFloat(voiceHeight) + store.attachmentMetrics.contentTop, available: work)
+                        }.onEnded { _ in
+                            settings.panelResizing = false; settings.persistPanelSize(); resizeStart = nil
+                            hoverState.onExit()
+                        })
+                    .padding(3)
+            }
+        }
         .onDisappear {
             voiceRuntime.detachPanel()
         }
         .onHover { inside in
             inside ? hoverState.onEnter() : hoverState.onExit()
+        }
         }
     }
 }
@@ -85,6 +121,8 @@ private struct StickyReminderAlertView: View {
     @ObservedObject var reminders: StickyReminderController
     let language: AppLanguage
     @State private var couldNotStop = false
+
+    @State private var resizeStart: CGSize?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 5) {

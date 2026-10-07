@@ -1,9 +1,17 @@
 import AppKit
 import SwiftUI
 
+enum ChatEffortPresentation {
+    static func title(_ effort: String, language: AppLanguage) -> String {
+        guard language == .japanese else { return "Reasoning: " + effort.capitalized }
+        let titles = ["none":"なし", "minimal":"最小", "low":"低", "medium":"標準", "high":"高", "xhigh":"より高", "max":"最大", "ultra":"最高"]
+        return "推論: " + (titles[effort] ?? effort)
+    }
+}
+
 /// One compact composer remains visible even when voice is disabled.
 enum CodexChatPanelLayout {
-    static let composerHeight: CGFloat = 84
+    static let composerHeight: CGFloat = 126
 
     static func height(panelSize: String, expanded: Bool, availableHeight: CGFloat) -> CGFloat {
         guard expanded else { return composerHeight }
@@ -141,6 +149,13 @@ struct CodexChatTranscript: View {
                             Text(message.text).textSelection(.enabled)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                         }.id(message.id)
+                    }
+                    if model.busy {
+                        HStack(spacing: 8) {
+                            ProgressView().controlSize(.small)
+                            Text(language == .japanese ? (model.phase == "responding" ? "返答中…" : "考え中…") : (model.phase == "responding" ? "Responding…" : "Thinking…"))
+                                .foregroundStyle(.secondary)
+                        }.accessibilityElement(children: .combine)
                     }
                 }.font(.system(size: 12)).padding(.horizontal, 14).padding(.vertical, 8)
             }

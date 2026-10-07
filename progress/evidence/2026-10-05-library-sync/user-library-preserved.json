@@ -1,0 +1,31 @@
+{
+  "unchanged": true,
+  "before": {
+    "counts": {
+      "assets": 3,
+      "categories": 0,
+      "memberships": 0,
+      "searches": 0
+    },
+    "dataHash": "8ff244c5c09f306a8ce3a116cf810352e9c910219eabd85bc238a11bbbb8990c",
+    "originalHashes": [
+      "bfdf003ea4c97e89c3b59c4739e38f801da5d25ebbd153ea443b31e65f8cad03",
+      "596bbb4b9847988c91fe45e42bff66ae510ddaad81f65ef3ae4f1dca097c6982",
+      "1b068a626c59f4f8a7b915dc8f386e69b1cc27977f272ce10e78093e0fbfd5bf"
+    ]
+  },
+  "after": {
+    "counts": {
+      "assets": 3,
+      "categories": 0,
+      "memberships": 0,
+      "searches": 0
+    },
+    "dataHash": "8ff244c5c09f306a8ce3a116cf810352e9c910219eabd85bc238a11bbbb8990c",
+    "originalHashes": [
+      "bfdf003ea4c97e89c3b59c4739e38f801da5d25ebbd153ea443b31e65f8cad03",
+      "596bbb4b9847988c91fe45e42bff66ae510ddaad81f65ef3ae4f1dca097c6982",
+      "1b068a626c59f4f8a7b915dc8f386e69b1cc27977f272ce10e78093e0fbfd5bf"
+    ]
+  }
+}

@@ -18,6 +18,14 @@ private final class HoverMenuPanel: NSPanel {
 }
 
 @MainActor
+private final class MenuVerificationAction: NSObject {
+    var selected = false
+    var onTimer: (() -> Void)?
+    @objc func select(_ sender: NSMenuItem) { selected = true }
+    @objc func fire(_ sender: Timer) { onTimer?() }
+}
+
+@MainActor
 final class HoverWindowController {
     private var accessWindows: [String: NSPanel] = [:]
     private var accessWindowStyles: [String: PanelAccessStyle] = [:]
@@ -29,6 +37,7 @@ final class HoverWindowController {
     private var awaitingPointerAfterExplicitOpen = false
     private var activePreviewScreen: NSScreen?
     private var closeTask: DispatchWorkItem?
+    private var trackingMenus: [ObjectIdentifier: NSMenu] = [:]
     private var resetTask: DispatchWorkItem?
     private var hoverMonitorTimer: Timer?
     private var globalPointerMonitor: Any?
@@ -79,6 +88,7 @@ final class HoverWindowController {
         configurePreviewWindow()
         settingsWindowController.onOpenProvider = { [weak self] in self?.openPanel(showing: $0) }
         observeSettings()
+        observeMenuTracking()
         observeTimerAlerts()
         observeStickyReminders()
     }
@@ -148,6 +158,22 @@ final class HoverWindowController {
             else { self.cancelClose(); self.awaitingPointerAfterExplicitOpen = true }
         }
         chat.closePanel = { [weak self] in self?.closePreview() }
+        if !CommandLine.arguments.contains(where: { $0.hasPrefix("--verify") }) {
+            AssetCaptureController.shared.configureShortcuts(settings: settings) { [weak self] action in
+                guard let self else { return }
+                switch action {
+                case "panel": if self.previewWindow?.isVisible == true { self.closePreview() } else { self.openPanelFromMenu() }
+                case "library": self.openPanel(showing: AssetsProvider.pluginID)
+                case "settings": self.openSettingsFromMenu()
+                case "chat": chat.show(settings: self.settings)
+                case "voice":
+                    self.openPanelFromMenu()
+                    let runtime = VoiceLaneRuntime.shared
+                    if runtime.snapshot.connection == .disconnected { runtime.beginAudioSession() } else { runtime.endAudioSession() }
+                default: break
+                }
+            }
+        }
         let assets = AssetLibraryRuntime.shared
         assets.onLayout = { [weak self] in self?.resizePreviewForPanelSizeChange() }
         assets.baselineSize = { [weak self] in PanelLayout.panelTotalSize(for: self?.settings.panelSize ?? .medium) }
@@ -491,6 +517,44 @@ final class HoverWindowController {
         print("liquid_interruptions=ok reversals=30 external_drag=ok recovery=ok idle_display_link=stopped")
     }
 
+    private func verifyNativeMenuHover() async throws {
+        guard let screen = screenSelection.target, let window = previewWindow,
+              let content = window.contentView else { return }
+        let outside = NSPoint(x: screen.frame.maxX + 100, y: screen.frame.minY - 100)
+        for select in [false, true] {
+            openPanel(showing: TimerProvider.pluginID)
+            await settlePanelSoakRunLoop(milliseconds: 50)
+            awaitingPointerAfterExplicitOpen = false
+            let menu = NSMenu(title: select ? "Reasoning verification" : "Model verification")
+            let action = MenuVerificationAction()
+            let item = NSMenuItem(title: "Verification choice", action: #selector(MenuVerificationAction.select(_:)), keyEquivalent: "")
+            item.target = action; menu.addItem(item)
+            var heldDuringTracking = false
+            // Real AppKit tracking runs a nested event loop, including timers in eventTracking mode.
+            action.onTimer = { [weak self] in
+                guard let self else { return }
+                heldDuringTracking = window.isVisible && self.trackingMenus[ObjectIdentifier(menu)] != nil
+                if select { menu.performActionForItem(at: 0) }
+                menu.cancelTracking()
+            }
+            let timer = Timer(timeInterval: PanelAnimationTiming.previewCloseDelay + 0.2,
+                target: action, selector: #selector(MenuVerificationAction.fire(_:)), userInfo: nil, repeats: false)
+            RunLoop.main.add(timer, forMode: .eventTracking)
+            RunLoop.main.add(timer, forMode: .common)
+            scheduleClose(at: outside)
+            menu.popUp(positioning: nil, at: NSPoint(x: content.bounds.midX, y: 8), in: content)
+            timer.invalidate()
+            action.onTimer = nil
+            guard heldDuringTracking, trackingMenus.isEmpty, action.selected == select else {
+                throw PanelSoakVerificationError.failed("native_menu_tracking_failed select=\(select) held=\(heldDuringTracking) remaining=\(trackingMenus.count)")
+            }
+            scheduleClose(at: outside)
+            await settlePanelSoakRunLoop(milliseconds: UInt64(PanelAnimationTiming.previewCloseDelay * 1000) + 80)
+            guard !window.isVisible else { throw PanelSoakVerificationError.failed("native_menu_dismissal_left_panel_pinned") }
+            print("PASS native menu: real popup outside hover region, \(select ? "selection" : "cancellation"), tracking released, auto-hide restored")
+        }
+    }
+
     private func verifyInlineChatPanel() async throws {
         guard let screen = screenSelection.target, let window = previewWindow else { return }
         let chat = CodexChatController.shared
@@ -538,12 +602,34 @@ final class HoverWindowController {
             awaitingPointerAfterExplicitOpen = false
             scheduleClose(at: NSPoint(x: screen.frame.maxX + 100, y: screen.frame.minY - 100))
             await settlePanelSoakRunLoop(milliseconds: UInt64(PanelAnimationTiming.previewCloseDelay * 1000) + 80)
-            guard window.isVisible else { throw PanelSoakVerificationError.failed("chat_closed_while_editing") }
+            guard !window.isVisible else { throw PanelSoakVerificationError.failed("chat_did_not_close_while_editing") }
             closePreview()
             guard !window.isVisible, chat.draft == "未送信の下書き", !chat.composerFocused else {
                 throw PanelSoakVerificationError.failed("chat_manual_close_lost_draft")
             }
-            print("PASS chat panel: \(size) inline resize, editing hold, manual hide, draft retained, no extra window")
+            settings.panelResizing = true
+            settings.customPanelSize = CGSize(width: 650, height: 620); positionWindows()
+            settings.customPanelSize = CGSize(width: 720, height: 660); positionWindows()
+            settings.panelResizing = false; settings.persistPanelSize()
+            guard abs(window.frame.width - 720 - PanelLayout.surfaceSidePadding * 2) < 1,
+                  abs(liquidSurface!.hostingView.frame.width - 720) < 1, ObjectIdentifier(window) == panelID else {
+                throw PanelSoakVerificationError.failed("custom_resize_frame_failed")
+            }
+            for desired in [CGSize(width: 1, height: 1), CGSize(width: 90000, height: 90000)] {
+                settings.panelResizing = true
+                settings.customPanelSize = desired; positionWindows()
+                let additional = voiceLaneHeight(on: screen) + panelFrames(on: screen).attachment.contentTop
+                let expected = PanelLayout.clampManualSize(desired, additionalHeight: additional,
+                    available: CGSize(width: screen.visibleFrame.width - PanelLayout.surfaceSidePadding * 2,
+                                      height: panelFrames(on: screen).preview.maxY - screen.visibleFrame.minY))
+                guard abs(liquidSurface!.hostingView.frame.width - expected.width) < 1,
+                      abs(window.frame.height - expected.height) < 1 else {
+                    throw PanelSoakVerificationError.failed("manual_resize_limits_failed")
+                }
+                settings.panelResizing = false
+            }
+            settings.customPanelSize = nil
+            print("PASS chat panel: \(size) inline resize, hover exit, draft retained, no extra window")
         }
     }
 
@@ -564,6 +650,7 @@ final class HoverWindowController {
             throw PanelSoakVerificationError.failed("panel_soak_screen_unavailable")
         }
 
+        try await verifyNativeMenuHover()
         try await verifyInlineChatPanel()
         let microphoneAuthorization = AVCaptureDevice.authorizationStatus(for: .audio)
         showPill()
@@ -739,7 +826,11 @@ final class HoverWindowController {
             showsNotchSideHandleArea: showsVisibleNotchSideHandle,
             showsVoiceConversation: VoiceActivityPresentation(snapshot: VoiceLaneRuntime.shared.snapshot).showsConversation
         )
-        guard let size = AssetLibraryRuntime.shared.panelSize else { return normal }
+        let assets = AssetLibraryRuntime.shared
+        let additionalHeight = voiceLaneHeight(on: screen) + normal.attachment.contentTop
+        let custom = settings.customPanelSize.map { PanelLayout.clampManualSize($0, additionalHeight: additionalHeight) }
+        guard let selectedSize = assets.fullscreen ? assets.panelSize : (custom ?? assets.panelSize) else { return normal }
+        let size = CGSize(width: min(selectedSize.width + (custom == nil || assets.fullscreen ? 0 : PanelLayout.surfaceSidePadding * 2), screen.visibleFrame.width), height: min(max(selectedSize.height, voiceLaneHeight(on: screen) + normal.attachment.contentTop + 200), normal.preview.maxY - screen.visibleFrame.minY))
         let fullscreen = AssetLibraryRuntime.shared.fullscreen
         let frame = fullscreen ? screen.frame : NSRect(x: min(screen.visibleFrame.maxX - size.width,
             max(screen.visibleFrame.minX, normal.preview.midX - size.width / 2)),
@@ -1064,8 +1155,10 @@ final class HoverWindowController {
             guard let self else { return }
             self.closeTask = nil
             guard !self.isMouseInsideHoverRegion(at: location), self.previewWindow?.attachedSheet == nil,
+                  self.trackingMenus.isEmpty,
                   !AssetLibraryRuntime.shared.holdsPanel,
                   !CodexChatController.shared.holdsPanel,
+                  !self.settings.panelResizing,
                   !self.awaitingPointerAfterExplicitOpen,
                   TimerStore.shared.activeAlert == nil,
                   self.stickyReminders.activeNote == nil else { return }
@@ -1085,6 +1178,9 @@ final class HoverWindowController {
 
     private func closePreview() {
         guard !AssetLibraryRuntime.shared.holdsPanel else { return }
+        let menus = Array(trackingMenus.values)
+        trackingMenus.removeAll()
+        menus.forEach { $0.cancelTracking() }
         AssetLibraryRuntime.shared.endPreview()
         CodexChatController.shared.composerFocused = false
         previewWindow?.makeFirstResponder(nil)
@@ -1253,6 +1349,7 @@ final class HoverWindowController {
             return
         }
         guard previewWindow?.isVisible == true,
+              trackingMenus.isEmpty,
               closeTask == nil,
               previewWindow?.attachedSheet == nil,
               !awaitingPointerAfterExplicitOpen,
@@ -1412,6 +1509,22 @@ final class HoverWindowController {
         menuStore.providerActive = isActive
     }
 
+    private func observeMenuTracking() {
+        NotificationCenter.default.publisher(for: NSMenu.didBeginTrackingNotification)
+            .sink { [weak self] notification in
+                guard let self, previewWindow?.isVisible == true,
+                      let menu = notification.object as? NSMenu else { return }
+                trackingMenus[ObjectIdentifier(menu)] = menu
+                cancelClose()
+            }.store(in: &settingsCancellables)
+        NotificationCenter.default.publisher(for: NSMenu.didEndTrackingNotification)
+            .sink { [weak self] notification in
+                guard let self, let menu = notification.object as? NSMenu else { return }
+                guard trackingMenus.removeValue(forKey: ObjectIdentifier(menu)) != nil else { return }
+                if trackingMenus.isEmpty { scheduleClose() }
+            }.store(in: &settingsCancellables)
+    }
+
     private func observeSettings() {
         settings.$displayPlacementMode
             .dropFirst()
@@ -1422,6 +1535,16 @@ final class HoverWindowController {
                 positionWindows()
             }
             .store(in: &settingsCancellables)
+
+        settings.$customPanelSize.dropFirst().sink { [weak self] _ in
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                if self.settings.panelResizing {
+                    self.cancelClose(); self.positionWindows()
+                    if let screen = self.activePreviewScreen { self.liquidAnimator.snap(progress: 1, frame: self.panelFrames(on: screen).preview) }
+                } else { self.resizePreviewForPanelSizeChange() }
+            }
+        }.store(in: &settingsCancellables)
 
         settings.$panelSize
             .dropFirst()

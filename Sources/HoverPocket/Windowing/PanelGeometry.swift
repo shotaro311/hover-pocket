@@ -44,6 +44,26 @@ enum PanelLayout {
     static func panelTotalSize(for panelSize: PanelSizeOption) -> NSSize {
         previewSize(for: panelSize)
     }
+
+    static func manualSizeLimits(additionalHeight: CGFloat = 0) -> (minimum: CGSize, maximum: CGSize) {
+        let small = previewSize(for: .small), extraLarge = previewSize(for: .extraLarge)
+        return (CGSize(width: small.width, height: small.height + additionalHeight),
+                CGSize(width: ceil(extraLarge.width * 1.15 / 10) * 10,
+                       height: ceil(extraLarge.height * 1.15 / 10) * 10 + additionalHeight))
+    }
+
+    static func clampManualSize(_ size: CGSize, additionalHeight: CGFloat, available: CGSize? = nil) -> CGSize {
+        let limits = manualSizeLimits(additionalHeight: additionalHeight)
+        return CGSize(width: min(available?.width ?? .infinity, min(limits.maximum.width, max(limits.minimum.width, size.width))),
+                      height: min(available?.height ?? .infinity, min(limits.maximum.height, max(limits.minimum.height, size.height))))
+    }
+
+    static func responsiveSize(for viewport: CGSize) -> PanelSizeOption {
+        if viewport.width < 560 || viewport.height < 360 { return .small }
+        if viewport.width < 640 { return .medium }
+        if viewport.width < 720 { return .large }
+        return .extraLarge
+    }
 }
 
 enum ScreenNotchProfile {

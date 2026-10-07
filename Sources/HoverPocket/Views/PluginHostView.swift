@@ -9,6 +9,7 @@ struct PluginHostView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
+        GeometryReader { viewport in
         Group {
             if let provider = providerStore.selectedProvider {
                 let id = provider.manifest.id
@@ -30,6 +31,7 @@ struct PluginHostView: View {
                     )
                 )
                 .id(id)
+                .environment(\.providerViewport, viewport.size)
                 .transition(.asymmetric(
                     insertion: reduceMotion ? .identity : .opacity.animation(.easeOut(duration: 0.14)),
                     removal: .identity
@@ -39,6 +41,17 @@ struct PluginHostView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+    }
+}
+
+private struct ProviderViewportKey: EnvironmentKey {
+    static let defaultValue = CGSize(width: 520, height: 317)
+}
+extension EnvironmentValues {
+    var providerViewport: CGSize {
+        get { self[ProviderViewportKey.self] }
+        set { self[ProviderViewportKey.self] = newValue }
     }
 }
 

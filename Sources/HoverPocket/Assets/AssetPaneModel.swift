@@ -122,6 +122,7 @@ final class AssetPaneModel: NSObject, ObservableObject, WKScriptMessageHandlerWi
         if method == "assets.capture" {
             let kind = p["kind"] as? String ?? "screenshot"
             if ["cameraPhoto", "cameraVideo", "audio"].contains(kind) { AssetDeviceCapture.shared.show(kind: kind, folder: p["folderId"] as? String) }
+            else if kind == "regionRecording" { await AssetCaptureController.shared.toggleRegionRecording(folder: p["folderId"] as? String) }
             else if kind == "recording" { await AssetCaptureController.shared.toggleRecording(folder: p["folderId"] as? String) }
             else { await AssetCaptureController.shared.screenshot(folder: p["folderId"] as? String) }
             return ["ok": true]
