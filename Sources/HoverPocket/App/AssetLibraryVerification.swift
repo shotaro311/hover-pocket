@@ -39,6 +39,13 @@ enum AssetLibraryVerification {
             }
             guard let web = pane.web else { throw LibraryError.message("WebView missing") }
             try await Task.sleep(for: .seconds(1))
+            let toolbar = try await web.evaluateJavaScript("(()=>{const t=document.querySelector('.assets-toolbar'),s=document.querySelector('.assets-search-field'),first=t.querySelector('button').getBoundingClientRect();return getComputedStyle(t).flexWrap==='nowrap'&&s.getBoundingClientRect().width<=201&&Array.from(t.querySelectorAll('button,input,select')).filter(e=>e.getBoundingClientRect().width>0).every(e=>Math.abs(e.getBoundingClientRect().y+e.getBoundingClientRect().height/2-first.y-first.height/2)<4);})()")
+            try check(toolbar as? Bool == true, "compact library toolbar stays on one row")
+            _ = try await web.evaluateJavaScript("document.querySelector('.assets-root').style.width='480px'")
+            try await Task.sleep(for: .milliseconds(100))
+            let narrowToolbar = try await web.evaluateJavaScript("(()=>{const t=document.querySelector('.assets-toolbar');return t.scrollWidth>t.clientWidth&&getComputedStyle(t).overflowX==='auto'&&t.clientHeight<70;})()")
+            try check(narrowToolbar as? Bool == true, "small library toolbar scrolls without wrapping")
+            _ = try await web.evaluateJavaScript("document.querySelector('.assets-root').style.width=''")
             let startup = try await web.callAsyncJavaScript("return {url:location.href,config:window.assetConfiguration||null,pane:!!window.assetPane,errors:window.assetErrors||[]};", arguments: [:], in: nil, contentWorld: .page)
             try JSONSerialization.data(withJSONObject: startup ?? [:], options: [.prettyPrinted]).write(to: evidence.appendingPathComponent("web-startup.json"))
             let result = try await web.callAsyncJavaScript("return await window.verifyAssetSelection();", arguments: [:], in: nil, contentWorld: .page) as? [String: Any]

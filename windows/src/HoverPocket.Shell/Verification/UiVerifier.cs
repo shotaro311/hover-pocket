@@ -391,6 +391,11 @@ internal sealed class UiVerifier
                     await wait(s => s.reduceMotion === true);
                     reduced.checked = false; reduced.dispatchEvent(new Event('change'));
                     await wait(s => s.reduceMotion === false);
+                    const appActions = document.querySelector('[data-codex-actions]');
+                    appActions.checked = true; appActions.dispatchEvent(new Event('change'));
+                    await wait(s => s.codexAllowAllAppActions === true);
+                    appActions.checked = false; appActions.dispatchEvent(new Event('change'));
+                    await wait(s => s.codexAllowAllAppActions === false);
                     window.__liquidSettingsResult = true;
                 }).catch(error => { window.__liquidSettingsResult = String(error); });
                 """);

@@ -80,7 +80,8 @@ export async function verifyAssetSelection() {
     check(!rangeKey.defaultPrevented,"thumbnail slider keeps native keyboard controls");
     slider.value=originalSize; slider.dispatchEvent(new Event("input")); sort.value="created"; sort.dispatchEvent(new Event("change")); host.querySelector("[data-action=sortDirection]").click(); await wait(60);
     host.style.width="480px"; await wait(60);
-    check(host.querySelector(".assets-toolbar").scrollWidth<=host.querySelector(".assets-toolbar").clientWidth+1,"toolbar fits narrow panels");
+    const narrowToolbar=host.querySelector(".assets-toolbar");
+    check(getComputedStyle(narrowToolbar).flexWrap==="nowrap" && getComputedStyle(narrowToolbar).overflowX==="auto" && narrowToolbar.clientHeight<70,"toolbar stays on one scrollable row in narrow panels");
     host.style.width="900px"; await wait(60);
     host.querySelector("[data-action=recording]").click();
     check(last("assets.capture").kind==="recording" && last("assets.capture").folderId===null,"video icon directly dispatches recording");

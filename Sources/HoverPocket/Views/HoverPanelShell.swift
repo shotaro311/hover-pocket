@@ -15,6 +15,7 @@ struct HoverPanelShell: View {
     let onExternalDragStarted: () -> Void
 
     @State private var splitStart: CGFloat?
+    @State private var splitRatio: Double?
     @State private var resizeStart: CGSize?
 
     var body: some View {
@@ -30,7 +31,7 @@ struct HoverPanelShell: View {
             height: max(200, $0.height - CGFloat(voiceHeight) - store.attachmentMetrics.contentTop)) } ?? normal
 
         let contentHeight = baseline.height + CGFloat(voiceHeight)
-        let chatHeight = assets.fullscreen ? 0 : min(max(CodexChatPanelLayout.composerHeight, contentHeight * CGFloat(settings.chatSplitRatio ?? Double(CGFloat(voiceHeight) / max(1, contentHeight)))), max(CodexChatPanelLayout.composerHeight, contentHeight - 180))
+        let chatHeight = assets.fullscreen ? 0 : min(max(CodexChatPanelLayout.composerHeight, contentHeight * CGFloat(splitRatio ?? settings.chatSplitRatio ?? Double(CGFloat(voiceHeight) / max(1, contentHeight)))), max(CodexChatPanelLayout.composerHeight, contentHeight - 180))
         Group {
             VStack(spacing: 0) {
                 ZStack {
@@ -83,6 +84,7 @@ struct HoverPanelShell: View {
                                 .contentShape(Rectangle()).offset(y: -4)
                                 .help(settings.appLanguage == .japanese ? "ドラッグして素材とチャットの高さを調整" : "Drag to resize tools and chat")
                                 .accessibilityLabel("Resize tools and chat")
+                                .accessibilityIdentifier("chat-splitter")
                                 .accessibilityAdjustableAction { direction in
                                     let delta = direction == .increment ? 0.03 : -0.03
                                     settings.chatSplitRatio = min(0.9, max(0.1, Double(chatHeight / contentHeight) + delta))
@@ -90,9 +92,12 @@ struct HoverPanelShell: View {
                                 .gesture(DragGesture(minimumDistance: 0, coordinateSpace: .global)
                                     .onChanged { value in
                                         if splitStart == nil { splitStart = chatHeight; settings.panelResizing = true }
-                                        settings.chatSplitRatio = min(0.9, max(0.1, Double(((splitStart ?? chatHeight) - value.translation.height) / contentHeight)))
+                                        splitRatio = min(0.9, max(0.1, Double(((splitStart ?? chatHeight) - value.translation.height) / contentHeight)))
                                     }
-                                    .onEnded { _ in splitStart = nil; settings.panelResizing = false })
+                                    .onEnded { _ in
+                                        if let splitRatio { settings.chatSplitRatio = splitRatio }
+                                        splitStart = nil; splitRatio = nil; settings.panelResizing = false
+                                    })
                         }
                 }
             }
@@ -129,6 +134,7 @@ struct HoverPanelShell: View {
             }
         }
         .onDisappear {
+            if splitStart != nil || resizeStart != nil { settings.panelResizing = false; splitStart = nil; splitRatio = nil; resizeStart = nil }
             voiceRuntime.detachPanel()
         }
         .onHover { inside in

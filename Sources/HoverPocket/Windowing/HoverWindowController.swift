@@ -264,6 +264,25 @@ final class HoverWindowController {
                     return view.subviews.lazy.compactMap { assetWeb(in: $0) }.first
                 }
                 try await Task.sleep(for: .milliseconds(600))
+                guard let host = previewHost?.view else { throw LibraryError.message("chat split host missing") }
+                let originalRatio = settings.chatSplitRatio
+                previewWindow.makeKey()
+                let border = host.convert(NSPoint(x: host.bounds.midX, y: host.isFlipped ? host.bounds.height - CGFloat(CodexChatPanelLayout.composerHeight) : CGFloat(CodexChatPanelLayout.composerHeight)), to: nil)
+                func pointer(_ type: NSEvent.EventType, _ point: NSPoint) throws {
+                    guard let event = NSEvent.mouseEvent(with: type, location: point, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: previewWindow.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1) else { throw LibraryError.message("chat split input event missing") }
+                    previewWindow.sendEvent(event)
+                }
+                try pointer(.leftMouseDown, border)
+                try await Task.sleep(for: .milliseconds(100))
+                for step in 1...6 {
+                    try pointer(.leftMouseDragged, NSPoint(x: border.x, y: border.y + CGFloat(step * 6)))
+                    try await Task.sleep(for: .milliseconds(40))
+                }
+                try pointer(.leftMouseUp, NSPoint(x: border.x, y: border.y + 36))
+                try await Task.sleep(for: .milliseconds(150))
+                try check(settings.chatSplitRatio != originalRatio && !settings.panelResizing, "native chat boundary drag saves ratio and releases hover hold")
+                print("PASS native chat boundary drag saves ratio and releases hover hold")
+                settings.chatSplitRatio = originalRatio
                 guard let web = assetWeb(in: previewWindow.contentView) else { throw LibraryError.message("asset panel web view missing") }
                 let store = try await runtime.store()
                 let id = try await store.query(LibraryQuery()).items.first { $0.kind == "image" }!.id

@@ -1,4 +1,5 @@
 using System.Text.Json;
+using HoverPocket.Shell.Bridge;
 using HoverPocket.Shell.Voice;
 using HoverPocket.Shell.Windows;
 using Microsoft.Web.WebView2.Core;
@@ -246,6 +247,25 @@ internal static class InlineChatPanelVerifier
             while (bridge.InlineChat.Busy) await Task.Delay(100, token);
             Check(bridge.InlineChat.Snapshot.ErrorCode is null && bridge.InlineChat.Snapshot.Messages.Count(message => message.Role == "assistant") == 1, "live sticky-note clarification adds one reply");
             Check(await web.ExecuteScriptAsync("document.querySelectorAll('.hp-chat-message[data-role=assistant]').length===1") == "true", "live panel shows exactly one clarification reply");
+            if (Environment.GetEnvironmentVariable("HOVERPOCKET_INLINE_CHAT_ACTIONS_VERIFY") == "1")
+            {
+                var fixtureFile = Path.Combine(root, "trash-fixture.txt"); await File.WriteAllTextAsync(fixtureFile, "Isolated library action fixture", token);
+                var fixtureId = (await bridge.AssetLibrary.ImportAsync(fixtureFile)).AssetId!;
+                var fixture = (await bridge.AssetLibrary.GetAsync(fixtureId))!;
+                var originalPath = bridge.AssetLibrary.ReadOriginalPath(fixture);
+                var settingsDispatcher = new BridgeDispatcher();
+                using var settingsAttachment = bridge.Attach(settingsDispatcher, BridgeSurface.Settings);
+                var permissionResult = await settingsDispatcher.ProcessRawMessageAsync("{\"id\":\"verify-permission\",\"method\":\"settings.setCodexAllowAllAppActions\",\"params\":{\"enabled\":true}}", token);
+                using var permissionJson = JsonDocument.Parse(permissionResult!);
+                Check(permissionJson.RootElement.GetProperty("error").ValueKind == JsonValueKind.Null, "settings-only bridge enables automatic app permission");
+                await web.ExecuteScriptAsync("window.__chatTestRequest('chat.new',{})");
+                await Until(() => Task.FromResult(bridge.CurrentSettings.CodexAllowAllAppActions && bridge.InlineChat.Snapshot.Messages.Count == 0), token);
+                bridge.InlineChat.Send("ライブラリの内容をすべてゴミ箱に移してください。これは隔離した検証用ライブラリです。確認は済んでいます。library_trash_allを使って実行してください。");
+                await Until(() => Task.FromResult(bridge.InlineChat.Busy), token);
+                while (bridge.InlineChat.Busy) await Task.Delay(100, token);
+                Check(bridge.InlineChat.Snapshot.ErrorCode is null && (await bridge.AssetLibrary.GetAsync(fixtureId))!.Trashed, "live Codex moves isolated library to trash with automatic app permission");
+                Check(File.Exists(originalPath) && (await bridge.AssetLibrary.QueryAsync(new())).Total == 0, "live bulk trash readback retains originals");
+            }
             if (Environment.GetEnvironmentVariable("HOVERPOCKET_VERIFY_LOG") is { Length: > 0 } log)
             {
                 using var screenshot = File.Create(Path.Combine(Path.GetDirectoryName(log)!, "inline-chat-live.png"));
