@@ -56,20 +56,24 @@ enum LibraryVoiceVerification {
             let original = try await store.path(store.get(id)!, verifyHash: true)
             let bytes = try Data(contentsOf: original)
             approve = false
-            try check(!succeeded(try await call(.trashAll)) && !(try await store.get(id)!.trashed), "denied bulk trash writes nothing")
+            let denied = try await call(.trashAll), afterDenied = try await store.get(id)!
+            try check(!succeeded(denied) && !afterDenied.trashed, "denied bulk trash writes nothing")
             approve = true
             try check(succeeded(try await call(.trash, ["assetId": .string(id)])), "single trash has verified readback")
             try check(succeeded(try await call(.search, ["trash": .bool(true)])), "AI can search trash")
-            try check(succeeded(try await call(.restore, ["assetId": .string(id)])) && (try await store.get(id)!.favorite), "restore retains favorite")
+            let restored = try await call(.restore, ["assetId": .string(id)]), afterRestore = try await store.get(id)!
+            try check(succeeded(restored) && afterRestore.favorite, "restore retains favorite")
             try check(!succeeded(try await call(.trashAll, ["selectionToken": .string("injected")])), "model cannot inject selection token")
             let (bound, _) = try await service.prepare(.trashAll, [:])
             let late = root.appendingPathComponent("later.txt"); try Data("arrived after preparation".utf8).write(to: late)
             let lateID = try await store.importFile(late).assetId!
             let snapshot = try await service.execute(.trashAll, bound)
-            try check(snapshot["moved"] == .integer(1) && !(try await store.get(lateID)!.trashed), "bulk trash only affects prepared targets")
+            let afterLate = try await store.get(lateID)!
+            try check(snapshot["moved"] == .integer(1) && !afterLate.trashed, "bulk trash only affects prepared targets")
             try check(try Data(contentsOf: original) == bytes, "original bytes retained after trash and restore")
             let all = try await call(.trashAll, id: "all-once")
-            try check(succeeded(all) && (try await store.query(LibraryQuery()).total) == 0, "bulk trash includes remaining assets")
+            let afterAll = try await store.query(LibraryQuery())
+            try check(succeeded(all) && afterAll.total == 0, "bulk trash includes remaining assets")
             try check(try await call(.trashAll, id: "all-once") == all, "bulk replay does not repeat writes")
             print("library_actions_verification=ok checks=\(checks.count) evidence=\(root.path)")
             return
