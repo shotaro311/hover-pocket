@@ -1917,7 +1917,7 @@ async function saveChatSplit(ratio) {
 }
 new ResizeObserver(() => updateChatSplit()).observe(document.documentElement);
 chatSplitter.addEventListener("pointerdown", event => {
-  if (event.button !== 0 || document.body.classList.contains("assets-fullscreen")) return;
+  if (event.button !== 0 || chatSplitter.getClientRects().length === 0) return;
   event.preventDefault();
   splitDrag = { y:event.clientY, height:parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--hp-chat-height")), ratio:currentState.settings.chatSplitRatio };
   chatSplitter.setPointerCapture(event.pointerId);
