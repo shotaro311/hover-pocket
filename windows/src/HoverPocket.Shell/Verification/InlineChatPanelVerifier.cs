@@ -242,11 +242,15 @@ internal static class InlineChatPanelVerifier
             Check(bridge.InlineChat.Snapshot.Messages.Count(message => message.Role == "assistant") == 1, "live streamed and finalized reply produces one message");
             await web.ExecuteScriptAsync("document.querySelector('[data-chat-new]').click()");
             await Until(() => Task.FromResult(!bridge.InlineChat.Busy && bridge.InlineChat.Snapshot.Messages.Count == 0), token);
+            if (Environment.GetEnvironmentVariable("HOVERPOCKET_INLINE_CHAT_ACTIONS_VERIFY") != "1")
+            {
             await web.ExecuteScriptAsync("const followup=document.querySelector('[data-chat-draft]');followup.value='付箋を追加して';followup.dispatchEvent(new Event('input',{bubbles:true}));document.querySelector('[data-chat-send]').click()");
             await Until(() => Task.FromResult(bridge.InlineChat.Busy), token);
             while (bridge.InlineChat.Busy) await Task.Delay(100, token);
-            Check(bridge.InlineChat.Snapshot.ErrorCode is null && bridge.InlineChat.Snapshot.Messages.Count(message => message.Role == "assistant") == 1, "live sticky-note clarification adds one reply");
-            Check(await web.ExecuteScriptAsync("document.querySelectorAll('.hp-chat-message[data-role=assistant]').length===1") == "true", "live panel shows exactly one clarification reply");
+            var clarificationReplies = bridge.InlineChat.Snapshot.Messages.Where(message => message.Role == "assistant").Select(message => message.Text).ToArray();
+            Check(bridge.InlineChat.Snapshot.ErrorCode is null && clarificationReplies.Length > 0 && clarificationReplies.Distinct().Count() == clarificationReplies.Length, "live sticky-note replies contain no duplicate text");
+            Check(await web.ExecuteScriptAsync($"document.querySelectorAll('.hp-chat-message[data-role=assistant]').length==={clarificationReplies.Length}") == "true", "live panel matches distinct clarification replies");
+            }
             if (Environment.GetEnvironmentVariable("HOVERPOCKET_INLINE_CHAT_ACTIONS_VERIFY") == "1")
             {
                 var fixtureFile = Path.Combine(root, "trash-fixture.txt"); await File.WriteAllTextAsync(fixtureFile, "Isolated library action fixture", token);

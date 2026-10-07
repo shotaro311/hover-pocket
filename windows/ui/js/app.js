@@ -1902,6 +1902,18 @@ function updateChatSplit(ratio = currentState?.settings?.chatSplitRatio) {
   chatSplitter.setAttribute("aria-valuemin", String(min));
   chatSplitter.setAttribute("aria-valuemax", String(Math.round(max)));
   chatSplitter.setAttribute("aria-label", currentState.settings.language === "en" ? "Resize tools and chat" : "素材とチャットの高さを調整");
+  chatSplitter.title = currentState.settings.language === "en" ? "Drag to resize tools and chat" : "ドラッグして素材とチャットの高さを調整";
+}
+async function saveChatSplit(ratio) {
+  const previous = currentState.settings.chatSplitRatio;
+  currentState.settings.chatSplitRatio = ratio;
+  try { await request("chat.setSplitRatio", {ratio}); }
+  catch {
+    if (currentState.settings.chatSplitRatio !== ratio) return;
+    currentState.settings.chatSplitRatio = previous; updateChatSplit();
+    const status = document.querySelector(".hp-chat-status");
+    if (status) status.textContent = currentState.settings.language === "en" ? "Could not save the panel boundary. Try again." : "境界の位置を保存できませんでした。もう一度操作してください。";
+  }
 }
 new ResizeObserver(() => updateChatSplit()).observe(document.documentElement);
 chatSplitter.addEventListener("pointerdown", event => {
@@ -1921,7 +1933,7 @@ function finishChatSplit() {
   if (!splitDrag) return;
   const ratio = splitDrag.ratio; splitDrag = null;
   void request("chat.menu", {open:false});
-  if (Number.isFinite(ratio)) { currentState.settings.chatSplitRatio=ratio; void request("chat.setSplitRatio", {ratio}).catch(() => {}); }
+  if (Number.isFinite(ratio)) void saveChatSplit(ratio);
 }
 chatSplitter.addEventListener("pointerup", finishChatSplit);
 chatSplitter.addEventListener("pointercancel", finishChatSplit);
@@ -1932,6 +1944,5 @@ chatSplitter.addEventListener("keydown", event => {
   const total = document.documentElement.clientHeight - currentState.panel.headerHeight;
   let ratio = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--hp-chat-height")) / total;
   ratio = event.key === "Home" ? .1 : event.key === "End" ? .9 : Math.max(.1, Math.min(.9, ratio + (event.key === "ArrowUp" ? .03 : -.03)));
-  currentState.settings.chatSplitRatio=ratio; updateChatSplit(ratio);
-  void request("chat.setSplitRatio", {ratio}).catch(() => {});
+  updateChatSplit(ratio); void saveChatSplit(ratio);
 });
