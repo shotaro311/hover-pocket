@@ -42,8 +42,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.setActivationPolicy(.accessory)
         configureAINativeRuntimeIfEnabled()
         observeAINativeRuntimeSetting()
-        hoverWindowController.connectAppController()
         if !HoverPocketRuntimeEnvironment.shared.isIsolatedVoiceE2E { AssetCaptureController.shared.start() }
+        hoverWindowController.connectAppController()
         configureVoiceRuntime()
         observeVoiceRuntimeSettings()
         observeVoiceE2EReceipt()

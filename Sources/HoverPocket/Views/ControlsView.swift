@@ -30,6 +30,7 @@ struct ControlsView: View {
                 volumeSection
                 nowPlayingSection
             }
+            .frame(maxWidth: 760)
             .frame(maxWidth: .infinity)
             .padding(.horizontal, 16)
             .padding(.vertical, 12)

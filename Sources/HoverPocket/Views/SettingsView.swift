@@ -159,6 +159,8 @@ struct SettingsView: View {
                 Text(localized(japanese: "撮影・録音は、素材パネルのカメラボタンから開始できます。", english: "Start capturing or recording from the camera button in your library panel."))
                     .font(.callout).foregroundStyle(.secondary)
             }
+        case .shortcuts:
+            SettingsCard { ShortcutSettingsView(settings: settings) }
         case .ai:
             SettingsCard { voiceSection }
             SettingsCard { pocketAppsSection }

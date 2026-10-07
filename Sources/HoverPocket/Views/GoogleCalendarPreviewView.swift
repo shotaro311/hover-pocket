@@ -3,6 +3,8 @@ import SwiftUI
 struct GoogleCalendarPreviewView: View {
     let isActive: Bool
     @ObservedObject var settings: AppSettings
+    var showsCalendarForLayoutVerification = false
+    @Environment(\.providerViewport) private var viewport
 
     @ObservedObject private var store = GoogleCalendarStore.shared
     @ObservedObject private var selection = PocketCalendarSelection.shared
@@ -30,6 +32,9 @@ struct GoogleCalendarPreviewView: View {
 
     var body: some View {
         Group {
+            if showsCalendarForLayoutVerification {
+                calendarView
+            } else {
             switch store.connectionState {
             case .missingConfiguration:
                 configurationView
@@ -41,6 +46,7 @@ struct GoogleCalendarPreviewView: View {
                 calendarView
             case .signedIn:
                 calendarView
+            }
             }
         }
         .padding(.horizontal, metrics.outerHorizontalPadding)
@@ -71,7 +77,7 @@ struct GoogleCalendarPreviewView: View {
     }
 
     private var metrics: CalendarPreviewMetrics {
-        CalendarPreviewMetrics(panelSize: settings.panelSize)
+        CalendarPreviewMetrics(viewport: viewport)
     }
 
     private var columns: [GridItem] {
@@ -102,7 +108,7 @@ struct GoogleCalendarPreviewView: View {
                 .padding(.vertical, metrics.weatherDividerPadding)
 
             WeatherForecastView(
-                panelSize: settings.panelSize,
+                panelSize: PanelLayout.responsiveSize(for: viewport),
                 language: language,
                 isActive: isActive,
                 location: settings.weatherLocation,
@@ -819,7 +825,7 @@ private struct CalendarEventEditorView: View {
     }
 }
 
-private struct CalendarPreviewMetrics {
+struct CalendarPreviewMetrics {
     let outerHorizontalPadding: CGFloat
     let outerVerticalPadding: CGFloat
     let paneSpacing: CGFloat
@@ -837,43 +843,28 @@ private struct CalendarPreviewMetrics {
     let weekdayFontSize: CGFloat
     let dayNumberFontSize: CGFloat
 
-    init(panelSize: PanelSizeOption) {
-        switch panelSize {
-        case .small:
-            outerHorizontalPadding = 12
-            outerVerticalPadding = 10
-            paneSpacing = 9
-            calendarVerticalSpacing = 5
-            weatherDividerPadding = 4
-            calendarWidth = 248
-            dayWidth = 32
-            dayHeight = 28
-            gridSpacing = 4
-            dayCellSpacing = 2
-            dayCornerRadius = 6
-            eventDotSize = 3.5
-            eventDotRowHeight = 4
-            monthFontSize = 12
-            weekdayFontSize = 8.5
-            dayNumberFontSize = 10
-        case .medium, .large, .extraLarge:
-            outerHorizontalPadding = 18
-            outerVerticalPadding = 14
-            paneSpacing = 14
-            calendarVerticalSpacing = 10
-            weatherDividerPadding = panelSize == .medium ? 4.5 : 5
-            calendarWidth = 282
-            dayWidth = 36
-            dayHeight = 32
-            gridSpacing = 5
-            dayCellSpacing = 3
-            dayCornerRadius = 7
-            eventDotSize = 4
-            eventDotRowHeight = 5
-            monthFontSize = 13
-            weekdayFontSize = 9
-            dayNumberFontSize = 11
-        }
+    init(viewport: CGSize) {
+        let size = PanelLayout.responsiveSize(for: viewport), compact = size == .small
+        outerHorizontalPadding = compact ? 12 : 18
+        outerVerticalPadding = compact ? 10 : 14
+        paneSpacing = compact ? 9 : 14
+        calendarVerticalSpacing = compact ? 5 : 10
+        weatherDividerPadding = compact ? 4 : 5
+        gridSpacing = compact ? 4 : 5
+        let weatherHeight: CGFloat = size == .small ? 58 : size == .medium ? 67 : 122
+        let desiredWidth = max(248, min(392, (viewport.width - outerHorizontalPadding * 2 - paneSpacing * 2 - 1) * 0.47))
+        let availableDayHeight = max(24, (viewport.height - outerVerticalPadding * 2 - weatherHeight
+            - weatherDividerPadding * 2 - 1 - 24 - 12 - calendarVerticalSpacing * 2 - gridSpacing * 5) / 6)
+        dayWidth = max(28, min((desiredWidth - gridSpacing * 6) / 7, availableDayHeight / 0.875))
+        dayHeight = dayWidth * 0.875
+        calendarWidth = desiredWidth
+        dayCellSpacing = compact ? 2 : 3
+        dayCornerRadius = compact ? 6 : 7
+        eventDotSize = compact ? 3.5 : 4
+        eventDotRowHeight = compact ? 4 : 5
+        monthFontSize = compact ? 12 : 13
+        weekdayFontSize = compact ? 8.5 : 9
+        dayNumberFontSize = compact ? 10 : 11
     }
 }
 

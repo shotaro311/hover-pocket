@@ -27,7 +27,7 @@ final class AssetScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @un
         self.directory = directory; self.systemAudio = systemAudio; self.microphone = microphone
         super.init()
     }
-    @MainActor func start(filter: SCContentFilter, size: CGSize) async throws {
+    @MainActor func start(filter: SCContentFilter, size: CGSize, sourceRect: CGRect? = nil) async throws {
         let ratio = min(1, 1920 / max(1, size.width), 1080 / max(1, size.height))
         let width = max(2, Int(size.width * ratio) / 2 * 2), height = max(2, Int(size.height * ratio) / 2 * 2)
         let writer = try AVAssetWriter(outputURL: directory.appendingPathComponent("screen.mp4"), fileType: .mp4)
@@ -50,6 +50,7 @@ final class AssetScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @un
             microphoneRecorder = recorder
         }
         let config = SCStreamConfiguration(); config.width = width; config.height = height
+        if let sourceRect { config.sourceRect = sourceRect }
         config.minimumFrameInterval = CMTime(value: 1, timescale: 30); config.queueDepth = 5
         config.capturesAudio = systemAudio; config.sampleRate = 48_000; config.channelCount = 2
         config.showsCursor = true; config.excludesCurrentProcessAudio = false

@@ -5,6 +5,15 @@ import Foundation
 _ = signal(SIGPIPE, SIG_IGN)
 _ = HoverPocketRuntimeEnvironment.shared
 
+if CommandLine.arguments.contains("--verify-region-recording") {
+    let app = NSApplication.shared
+    Task { @MainActor in
+        do { try await RegionRecordingVerification.run(); exit(0) }
+        catch { print("region_recording_verification=failed \(error)"); exit(1) }
+    }
+    app.run(); exit(1)
+}
+
 if CommandLine.arguments.contains("--verify-library-pairing-cross") {
     let app = NSApplication.shared
     Task { @MainActor in

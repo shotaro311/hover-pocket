@@ -1,7 +1,7 @@
 import Foundation
 
 enum SettingsCategory: String, CaseIterable, Identifiable {
-    case general, appearance, library, capture, ai, advanced
+    case general, appearance, library, capture, shortcuts, ai, advanced
 
     var id: String { rawValue }
 
@@ -11,6 +11,7 @@ enum SettingsCategory: String, CaseIterable, Identifiable {
         case .appearance: "rectangle.topthird.inset.filled"
         case .library: "photo.stack"
         case .capture: "camera"
+        case .shortcuts: "keyboard"
         case .ai: "sparkles"
         case .advanced: "slider.horizontal.3"
         }
@@ -22,6 +23,7 @@ enum SettingsCategory: String, CaseIterable, Identifiable {
         case .appearance: ("表示", "Appearance")
         case .library: ("素材と同期", "Library & Sync")
         case .capture: ("撮影", "Capture")
+        case .shortcuts: ("ショートカットキー", "Shortcuts")
         case .ai: ("AI", "AI")
         case .advanced: ("詳細", "Advanced")
         }
