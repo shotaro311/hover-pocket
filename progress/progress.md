@@ -1,14 +1,20 @@
 ---
 project_slug: hover-menu-preview
-updated: 2026-10-07
+updated: 2026-10-08
 updated_by: codex
-status: library-chat-actions-verification; candidate-0.2.14; production-0.2.13
+status: production-0.2.14; library-chat-actions-released; public-and-transition-readback-passed
 ---
+
+## 2026-10-08 素材メニュー・会話の境界・Codex操作権限の本番反映
+
+- PR #52をmainへ統合し、Windows 0.2.14とMac 0.2.14 / build680を公開・本番へ適用。両OSの起動と公開版との一致、データ保持を確認し、旧アプリとデータはバックアップへ残した。
+- ヘッダーのサイズ選択を廃止し、素材の検索とメニューを1行へ整理。会話との境界をドラッグして保存できる。AI設定には「Codexにアプリ内の操作をすべて許可」を追加し、初期状態はオフ。素材のゴミ箱移動・復元・一括操作にも対応する。
+- 両OSの最終CI、公開フィードと配布物99項目、0.2.13から0.2.14への更新・復元・再インストールCIが成功。Windowsでは隔離素材に対する実Codexのゴミ箱操作も成功した。[本番反映・検証の記録](2026-10/2026-10-08_hover-pocket-library-chat-actions-release.md) / [使い方](../docs/usage/library-chat-actions.md)。
 
 ## 2026-10-07 素材メニュー・会話の境界・Codex操作権限
 
 - 両OSでサイズ選択ボタンを廃止し、素材の操作を1行へまとめ、会話との境界ドラッグと保存を実装。設定にCodexのアプリ内操作をすべて許可するオプションと、AIのゴミ箱移動・復元・一括操作を追加した。
-- 隔離したゴミ箱操作と設定、Windowsの実ドラッグ、両OSの1行メニューが成功。候補0.2.14の回帰検査・CI・公開／本番反映を進める。[変更と検証](2026-10/2026-10-07_hover-pocket-library-chat-actions.md)。
+- 隔離したゴミ箱操作と設定、Windowsの実ドラッグ、両OSの1行メニューが成功。回帰検査・CI・公開／本番反映は10月8日に完了した。[変更と検証](2026-10/2026-10-07_hover-pocket-library-chat-actions.md)。
 
 ## 2026-10-07 ライブラリの自動保存・表示拡張・ホバー収納
 
