@@ -34,11 +34,7 @@ internal static class PanelSizeCatalog
     ];
 }
 
-internal sealed record PanelResizeLimits(double MinWidth, double MinHeight, double MaxWidth, double MaxHeight)
-{
-    internal System.Windows.Size Clamp(System.Windows.Size size) => new(
-        Math.Clamp(size.Width, MinWidth, MaxWidth), Math.Clamp(size.Height, MinHeight, MaxHeight));
-}
+internal sealed partial record PanelResizeLimits(double MinWidth, double MinHeight, double MaxWidth, double MaxHeight);
 
 internal sealed record PanelSizeMetrics(
     string Id,

@@ -885,7 +885,8 @@ def main() -> None:
     if "_featureTransitionGate.Wait();" not in windows_coordinator \
             or "dispose-transition-drain" not in windows_verifier:
         fail("Windows coordinator disposal can bypass an active Voice transition")
-    if 'voiceContentEl.hidden = mode === "disabled";' not in app_js \
+    if 'voiceContentEl.hidden = mode === "disabled" ||' not in app_js \
+            or 'lane?.sessionStatus !== "stopping"' not in app_js \
             or 'voiceLaneEl.hidden = false;' not in app_js \
             or 'const inlineChat = createInlineChat(' not in app_js \
             or "voiceTeardownVisibleOk" not in app_js:
