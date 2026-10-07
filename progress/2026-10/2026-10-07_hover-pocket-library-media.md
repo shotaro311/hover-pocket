@@ -16,6 +16,15 @@
 
 ## 配布と残る確認
 
-- 0.2.13 / Mac build679の配布を準備中。本番アプリと公開フィードは現時点では0.2.12のまま。公開後、署名・公証・両OSの個別フィード・配布物と、設定/素材/チャット/Clipboardの保持を読み戻す。
+- [PR #50](https://github.com/shotaro311/hover-pocket/pull/50)をmainへ統合（e713195141743bcfddd67fd0cbab0d9562ea9867）。[Windows 0.2.13](https://github.com/shotaro311/hover-pocket/releases/tag/win-v0.2.13)と[Mac 0.2.13 / build679](https://github.com/shotaro311/hover-pocket/releases/tag/v0.2.13-679)を公開し、各OS専用のフィードを更新した。Windowsはbeta署名条件を維持。Windows側のソース変更はe980436以降なく、配布DLLの版は0.2.13+e980436191753320fb9168027cd0e45eba7dcf57。
+- Windowsは公開nupkgとローカル検証済みnupkgのSHA256一致を確認して更新。PID43020で応答し、公開DLL・FFmpeg・DLL群との一致、設定・自動起動・素材22件・原本・DB内容・チャット・Clipboard本文と画像の保持を確認した。履歴ファイルの並び等は通常の起動処理で変わり、内容hashは一致した。証拠はstartup-readback.json、更新前のアプリとデータはstartup-backup-*へ保持。
+- Macは公開ZIPと公証済みZIPのSHA256一致を確認し、署名・stapler・Gatekeeperを検査して/Applicationsへ適用。PID68202で起動。公開本体とFFmpeg、設定・素材22件・原本・DB・チャットが一致。Clipboardの画像20件は一致、テキストは既存1件の最新への移動を確認し、本文とお気に入りを保持した。更新前のアプリ・データはstartup-backupとinstalled-old-moved.appに保持。証拠はinstall-receipt.jsonとstartup-resolved-readback.json。
+- 公開フィード・配布物99項目が成功（public-readback.json）。[独立readback CI](https://github.com/shotaro311/hover-pocket/actions/runs/37621152890)で両OSの配布物、WindowsパッケージID、Macの署名・公証・Gatekeeperが成功。[更新・復元CI](https://github.com/shotaro311/hover-pocket/actions/runs/37621148225)も両OSで成功。正式署名向けWindows Authenticodeと未配布のCodex sandbox MSIは、今回のbeta配布条件に従ってスキップした。
 - 古い文書・RAW・保護/破損ファイルはOSやコーデックにより表示できない場合がある。文書は文字の抽出であり、元の組版や図表の再現は対象外。詳細は[使い方](../../docs/usage/library-previews.md)。
 - ローカル検証証拠: Windows/Mac worktreeの artifacts/library-media-20261007/。Macのビルド/署名済みヘルパーはsystem frameworksのみに依存する。追加PGP検証はgpg import段階で失敗し、PGP検証済みとは扱っていない。固定SHA256の検証は両OSで成功。
+
+## 配布候補での追加検査
+
+- 最終ソース02e390eのWindows/Mac CIが成功（37619452579 / 37619452586）。Windowsは配布パッケージのメディア検査とnative-interaction-finalでフォルダ移動・Undo・復元も成功。途中のWindowsネイティブドラッグ検査は1回タイムアウトし、同じソースでCI再実行と実機の対象検査が通過した。
+- MacのFFmpegをアプリと同じ最低OS14で再ビルド。LC_BUILD_VERSIONのminos14.0を確認。旧ビルドが実行ホストの27を要求した問題を修正し、設定変更時にはcleanする。実macOS14での起動は未検証。最終のminimum-os-libraryは201項目、minimum-os-ui-retryは97項目が成功。先行UI検査の1回はプレビュー操作途中でタイムアウトし、同じ配布候補の再実行でPDF・動画・全画面・20回のホバー開閉まで成功した。
+- 最終公証はAccepted（8f6a904c-cc6e-489a-ab56-9ec419c5ebfb）。当初はMacOSフォルダへのライセンス類の配置で公証が拒否され、実行ファイルだけをMacOSへ、資料をResourcesへ移して解決した。検証コードのSwift並行処理エラーとテスト素材/JavaScript戻り値も修正した。

@@ -2,13 +2,14 @@
 project_slug: hover-menu-preview
 updated: 2026-10-07
 updated_by: codex
-status: library-media-options-and-hover-close-verified; preparing-0.2.13; production-remains-0.2.12
+status: library-media-options-and-hover-close-released; production-0.2.13; public-and-transition-readback-passed
 ---
 
 ## 2026-10-07 ライブラリの自動保存・表示拡張・ホバー収納
 
 - 両OSに画像コピーの自動保存オン/オフ、本文・文書・追加画像形式・互換動画/音声のプレビューを実装。ライブラリでマウスを外しても閉じない問題を修正した。
-- Windowsの保存120・同期102・全UI・Releaseの実44素材と19種類の再生、Macの201＋97項目とホバー開閉が成功。本番は0.2.12を維持し、0.2.13 / build679の配布を準備中。Macの既存画面収録権限は引き続き未許可。[変更・検証・配布readback](2026-10/2026-10-07_hover-pocket-library-media.md) / [使い方](../docs/usage/library-previews.md)。
+- PR #50をmainへ統合し、Windows 0.2.13とMac 0.2.13 / build679を公開・本番へ適用。Windows PID43020、Mac PID68202の起動と公開版との一致、両OSの設定・素材22件・チャット・Clipboard内容の保持を確認した。更新前のアプリとデータはバックアップに保持した。
+- Windowsの保存120・同期102・全UI・実44素材と19種類の再生、Macの201＋97項目とホバー開閉、公開配布物99項目と両OSの更新・復元・再インストールCIが成功。Macの既存画面収録権限は引き続き未許可。[変更・検証・配布readback](2026-10/2026-10-07_hover-pocket-library-media.md) / [使い方](../docs/usage/library-previews.md)。
 
 ## 2026-10-07 起点設定の削除・生成モデル選択・Focus削除
 
