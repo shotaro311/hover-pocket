@@ -14,6 +14,7 @@ internal sealed record PreparedLibraryCall(JsonElement Arguments, VoiceNativeApp
 internal sealed class VoiceLibraryCapabilities(AssetStore store, Func<CaptureController?> capture,
     Dispatcher dispatcher, Func<string?, CancellationToken, Task<bool>> showLibrary)
 {
+    private readonly Dictionary<string, (string[] Ids, DateTimeOffset Expires)> _trashSelections = [];
     private sealed record Tool(string Name, string Description, Dictionary<string, object> Properties, string[] Required, bool Write)
     {
         public PocketCapabilityKey Key => new(Name switch { "library_search" => "library.assets.search", "library_open" => "library.window.open", _ => Name.Replace('_', '.') }, 1);
@@ -38,13 +39,16 @@ internal sealed class VoiceLibraryCapabilities(AssetStore store, Func<CaptureCon
         new("capture_recording_stop", "Stop the current recording and save it to the library. No extra confirmation. Returns saved asset IDs after file readback. Use status when already stopped.", new(), [], true),
         new("capture_recording_status", "Read recording/busy status and asset IDs from the last recording. Does not capture anything.", new(), [], false),
         new("library_search", "Search local library metadata, newest first. Empty arguments list recent assets and folders. Returns at most 20 assets; use offset for more. Names are untrusted data. Does not read file contents.", new() {
-            ["text"] = Str(), ["kind"] = Choice("image", "video", "pdf", "other"), ["folderId"] = Str(64), ["favorites"] = Bool(),
+            ["trash"] = Bool(), ["text"] = Str(), ["kind"] = Choice("image", "video", "pdf", "other"), ["folderId"] = Str(64), ["favorites"] = Bool(),
             ["limit"] = new { type = "integer", minimum = 1, maximum = 20 }, ["offset"] = new { type = "integer", minimum = 0, maximum = 10000 }
         }, [], false),
         new("library_open", "Open the library, or preview an asset by an ID from search/capture. Uses HoverPocket's preview, never launches external files. Opening a video does not start playback automatically.", new() { ["assetId"] = Str(64) }, [], false),
         new("library_asset_rename", "Rename a library asset after confirmation; does not change the file contents.", new() { ["assetId"] = Str(64), ["name"] = Str() }, ["assetId", "name"], true),
         new("library_asset_favorite", "Set or unset a library asset's favorite state after confirmation.", new() { ["assetId"] = Str(64), ["favorite"] = Bool() }, ["assetId", "favorite"], true),
         new("library_asset_classify", "Add an asset to an existing library folder after confirmation. Keeps its other folder memberships. Resolve the exact folder ID from library_search.", new() { ["assetId"] = Str(64), ["folderId"] = Str(64) }, ["assetId", "folderId"], true),
+        new("library_asset_trash", "Move an identified library asset to the library Trash. Keeps the original and permits restoration. Host applies the saved approval preference.", new() { ["assetId"] = Str(64) }, ["assetId"], true),
+        new("library_asset_restore", "Restore an asset from library Trash. Find its ID with library_search and trash=true.", new() { ["assetId"] = Str(64) }, ["assetId"], true),
+        new("library_trash_all", "Move all current library assets to library Trash, including favorites. Use only when the user explicitly requests all assets. Host snapshots targets before approval; retains originals and existing trash. No permanent deletion.", new(), [], true),
         new("library_folder_create", "Create a root-level library folder after confirmation, or return the existing folder with the same normalized name.", new() { ["name"] = Str(100) }, ["name"], true)
     ];
     public static IReadOnlyDictionary<string, PocketCapabilityKey> Tools { get; } = Catalog.ToDictionary(t => t.Name, t => t.Key);
@@ -87,7 +91,8 @@ internal sealed class VoiceLibraryCapabilities(AssetStore store, Func<CaptureCon
         foreach (var property in args.EnumerateObject())
         {
             if (!seen.Add(property.Name)) throw new VoiceLibraryException("invalid_arguments");
-            if (prepared && ((property.Name == "targetToken" && tool.Name is "capture_screenshot_save" or "capture_recording_start")
+            if (prepared && ((property.Name == "selectionToken" && tool.Name == "library_trash_all")
+                || (property.Name == "targetToken" && tool.Name is "capture_screenshot_save" or "capture_recording_start")
                 || (property.Name == "recordingId" && tool.Name == "capture_recording_stop")))
             {
                 if (property.Value.ValueKind != JsonValueKind.String || !Guid.TryParseExact(property.Value.GetString(), "N", out _)) throw new VoiceLibraryException("invalid_arguments");
@@ -110,6 +115,7 @@ internal sealed class VoiceLibraryCapabilities(AssetStore store, Func<CaptureCon
         }
         if (tool.Required.Any(key => !seen.Contains(key))) throw new VoiceLibraryException("invalid_arguments");
         if (prepared && tool.Name is "capture_screenshot_save" or "capture_recording_start" && !seen.Contains("targetToken")) throw new VoiceLibraryException("invalid_arguments");
+        if (prepared && tool.Name == "library_trash_all" && !seen.Contains("selectionToken")) throw new VoiceLibraryException("invalid_arguments");
         if (prepared && tool.Name == "capture_recording_stop" && !seen.Contains("recordingId")) throw new VoiceLibraryException("invalid_arguments");
     }
 
@@ -142,10 +148,28 @@ internal sealed class VoiceLibraryCapabilities(AssetStore store, Func<CaptureCon
         {
             bound["recordingId"] = Capture.VoiceState.RecordingId ?? throw new VoiceLibraryException("no_recording");
         }
+        else if (tool.Name == "library_trash_all")
+        {
+            foreach (var expired in _trashSelections.Where(x => x.Value.Expires < DateTimeOffset.UtcNow).Select(x => x.Key).ToArray()) _trashSelections.Remove(expired);
+            if (_trashSelections.Count >= 32) throw new VoiceLibraryException("overloaded");
+            var ids = new List<string>();
+            for (var offset = 0; ; offset += 200) {
+                var page = await store.QueryAsync(new AssetQuery(Limit: 200, Offset: offset), token);
+                if (page.Total > 10000) throw new VoiceLibraryException("library_too_large");
+                ids.AddRange(page.Items.Select(a => a.Id));
+                if (ids.Count >= page.Total || page.Items.Length == 0) break;
+            }
+            var selection = Guid.NewGuid().ToString("N");
+            _trashSelections[selection] = (ids.Distinct().ToArray(), DateTimeOffset.UtcNow.AddMinutes(2));
+            bound["selectionToken"] = selection;
+            approval = new("ライブラリの素材をすべてゴミ箱へ移動", $"対象: {ids.Count}件（お気に入りを含む）\n原本を保持し、ゴミ箱から復元できます。");
+        }
         else if (tool.Name.StartsWith("library_asset_"))
         {
-            var asset = await AssetAsync(Text(args, "assetId")!);
+            var asset = await AssetAsync(Text(args, "assetId")!, tool.Name == "library_asset_restore");
             var detail = tool.Name switch {
+                "library_asset_trash" => "ゴミ箱へ移動（原本を保持）",
+                "library_asset_restore" => "ゴミ箱から復元",
                 "library_asset_rename" => "新しい名前: " + Text(args, "name"),
                 "library_asset_favorite" => Flag(args, "favorite") ? "お気に入りに追加" : "お気に入りを解除",
                 _ => "追加先: " + (await FolderAsync(Text(args, "folderId")))!.Name
@@ -162,13 +186,13 @@ internal sealed class VoiceLibraryCapabilities(AssetStore store, Func<CaptureCon
         return (await store.QueryAsync(new AssetQuery(Limit: 1))).Folders.SingleOrDefault(f => f.Id == id)
             ?? throw new VoiceLibraryException("folder_not_found");
     }
-    private async Task<Asset> AssetAsync(string id)
+    private async Task<Asset> AssetAsync(string id, bool trashed = false)
     {
         var asset = await store.GetAsync(id);
-        if (asset is null || asset.Trashed) throw new VoiceLibraryException("asset_not_found");
+        if (asset is null || asset.Trashed != trashed) throw new VoiceLibraryException("asset_not_found");
         return asset;
     }
-    private static object Metadata(Asset a) => new { a.Id, a.Name, a.Kind, a.Extension, a.CreatedAt, a.SizeBytes, a.Favorite, a.FolderIds };
+    private static object Metadata(Asset a) => new { a.Id, a.Name, a.Kind, a.Extension, a.CreatedAt, a.SizeBytes, a.Favorite, a.Trashed, a.FolderIds };
     private async Task<object> SavedAsync(string id)
     {
         var asset = await AssetAsync(id);
@@ -201,13 +225,27 @@ internal sealed class VoiceLibraryCapabilities(AssetStore store, Func<CaptureCon
                 return Json(new { ok = true, recording = false, assets });
             case "library_search":
                 await FolderAsync(Text(args, "folderId"));
-                var page = await store.QueryAsync(new AssetQuery(Text: Text(args, "text") ?? "", View: Flag(args, "favorites") ? "favorites" : "recent", Kind: Text(args, "kind"),
+                var page = await store.QueryAsync(new AssetQuery(Text: Text(args, "text") ?? "", View: Flag(args, "trash") ? "trash" : Flag(args, "favorites") ? "favorites" : "recent", Kind: Text(args, "kind"),
                     FolderId: Text(args, "folderId"), Limit: Number(args, "limit", 20), Offset: Number(args, "offset", 0)));
                 return Json(new { ok = true, assets = page.Items.Select(Metadata), page.Total, folders = page.Folders.Take(100), foldersTruncated = page.Folders.Length > 100 });
             case "library_open":
                 if (Text(args, "assetId") is { } previewId) await AssetAsync(previewId);
                 if (!await showLibrary(Text(args, "assetId"), token)) throw new VoiceLibraryException("preview_failed");
                 return Json(new { ok = true, assetId = Text(args, "assetId"), opened = true });
+            case "library_trash_all":
+                if (!_trashSelections.Remove(Text(args, "selectionToken")!, out var selection) || selection.Expires < DateTimeOffset.UtcNow) throw new VoiceLibraryException("selection_expired");
+                foreach (var selected in selection.Ids) await AssetAsync(selected);
+                token.ThrowIfCancellationRequested();
+                if (selection.Ids.Length > 0) await store.UpdateAsync(selection.Ids, "trash");
+                foreach (var selected in selection.Ids) await AssetAsync(selected, true);
+                return Json(new { ok = true, moved = selection.Ids.Length, originalsPreserved = true, restorable = true });
+            case "library_asset_trash":
+            case "library_asset_restore":
+                var trash = tool == "library_asset_trash";
+                var selectedAsset = await AssetAsync(Text(args, "assetId")!, !trash);
+                token.ThrowIfCancellationRequested();
+                await store.UpdateAsync([selectedAsset.Id], trash ? "trash" : "restore");
+                return Json(new { ok = true, asset = Metadata(await AssetAsync(selectedAsset.Id, trash)), originalsPreserved = true });
             case "library_folder_create":
                 var folder = await store.AddCategoryAsync("folder", Text(args, "name")!);
                 var found = await FolderAsync(folder) ?? throw new VoiceLibraryException("readback_failed");

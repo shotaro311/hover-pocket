@@ -6,6 +6,7 @@ final class LibraryVoiceService {
     static let shared = LibraryVoiceService()
     let capture: AssetCaptureController
     let targets: VoiceCaptureTargets
+    private var trashSelections: [String: (ids: [String], expires: Date)] = [:]
     private let storeProvider: () async throws -> AssetLibraryStore
     private let showLibrary: (String?) async throws -> Void
 
@@ -43,12 +44,31 @@ final class LibraryVoiceService {
             case .favorite: detail = before.name + (arguments.flag("favorite") ? "\nお気に入りに追加" : "\nお気に入りを解除")
             default: detail = before.name + "\n追加先: " + (try await folder(arguments.text("folderId")))!.name
             }
+        } else if operation == .trashAll {
+            trashSelections = trashSelections.filter { $0.value.expires > Date() }
+            guard trashSelections.count < 32 else { throw LibraryVoiceError.failed("overloaded") }
+            let store = try await storeProvider()
+            var ids: [String] = [], query = LibraryQuery(); query.limit = 200
+            while true {
+                let page = try await store.query(query)
+                guard page.total <= 10000 else { throw LibraryVoiceError.failed("library_too_large") }
+                ids += page.items.map(\.id)
+                if ids.count >= page.total || page.items.isEmpty { break }
+                query.offset += 200
+            }
+            let selection = UUID().uuidString
+            trashSelections[selection] = (Array(Set(ids)), Date().addingTimeInterval(120))
+            bound["selectionToken"] = .string(selection)
+            detail = "対象: \(ids.count)件（お気に入りを含む）\n原本を保持し、ゴミ箱から復元できます。"
+        } else if [.trash, .restore].contains(operation) {
+            let before = try await asset(arguments.text("assetId")!, trashed: operation == .restore)
+            detail = before.name + (operation == .trash ? "\nゴミ箱へ移動（原本を保持）" : "\nゴミ箱から復元")
         } else if operation == .folder { detail = arguments.text("name") }
         if let name = arguments.text("name"), operation != .folder,
            name.contains("/") || name.contains(":") { throw CapabilityHandlerError.invalidArgument("name") }
         let title = operation == .screenshot ? "スクリーンショットを保存" : operation == .recordStart ? "画面収録を開始"
             : operation == .folder ? "ライブラリにフォルダを作成" : "ライブラリを更新"
-        return (bound, detail.map { .init(kind: .personalEdit, title: title, detail: $0) })
+        return (bound, detail.map { .init(kind: [.trash, .trashAll].contains(operation) ? .personalDelete : .personalEdit, title: title, detail: $0) })
     }
     private func folder(_ id: String?) async throws -> LibraryCategory? {
         guard let id else { return nil }
@@ -58,15 +78,15 @@ final class LibraryVoiceService {
         }
         return value
     }
-    private func asset(_ id: String) async throws -> LibraryAsset {
+    private func asset(_ id: String, trashed: Bool = false) async throws -> LibraryAsset {
         let store = try await storeProvider()
-        guard let asset = try await store.get(id), !asset.trashed else { throw LibraryVoiceError.failed("asset_not_found") }
+        guard let asset = try await store.get(id), asset.trashed == trashed else { throw LibraryVoiceError.failed("asset_not_found") }
         return asset
     }
     private func metadata(_ asset: LibraryAsset) -> CapabilityValue {
         .object(["id": .string(asset.id), "name": .string(asset.name), "kind": .string(asset.kind),
             "extension": .string(asset.extension), "createdAt": .string(asset.createdAt), "sizeBytes": .integer(Int(asset.sizeBytes)),
-            "favorite": .bool(asset.favorite), "folderIds": .array(asset.folderIds.map(CapabilityValue.string))])
+            "trashed": .bool(asset.trashed), "favorite": .bool(asset.favorite), "folderIds": .array(asset.folderIds.map(CapabilityValue.string))])
     }
     private func metadata(_ folder: LibraryCategory) -> CapabilityValue {
         .object(["id": .string(folder.id), "name": .string(folder.name), "parentId": folder.parentId.map(CapabilityValue.string) ?? .null])
@@ -108,7 +128,7 @@ final class LibraryVoiceService {
             _ = try await folder(arguments.text("folderId"))
             let store = try await storeProvider()
             var query = LibraryQuery(); query.text = arguments.text("text") ?? ""; query.kind = arguments.text("kind")
-            query.folderId = arguments.text("folderId"); query.view = arguments.flag("favorites") ? "favorites" : "recent"
+            query.folderId = arguments.text("folderId"); query.view = arguments.flag("trash") ? "trash" : arguments.flag("favorites") ? "favorites" : "recent"
             if case .integer(let limit)? = arguments["limit"] { query.limit = limit } else { query.limit = 20 }
             if case .integer(let offset)? = arguments["offset"] { query.offset = offset }
             let page = try await store.query(query)
@@ -118,6 +138,23 @@ final class LibraryVoiceService {
             if let id = arguments.text("assetId") { _ = try await asset(id) }
             try await showLibrary(arguments.text("assetId"))
             return ["ok": .bool(true), "opened": .bool(true), "assetId": arguments["assetId"] ?? .null]
+        case .trashAll:
+            guard let selection = trashSelections.removeValue(forKey: arguments.text("selectionToken")!), selection.expires > Date() else { throw LibraryVoiceError.failed("selection_expired") }
+            let store = try await storeProvider()
+            for id in selection.ids { _ = try await asset(id) }
+            try Task.checkCancellation()
+            if !selection.ids.isEmpty { try await store.update(ids: selection.ids, operation: "trash", value: nil) }
+            for id in selection.ids { _ = try await asset(id, trashed: true) }
+            AssetLibraryRuntime.shared.notifyChange()
+            return ["ok": .bool(true), "moved": .integer(selection.ids.count), "originalsPreserved": .bool(true), "restorable": .bool(true)]
+        case .trash, .restore:
+            let before = try await asset(arguments.text("assetId")!, trashed: operation == .restore)
+            let store = try await storeProvider()
+            try Task.checkCancellation()
+            try await store.update(ids: [before.id], operation: operation == .trash ? "trash" : "restore", value: nil)
+            let after = try await asset(before.id, trashed: operation == .trash)
+            AssetLibraryRuntime.shared.notifyChange()
+            return ["ok": .bool(true), "asset": metadata(after), "originalsPreserved": .bool(true)]
         case .folder:
             let store = try await storeProvider()
             let id = try await store.category(type: "folder", name: arguments.text("name")!)

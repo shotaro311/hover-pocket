@@ -36,6 +36,7 @@ internal sealed class UiVerifier
                 _failures.Add("webview: UI did not report ready within 8s");
             }
 
+            if (ready && Environment.GetEnvironmentVariable("HOVERPOCKET_LIBRARY_ACTIONS_VERIFY_ONLY") == "1") return await LibraryActionVerifier.RunAsync(_controller);
             if (ready && Environment.GetEnvironmentVariable("HOVERPOCKET_SYNC_VERIFY_ONLY") == "1")
                 return await AssetSyncVerifier.RunAsync(_controller);
             if (ready && Environment.GetEnvironmentVariable("HOVERPOCKET_LIBRARY_MEDIA_VERIFY_ONLY") == "1")

@@ -63,7 +63,7 @@ internal static class VoiceLibraryVerifier
             var runtime = new CodexNativeCapabilityRuntime(new CodexRealtimeCapabilityAdapter(new OpenAIRealtimeCapabilityRuntime(
                 new BrokerOpenAIRealtimeCapabilityAuthority(registry, broker), (_, _) => Task.FromResult(false), (_, _) => Task.FromResult(false), () => true, () => "Asia/Tokyo")),
                 registry, broker, (request, _) => { approvals++; approval = request; return Task.FromResult(approved); }, library);
-            Require(runtime.Definitions.GetArrayLength() == 19, "full tool catalog");
+            Require(runtime.Definitions.GetArrayLength() == 22, "full tool catalog");
             Task<CodexVoiceDynamicToolResponse> Call(string id, string name, object args, string thread = "voice-library", CancellationToken token = default) =>
                 Task.Run(() => runtime.ExecuteAsync(JsonSerializer.SerializeToElement(new { threadId = thread, callId = id, tool = name, arguments = args }), "voice-library", token));
             var query = await Call("windows", "capture_windows_list", new { query = fixture.Title });

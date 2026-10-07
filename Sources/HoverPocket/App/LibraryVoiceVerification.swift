@@ -48,6 +48,32 @@ enum LibraryVoiceVerification {
         }
         func result(_ value: CapabilityObject) -> CapabilityObject { object(value["result"]) }
         func succeeded(_ value: CapabilityObject) -> Bool { value["status"] == .string("succeeded") && value["readback"] == .string("verified") }
+        if ProcessInfo.processInfo.environment["HOVERPOCKET_LIBRARY_ACTIONS_ONLY"] == "1" {
+            let file = root.appendingPathComponent("retain.txt")
+            try Data("original to retain".utf8).write(to: file)
+            let id = try await store.importFile(file).assetId!
+            try await store.update(ids: [id], operation: "favoriteSet", value: "true")
+            let original = try await store.path(store.get(id)!, verifyHash: true)
+            let bytes = try Data(contentsOf: original)
+            approve = false
+            try check(!succeeded(try await call(.trashAll)) && !(try await store.get(id)!.trashed), "denied bulk trash writes nothing")
+            approve = true
+            try check(succeeded(try await call(.trash, ["assetId": .string(id)])), "single trash has verified readback")
+            try check(succeeded(try await call(.search, ["trash": .bool(true)])), "AI can search trash")
+            try check(succeeded(try await call(.restore, ["assetId": .string(id)])) && (try await store.get(id)!.favorite), "restore retains favorite")
+            try check(!succeeded(try await call(.trashAll, ["selectionToken": .string("injected")])), "model cannot inject selection token")
+            let (bound, _) = try await service.prepare(.trashAll, [:])
+            let late = root.appendingPathComponent("later.txt"); try Data("arrived after preparation".utf8).write(to: late)
+            let lateID = try await store.importFile(late).assetId!
+            let snapshot = try await service.execute(.trashAll, bound)
+            try check(snapshot["moved"] == .integer(1) && !(try await store.get(lateID)!.trashed), "bulk trash only affects prepared targets")
+            try check(try Data(contentsOf: original) == bytes, "original bytes retained after trash and restore")
+            let all = try await call(.trashAll, id: "all-once")
+            try check(succeeded(all) && (try await store.query(LibraryQuery()).total) == 0, "bulk trash includes remaining assets")
+            try check(try await call(.trashAll, id: "all-once") == all, "bulk replay does not repeat writes")
+            print("library_actions_verification=ok checks=\(checks.count) evidence=\(root.path)")
+            return
+        }
         func fixture(_ title: String, x: CGFloat, color: NSColor) -> NSWindow {
             let window = NSWindow(contentRect: NSRect(x: x, y: 100, width: 440, height: 300), styleMask: [.titled], backing: .buffered, defer: false)
             window.title = title; window.isReleasedWhenClosed = false
@@ -60,8 +86,8 @@ enum LibraryVoiceVerification {
         NSApp.activate(ignoringOtherApps: true)
         try await Task.sleep(for: .milliseconds(400))
         let tools = try runtime.sessionTools()
-        try check(LibraryVoiceOperation.allCases.allSatisfy { op in tools.contains { $0["name"] as? String == op.rawValue } }, "all 11 library tools exposed")
-        try check(LibraryVoiceOperation.allCases.allSatisfy { op in bridge.dynamicTools.contains { $0.objectValue?["name"]?.stringValue == op.rawValue } }, "all 11 tools reach Codex bridge")
+        try check(LibraryVoiceOperation.allCases.allSatisfy { op in tools.contains { $0["name"] as? String == op.rawValue } }, "all library tools exposed")
+        try check(LibraryVoiceOperation.allCases.allSatisfy { op in bridge.dynamicTools.contains { $0.objectValue?["name"]?.stringValue == op.rawValue } }, "all library tools reach Codex bridge")
         try check(succeeded(try await call(.search, ["text": .string("")])), "empty search text accepted")
         let empty = result(try await call(.search))
         try check(empty["total"] == .integer(0) && approvals == 0, "isolated search is read only")

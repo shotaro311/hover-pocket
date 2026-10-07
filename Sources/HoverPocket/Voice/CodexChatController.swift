@@ -121,7 +121,7 @@ final class CodexChatController: ObservableObject {
         guard let settings, let context = AINativeRuntime.shared.voiceCapabilityContext else { throw LibraryError.message("AI機能を準備できません。") }
         let runtime = try OpenAIRealtimeMacOSCapabilityRuntime(context: context, inputOrigin: .text,
             calendarAccessGranted: { settings.voiceCalendarAccessEnabled && HoverPocketRuntimeEnvironment.shared.externalIntegrationsEnabled },
-            actionConfirmationEnabled: { settings.voiceActionConfirmationEnabled }, destructiveConfirmationEnabled: { settings.voiceDestructiveConfirmationEnabled })
+            actionConfirmationEnabled: { (!settings.codexAllowAllAppActions && settings.voiceActionConfirmationEnabled) }, destructiveConfirmationEnabled: { (!settings.codexAllowAllAppActions && settings.voiceDestructiveConfirmationEnabled) })
         let bridge = CodexAppServerCapabilityBridge(runtime: runtime, appController: .shared)
         let executable = try CodexExecutableResolver.resolve(nil)
         let profile = try CodexVoiceAppServerProfile.prepare(executableURL: executable)

@@ -178,6 +178,7 @@ internal sealed class UserSettingsStore
             settings.WeatherTemperatureUnit = "automatic";
         if (!Enum.IsDefined(settings.PanelAttachmentStyle)) settings.PanelAttachmentStyle = PanelAttachmentStyle.PreserveMenu;
         var resizeLimits = PanelSizeCatalog.ResizeLimits(0);
+        if (settings.ChatSplitRatio is { } ratio) settings.ChatSplitRatio = double.IsFinite(ratio) ? Math.Clamp(ratio, .1, .9) : null;
         if (settings.PanelWidthDips is { } width) settings.PanelWidthDips = double.IsFinite(width) ? Math.Clamp(width, resizeLimits.MinWidth, resizeLimits.MaxWidth) : null;
         if (settings.PanelHeightDips is { } height) settings.PanelHeightDips = double.IsFinite(height) ? Math.Max(resizeLimits.MinHeight, height) : null;
         settings.Shortcuts ??= new UserSettings().Shortcuts;

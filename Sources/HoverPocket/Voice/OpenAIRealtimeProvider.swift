@@ -380,10 +380,10 @@ enum VoiceProviderAdapterFactory {
                             && HoverPocketRuntimeEnvironment.shared.externalIntegrationsEnabled
                     },
                     actionConfirmationEnabled: {
-                        settings.voiceActionConfirmationEnabled
+                        (!settings.codexAllowAllAppActions && settings.voiceActionConfirmationEnabled)
                     },
                     destructiveConfirmationEnabled: {
-                        settings.voiceDestructiveConfirmationEnabled
+                        (!settings.codexAllowAllAppActions && settings.voiceDestructiveConfirmationEnabled)
                     },
                     voiceRuntime: voiceRuntime
                 )
@@ -397,10 +397,10 @@ enum VoiceProviderAdapterFactory {
                             && HoverPocketRuntimeEnvironment.shared.externalIntegrationsEnabled
                     },
                     actionConfirmationEnabled: {
-                        settings.voiceActionConfirmationEnabled
+                        (!settings.codexAllowAllAppActions && settings.voiceActionConfirmationEnabled)
                     },
                     destructiveConfirmationEnabled: {
-                        settings.voiceDestructiveConfirmationEnabled
+                        (!settings.codexAllowAllAppActions && settings.voiceDestructiveConfirmationEnabled)
                     },
                     voiceRuntime: voiceRuntime
                 )

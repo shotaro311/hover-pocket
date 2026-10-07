@@ -25,6 +25,7 @@ const codexSandboxNoteEl = document.querySelector("[data-codex-sandbox-note]");
 const codexSandboxCheckEl = document.querySelector("[data-codex-sandbox-check]");
 const codexSandboxSetupEl = document.querySelector("[data-codex-sandbox-setup]");
 const codexSandboxStatusEl = document.querySelector("[data-codex-sandbox-status]");
+const codexActionsEl = document.querySelector("[data-codex-actions]");
 const aiNativeEl = document.querySelector("[data-ai-native]");
 const aiNativeLabelEl = document.querySelector("[data-ai-native-label]");
 const aiNativeNoteEl = document.querySelector("[data-ai-native-note]");
@@ -141,6 +142,9 @@ function render(state) {
 
   renderProviders(state);
   renderProviderSelection(state);
+  codexActionsEl.checked = Boolean(state.settings.codexAllowAllAppActions);
+  document.querySelector("[data-codex-actions-label]").textContent = state.settings.language === "en" ? "Allow Codex all app actions" : "Codexにアプリ内の操作をすべて許可";
+  document.querySelector("[data-codex-actions-note]").textContent = state.settings.language === "en" ? "Run supported edits, deletions and captures without additional confirmation. Library deletions move assets to Trash. OS permissions still apply." : "追加・編集・削除・撮影など、対応する操作を追加確認なしで実行します。素材の削除はゴミ箱へ移動します。OSの権限許可は別途必要です。";
   aiNativeEl.checked = Boolean(state.settings.aiNativeEnabled);
   aiNativeLabelEl.textContent = state.settings.language === "en" ? "Enable personal tools" : "自作ツールを使う";
   aiNativeNoteEl.textContent = state.settings.language === "en"
@@ -799,6 +803,7 @@ preferredProviderEl.addEventListener("change", () => {
   update("settings.setPreferredProvider", { id: preferredProviderEl.value });
 });
 
+codexActionsEl.addEventListener("change", () => update("settings.setCodexAllowAllAppActions", {enabled:codexActionsEl.checked}));
 aiNativeEl.addEventListener("change", () => {
   update("settings.setAiNativeEnabled", { enabled: aiNativeEl.checked });
 });
