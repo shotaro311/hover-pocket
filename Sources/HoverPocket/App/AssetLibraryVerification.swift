@@ -1,4 +1,5 @@
 import AppKit
+import AVFoundation
 import PDFKit
 import WebKit
 import SwiftUI
@@ -14,7 +15,7 @@ enum AssetLibraryVerification {
         let contract = source.appendingPathComponent("shared/asset-library")
         var checks: [String] = []
         func check(_ passed: Bool, _ name: String) throws {
-            guard passed else { throw LibraryError.message("FAIL " + name) }; checks.append(name); print("PASS " + name)
+            guard passed else { throw LibraryError.message("FAIL " + name) }; checks.append(name); FileHandle.standardOutput.write(Data(("PASS " + name + "\n").utf8))
         }
         let store = try AssetLibraryStore(root: evidence.appendingPathComponent("library"), contractRoot: contract)
         try await store.start()
@@ -44,6 +45,29 @@ enum AssetLibraryVerification {
             try JSONSerialization.data(withJSONObject: result ?? [:], options: [.prettyPrinted, .sortedKeys]).write(to: evidence.appendingPathComponent("web-interactions.json"))
             try check(result?["ok"] as? Bool == true, "Windows interaction suite in WKWebView: \(String(describing: result?["error"]))")
             if let names = result?["checks"] as? [String] { checks += names }
+            if ProcessInfo.processInfo.environment["HOVERPOCKET_LIBRARY_MEDIA_FIXTURES"] != nil {
+                let page = try await store.query(LibraryQuery())
+                guard let text = page.items.first(where: { $0.name == "fixture.txt" }) else { throw LibraryError.message("text fixture missing") }
+                let literal = try await web.callAsyncJavaScript("await window.assetPane.showAsset(id); const text=document.querySelector('.assets-document-text');return !!text && text.textContent.includes('Library fixture') && !text.querySelector('script') && !window.fixtureExecuted && text.scrollWidth <= text.clientWidth+1;", arguments: ["id": text.id], in: nil, contentWorld: .page)
+                try check(literal as? Bool == true, "actual document UI: safe literal text without horizontal overflow")
+                for asset in page.items.filter({ ["audio", "video"].contains(AssetPreviewFormats.kind($0.extension)) }) {
+                    let played = try await web.callAsyncJavaScript("""
+                    await window.assetPane.showAsset(id);
+                    const deadline=Date.now()+20000;
+                    let player;
+                    while(Date.now()<deadline) {
+                      player=document.querySelector('.assets-media video,.assets-media audio');
+                      if(player?.readyState>=1 && player.duration>0)break;
+                      await new Promise(r=>setTimeout(r,50));
+                    }
+                    if(!player || !(player.duration>0))throw Error('media metadata unavailable');
+                    const sought=new Promise((resolve,reject)=>{player.onseeked=resolve;setTimeout(()=>reject(Error('media seek timeout')),10000);});
+                    player.currentTime=player.duration/2;await sought;return true;
+                    """, arguments: ["id": asset.id], in: nil, contentWorld: .page)
+                    try check(played as? Bool == true, "actual WebKit media decode and seek: \(asset.extension)")
+                }
+                _ = try await web.evaluateJavaScript("document.querySelector('[data-action=endPreview]').click()")
+            }
             pane.organizer = false
             _ = try await web.evaluateJavaScript("document.querySelector('[data-action=captureMenu]').click()")
             try await Task.sleep(for: .milliseconds(150))
@@ -59,9 +83,9 @@ enum AssetLibraryVerification {
             try await AssetMediaVerification.snapshot(window: window, to: evidence.appendingPathComponent("library-ui.png"))
             let cards = try await web.evaluateJavaScript("document.querySelectorAll('.assets-card').length") as? Int ?? 0
             try check(cards > 0, "native bridge renders persisted assets: " + nativeText)
-            let imageID = try await store.query(LibraryQuery()).items.first { $0.kind == "image" }?.id
+            let imageID = try await store.query(LibraryQuery()).items.first { $0.name == "検証画像.png" }?.id
             if let imageID {
-                _ = try await web.callAsyncJavaScript("document.querySelector('[data-asset-id=\"'+id+'\"] img').dispatchEvent(new MouseEvent('dblclick',{bubbles:true}));", arguments: ["id": imageID], in: nil, contentWorld: .page)
+                _ = try await web.callAsyncJavaScript("await window.assetPane.showAsset(id); return true;", arguments: ["id": imageID], in: nil, contentWorld: .page)
                 try await Task.sleep(for: .seconds(1))
                 let preview = try await web.evaluateJavaScript("document.querySelector('.assets-root').classList.contains('has-preview')") as? Bool
                 try check(preview == true, "native image preview")
@@ -88,8 +112,8 @@ enum AssetLibraryVerification {
                 try check(try await web.evaluateJavaScript("document.querySelector('.assets-root').classList.contains('has-preview')") as? Bool == false, "preview close invalidates UI")
             }
             let page = try await store.query(LibraryQuery())
-            for asset in page.items where asset.kind == "pdf" || asset.kind == "video" {
-                _ = try await web.callAsyncJavaScript("await window.assetPane.refresh();document.querySelector('[data-asset-id=\"'+id+'\"] img').dispatchEvent(new MouseEvent('dblclick',{bubbles:true}));", arguments: ["id": asset.id], in: nil, contentWorld: .page)
+            for asset in page.items where asset.name == "検証.pdf" || asset.name == "検証動画.mp4" {
+                _ = try await web.callAsyncJavaScript("await window.assetPane.showAsset(id);", arguments: ["id": asset.id], in: nil, contentWorld: .page)
                 try await Task.sleep(for: .milliseconds(600))
                 if asset.kind == "pdf" {
                     let pdf = try await web.callAsyncJavaScript("const input=document.querySelector('.assets-preview-bottom input');input.value=2;input.dispatchEvent(new Event('change'));await new Promise(r=>setTimeout(r,300));return {page:document.querySelector('.assets-preview-bottom input').value,decoded:document.querySelector('.assets-media img').naturalWidth};", arguments: [:], in: nil, contentWorld: .page) as? [String: Any]
@@ -218,6 +242,41 @@ enum AssetLibraryVerification {
                 let asset = try await store.get(item.assetId!)!, url = try await store.path(asset, verifyHash: true)
                 let frame = await AssetMedia.frame(asset, url: url)
                 try check(frame.error == nil && frame.width > 0 && frame.dataUrl != nil, "native \(asset.kind) decode")
+            }
+            if let fixtureRoot = ProcessInfo.processInfo.environment["HOVERPOCKET_LIBRARY_MEDIA_FIXTURES"] {
+                for file in try FileManager.default.contentsOfDirectory(at: URL(fileURLWithPath: fixtureRoot), includingPropertiesForKeys: nil).sorted(by: { $0.lastPathComponent < $1.lastPathComponent }) {
+                    let imported = try await store.importFile(file)
+                    guard let asset = try await store.get(imported.assetId!) else { throw LibraryError.message("fixture import failed") }
+                    let url = try await store.readPath(asset), kind = AssetPreviewFormats.kind(asset.extension)
+                    if ["text", "document", "image", "pdf", "video"].contains(kind) {
+                        let frame = await AssetMedia.frame(asset, url: url, root: store.root)
+                        try check(frame.error == nil && (frame.dataUrl != nil || frame.textContent != nil), "file preview: \(asset.extension) \(frame.error ?? "")")
+                        if ["text", "document"].contains(kind) { try check(frame.textContent?.contains("Library fixture") == true, "document content: \(asset.extension)") }
+                        let thumbnail = await AssetMedia.frame(asset, url: url, thumbnail: true, root: store.root)
+                        try check(thumbnail.dataUrl != nil || thumbnail.textContent != nil, "file thumbnail: \(asset.extension)")
+                    }
+                    if ["audio", "video"].contains(kind) {
+                        let compatible = try await AssetCompatibleMedia.shared.convert(url, hash: asset.sha256, mode: kind, root: store.root)
+                        let playable = AVURLAsset(url: compatible)
+                        try check(try await playable.load(.isPlayable), "compatible playback: \(asset.extension)")
+                    }
+                    try check(try AssetLibraryStore.hash(url) == asset.sha256, "preview preserves original: \(asset.extension)")
+                }
+                AssetLibraryRuntime.shared.verificationStore = store
+                let runtime = AssetLibraryRuntime.shared
+                let clipboardImage = try AssetMedia.png(try fixtureImage()) + Data([1, 2, 3])
+                let before = try await store.query(LibraryQuery()).total
+                runtime.importClipboardImage(clipboardImage, enabled: { false })
+                try await Task.sleep(for: .milliseconds(200))
+                try check(try await store.query(LibraryQuery()).total == before, "clipboard default off")
+                runtime.importClipboardImage(clipboardImage, enabled: { true })
+                let deadline = Date().addingTimeInterval(5)
+                while try await store.query(LibraryQuery()).total == before, Date() < deadline { try await Task.sleep(for: .milliseconds(30)) }
+                try check(try await store.query(LibraryQuery()).total == before + 1, "clipboard enabled imports independent image")
+                runtime.importClipboardImage(clipboardImage, enabled: { true }); try await Task.sleep(for: .milliseconds(300))
+                try check(try await store.query(LibraryQuery()).total == before + 1, "clipboard duplicate ignored")
+                runtime.importClipboardImage(clipboardImage + Data([4]), enabled: { false }); try await Task.sleep(for: .milliseconds(200))
+                try check(try await store.query(LibraryQuery()).total == before + 1, "clipboard disabled preserves saved image")
             }
             let editor = AssetEditorSession(image: image)
             editor.annotations = [AssetAnnotation(tool: .rectangle, points: [CGPoint(x: 20, y: 20), CGPoint(x: 220, y: 150)], color: .red, width: 8),

@@ -3,11 +3,14 @@ import { request } from './js/bridge.js';
 window.assetPane = renderAssetsProvider({container: document.getElementById('assets'), request,
   state: {settings: {language: window.assetConfiguration.language}, organizer: window.assetConfiguration.organizer, platform:'mac'}});
 let interactionHeld = false;
+let dialogHeld = false;
 function syncInteractionHold() {
-  const editing = !!document.querySelector('dialog[open]') || !!document.activeElement?.matches('input,textarea,[contenteditable="true"]');
-  if (editing === interactionHeld) return;
+  const dialog = !!document.querySelector('dialog[open]');
+  const editing = dialog || !!document.activeElement?.matches('input,textarea,[contenteditable="true"]');
+  if (editing === interactionHeld && dialog === dialogHeld) return;
   interactionHeld = editing;
-  void request(editing ? 'panel.beginTextInput' : 'panel.endTextInput', {editing});
+  dialogHeld = dialog;
+  void request(editing ? 'panel.beginTextInput' : 'panel.endTextInput', {editing,dialog});
 }
 document.addEventListener('focusin', syncInteractionHold);
 document.addEventListener('focusout', () => setTimeout(syncInteractionHold, 0));

@@ -5,6 +5,8 @@ import Foundation
 @MainActor
 final class ClipboardHistoryStore: ObservableObject {
     static let shared = ClipboardHistoryStore()
+    var autoImportEnabled: () -> Bool = { false }
+    var capturesText = true
 
     @Published private(set) var textItems: [ClipboardTextHistoryItem] = []
     @Published private(set) var imageItems: [ClipboardImageHistoryItem] = []
@@ -151,13 +153,13 @@ final class ClipboardHistoryStore: ObservableObject {
         let pasteboard = NSPasteboard.general
         guard pasteboard.changeCount != lastChangeCount else { return }
         lastChangeCount = pasteboard.changeCount
-        captureCurrentPasteboardIfUseful()
+        captureCurrentPasteboardIfUseful(autoImport: true)
     }
 
-    private func captureCurrentPasteboardIfUseful() {
+    private func captureCurrentPasteboardIfUseful(autoImport: Bool = false) {
         let pasteboard = NSPasteboard.general
 
-        if let text = pasteboard.string(forType: .string),
+        if capturesText, let text = pasteboard.string(forType: .string),
            addTextIfUseful(text) {
             trimHistory()
             save()
@@ -166,7 +168,7 @@ final class ClipboardHistoryStore: ObservableObject {
         if let imageData = pasteboard.data(forType: .png)
             ?? pasteboard.data(forType: .tiff)
             ?? NSImage(pasteboard: pasteboard)?.tiffRepresentation {
-            captureImage(from: imageData)
+            captureImage(from: imageData, autoImport: autoImport && autoImportEnabled())
         }
     }
 
@@ -185,12 +187,13 @@ final class ClipboardHistoryStore: ObservableObject {
 
     /// Converts and hashes clipboard image data off the main actor; PNG encode,
     /// SHA256 and file writes are too heavy for the 0.75s poll on the main thread.
-    private func captureImage(from imageData: Data) {
+    private func captureImage(from imageData: Data, autoImport: Bool) {
         let storageDirectory = self.storageDirectory
         Task.detached(priority: .utility) { [weak self] in
             guard let bitmap = NSBitmapImageRep(data: imageData),
                   let pngData = bitmap.representation(using: .png, properties: [:])
             else { return }
+            if autoImport { await MainActor.run { [weak self] in if self?.autoImportEnabled() == true { AssetLibraryRuntime.shared.importClipboardImage(pngData, enabled: { [weak self] in self?.autoImportEnabled() == true }) } } }
             let hash = Self.hashString(for: pngData)
             let existingFavorite = await MainActor.run { [weak self] in
                 self?.imageItems.first(where: { $0.contentHash == hash })?.isFavorite ?? false

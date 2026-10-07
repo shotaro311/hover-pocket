@@ -329,7 +329,7 @@ internal sealed partial class PanelBridgeController : IDisposable
             new ClipboardNativeListener(System.Windows.Application.Current?.Dispatcher ?? System.Windows.Threading.Dispatcher.CurrentDispatcher),
             () => CurrentSettings,
             SetClipboardPrivateModeAsync,
-            () => IsVisible("clipboard"));
+            () => IsVisible("clipboard"), AssetLibrary);
         _clipboardBridgeController.ExternalDragStarted += OnClipboardExternalDragStarted;
         _clipboardBridgeController.ApplySettings(CurrentSettings, IsVisible("clipboard"));
         _selectedProviderId = ResolveInitialProviderId();
@@ -473,6 +473,13 @@ internal sealed partial class PanelBridgeController : IDisposable
         }
         if (surface == BridgeSurface.Settings)
         {
+            Register("settings.setLibraryAutoImportClipboardImages", async (p, token) =>
+            {
+                var updated = CurrentSettings.Clone();
+                updated.LibraryAutoImportClipboardImages = ReadRequiredBool(p, "enabled");
+                SaveSettings(updated);
+                return await PublishStateAsync(token);
+            });
             RegisterToolSettings(Register);
             foreach (var method in new[] { "status", "invite", "join", "approve", "cancel", "remove" })
                 Register("pairing." + method, (p, token) => PairingRequest(method, p, token));
@@ -667,6 +674,7 @@ internal sealed partial class PanelBridgeController : IDisposable
                 voiceCalendarAccessGranted = CurrentSettings.VoiceCalendarAccessGranted,
                 voiceLaneLayout = ToWireValue(CurrentSettings.VoiceLaneLayout),
                 clipboardPrivateMode = CurrentSettings.ClipboardPrivateMode,
+                libraryAutoImportClipboardImages = CurrentSettings.LibraryAutoImportClipboardImages,
                 rememberLastSelectedProvider = CurrentSettings.RememberLastSelectedProvider,
                 preferredProviderId = CurrentSettings.PreferredProviderId,
                 lastSelectedProviderId = CurrentSettings.LastSelectedProviderId,

@@ -8,7 +8,7 @@ export function renderAssetsProvider({ container, request, state }) {
   let query = { version: 2, text: "", view: "recent", offset: 0, limit: 100 }, selection = new Set(), anchor = null;
   let selectionRevision = 0, marquee = null, marqueeFrame = 0;
   let selectedAsset = null, preview = null, fullscreen = false, organizer = !!state?.organizer, zoom = 1, pdfPage = 1, composing = false, dragging = false, editingImage = false, dragIds = [], droppedInTrash = false, droppedDestination = null;
-  const thumbnails = new Map(), pendingThumbs = new Set();
+  const thumbnails = new Map(), excerpts = new Map(), attemptedThumbs = new Set(), pendingThumbs = new Set();
   const root = document.createElement("section"); root.className = "assets-root";
   const icon = (name, size = 18) => `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${{
     menu:'<path d="M5 6h14M5 12h14M5 18h14"/>', search:'<circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 4 4"/>',
@@ -235,11 +235,19 @@ export function renderAssetsProvider({ container, request, state }) {
       cardIndex++;
       if (image.getAttribute("src")) { /* keep the decoded thumbnail */ }
       else if (thumbnails.has(asset.id)) image.src = thumbnails.get(asset.id);
-      else if (asset.kind !== "other" && !pendingThumbs.has(asset.id)) {
-        pendingThumbs.add(asset.id);
+      else if (excerpts.has(asset.id)) showExcerpt(card, excerpts.get(asset.id));
+      else if (!attemptedThumbs.has(asset.id) && !pendingThumbs.has(asset.id)) {
+        pendingThumbs.add(asset.id); attemptedThumbs.add(asset.id);
+        while (attemptedThumbs.size > 500) attemptedThumbs.delete(attemptedThumbs.values().next().value);
         // The visible window bounds the number of requests and decoded images.
         void run("assets.thumbnail", { id: asset.id }).then(frame => {
-          pendingThumbs.delete(asset.id); if (disposed || !frame?.dataUrl) return;
+          pendingThumbs.delete(asset.id); if (disposed || !frame) return;
+          if (typeof frame.textContent === "string") {
+            excerpts.set(asset.id, frame.textContent); while (excerpts.size > 150) excerpts.delete(excerpts.keys().next().value);
+            const visible = Array.from(grid.children).find(el => el.dataset.assetId === asset.id); if (visible) showExcerpt(visible, frame.textContent);
+            return;
+          }
+          if (!frame.dataUrl) return;
           thumbnails.set(asset.id, frame.dataUrl); while (thumbnails.size > 150) thumbnails.delete(thumbnails.keys().next().value);
           const visible = Array.from(grid.children).find(el => el.dataset.assetId === asset.id); if (visible) visible.querySelector("img").src = frame.dataUrl;
         });
@@ -452,6 +460,24 @@ export function renderAssetsProvider({ container, request, state }) {
       if (selectStem && initial.lastIndexOf(".") > 0) field.setSelectionRange(0,initial.lastIndexOf(".")); else field.select();
     });
   }
+  function showExcerpt(card, text) {
+    let excerpt = card.querySelector(".assets-card-excerpt");
+    if (!excerpt) { excerpt = document.createElement("pre"); excerpt.className = "assets-card-excerpt"; card.append(excerpt); }
+    excerpt.textContent = text; card.classList.add("has-excerpt");
+  }
+  async function recoverPlayback(player, asset, current) {
+    if (disposed || current !== previewGeneration) return;
+    if (player.dataset.compatible) {
+      if (player.dataset.compatible === "ready") report(english ? "This codec cannot be played. Open the original in another app." : "この圧縮形式を再生できません。原本を外部アプリで開けます。");
+      return;
+    }
+    player.dataset.compatible = "pending";
+    report(english ? "Preparing a compatible preview…" : "再生できるプレビューを準備中…");
+    const result = await run("assets.playbackFallback", {id:asset.id});
+    if (disposed || current !== previewGeneration || !player.isConnected) return;
+    if (result?.url) { player.dataset.compatible = "ready"; player.src = result.url; player.load(); report(english ? "Compatible preview ready. The original is unchanged." : "再生用のプレビューを用意しました。原本は保持しています。"); }
+    else report(english ? "This codec cannot be played. Open the preserved original in another app." : "この圧縮形式を再生できません。保持した原本を外部アプリで開けます。");
+  }
   async function openPreview(asset, requestedPage = 1) {
     closeContextMenu();
     void run("assets.visibility", {visible:false});
@@ -471,14 +497,18 @@ export function renderAssetsProvider({ container, request, state }) {
     preview = result;
     if (result.error && result.kind === "video") report(result.error);
     if (result.error && result.kind !== "video") { media.textContent = result.error; }
+    else if (typeof result.textContent === "string") {
+      const content = document.createElement("pre"); content.className = "assets-document-text"; content.textContent = result.textContent || (english ? "Empty document" : "空の文書です"); content.tabIndex = 0; content.setAttribute("aria-label", english ? "Document content" : "文書の本文"); media.replaceChildren(content);
+      if (result.truncated) { const notice = document.createElement("p"); notice.className = "assets-document-notice"; notice.textContent = english ? "Showing the beginning. Copy or open the original for the complete document." : "先頭部分を表示しています。全文は原本をコピーするか、外部アプリで確認できます。"; media.append(notice); }
+    }
     else if (result.audioUrl) {
       const audio=document.createElement("audio"); audio.controls=true; audio.src=result.audioUrl; audio.preload="metadata";
-      audio.addEventListener("error",()=>report(english?"This audio cannot be played. The original is preserved.":"この音声は再生できません。原本は保存されています。")); media.replaceChildren(audio);
+      audio.addEventListener("error",()=>{ void recoverPlayback(audio,asset,current); }); media.replaceChildren(audio);
     }
     else if (result.kind === "video") {
       let video = media.querySelector("video,audio");
-      if (!video) { video = document.createElement("video"); video.controls = true; video.preload = "metadata"; video.autoplay = false; video.playsInline = true; video.src = result.videoUrl; if (result.dataUrl) video.poster = result.dataUrl; video.onerror = () => report(`この動画は再生できません。原本は保存されています。${platformLabel}のメディア機能と形式を確認してください。`); media.replaceChildren(video); }
-    } else if (result.dataUrl) { const image = document.createElement("img"); image.src = result.dataUrl; image.alt = asset.name; image.draggable = false; media.replaceChildren(image); }
+      if (!video) { video = document.createElement("video"); video.controls = true; video.preload = "metadata"; video.autoplay = false; video.playsInline = true; video.src = result.videoUrl; if (result.dataUrl) video.poster = result.dataUrl; video.onerror = () => { void recoverPlayback(video,asset,current); }; media.replaceChildren(video); }
+    } else if (result.dataUrl) { const image = document.createElement("img"); image.src = result.dataUrl; image.alt = asset.name; image.draggable = false; image.addEventListener("error", () => { media.textContent = english ? "This image cannot be displayed. The original is preserved." : "この画像を表示できません。原本は保存されています。"; }); media.replaceChildren(image); }
     else media.textContent = t("この形式はプレビューに対応していません。コピー・保存先から原本を取り出せます。");
     const content = media.querySelector("img,video");
     if (content && result.width > 0 && result.height > 0 && result.kind !== "pdf") { const ratio = devicePixelRatio || 1; content.style.maxWidth = `min(100%,${result.width / ratio}px)`; content.style.maxHeight = `min(100%,${result.height / ratio}px)`; }
@@ -498,6 +528,7 @@ export function renderAssetsProvider({ container, request, state }) {
       });
       edit.className = "assets-edit-image"; edit.disabled = true; editButton = edit; footer.append(edit);
     }
+    footer.append(button(english ? "Open in app" : "外部アプリで開く", () => run("assets.copy", { id: asset.id, mode: "open" })));
     footer.append(button("ファイルをコピー", () => run("assets.copy", { id: asset.id })), button("保存先…", () => run("assets.copy", { id: asset.id, mode: "save" })));
     applyZoom();
     const readyImage = media.querySelector("img");
@@ -522,7 +553,7 @@ export function renderAssetsProvider({ container, request, state }) {
       resetPreviewUi();
       // Finish the grid before the panel resizes so the arrival snapshot matches the live page.
       await run("assets.visibility", {visible:true}); renderGrid(); renderSelection(); renderDetails();
-      await run("assets.endPreview"); await run("panel.endTextInput"); if (organizer) await run("assets.organizer");
+      await run("assets.endPreview"); await run("panel.endTextInput", {dialog: !!document.querySelector("dialog[open]")}); if (organizer) await run("assets.organizer");
     } finally {
       // A quick cancellation can finish before the native preview starts. No resize
       // then takes ownership of this snapshot, so release that unchanged revision.
@@ -608,12 +639,12 @@ export function renderAssetsProvider({ container, request, state }) {
   const unsubscribers = [on("assets.dragMoved", moveDrag), on("assets.dragTargetHover", payload => highlightDropTarget(payload.dropTarget)), on("assets.trashHover", payload => trashDrop.classList.toggle("is-targeted", !!payload.hovered)), on("assets.dragPreparing", () => report(english ? "Preparing files for drag… You can release the mouse while waiting." : "外へ渡すファイルを準備しています。大きい素材はマウスを離して待てます。")), on("assets.dragReady", () => report(english ? "Ready. Drag the same selection again." : "準備できました。同じ素材をもう一度ドラッグしてください。")), on("assets.dropUnsupported", payload => report(payload.message)), on("assets.changed", () => { clearTimeout(eventTimer); eventTimer = setTimeout(() => { if (!preview && !dragging && !document.hidden) void refresh(); }, 150); }), on("assets.importChanged",showImportProgress), on("assets.restoreAvailable", result=>{
     root.querySelector(".assets-restore-available")?.remove();
     const control = button(english ? `Restore ${result.ids.length} from trash` : `ゴミ箱の素材を復元（${result.ids.length}件）`,async()=>{const restored=await run("assets.update",{ids:result.ids,operation:"restore"});if(restored?.ok){control.remove();await refresh();}}); control.className="assets-restore-available";find(".assets-toolbar").append(control);
-  }), on("panel.closed", () => { closeContextMenu(); if (preview) resetPreviewUi(); finishMarquee(); void run("assets.visibility", {visible:false}); }), on("panel.opened", () => { void run("assets.visibility", {visible:true}).then(refresh); }), on("assets.fullscreenChanged", payload => { if (preview) showFullscreen(!!payload.fullscreen); }), on("assets.previewEnded", () => { if (preview) { resetPreviewUi(); void run("panel.endTextInput"); void run("assets.visibility",{visible:!document.hidden}).then(()=>renderGrid()); } })];
+  }), on("panel.closed", () => { closeContextMenu(); if (preview) resetPreviewUi(); finishMarquee(); void run("assets.visibility", {visible:false}); }), on("panel.opened", () => { void run("assets.visibility", {visible:true}).then(refresh); }), on("assets.fullscreenChanged", payload => { if (preview) showFullscreen(!!payload.fullscreen); }), on("assets.previewEnded", () => { if (preview) { resetPreviewUi(); void run("panel.endTextInput", {dialog: !!document.querySelector("dialog[open]")}); void run("assets.visibility",{visible:!document.hidden}).then(()=>renderGrid()); } })];
   void run("assets.status").then(status => { if (status?.warning) report(status.warning); });
   void run("assets.visibility", {visible:true});
   void run("assets.importState").then(progress=>{if(progress&&(progress.busy||progress.completed||progress.failed||progress.duplicates))showImportProgress(progress);});
   void refresh();
-  return { refresh, async showAsset(id) { const asset = await request("assets.get", {id}); if (!asset || disposed || editingImage) return false; return !!(await openPreview(asset)) && !disposed && preview?.id === asset.id; }, async openAsset(asset) { if (!asset?.id || disposed || editingImage) return false; const opened = await openPreview(asset); return opened === true && !disposed && preview?.id === asset.id && root.classList.contains("has-preview"); }, dispose() { closeContextMenu(); finishMarquee(); ++selectionRevision; document.body.classList.remove("assets-fullscreen"); disposed = true; clearInterval(dragScrollTimer); ++generation; ++previewGeneration; clearTimeout(queryTimer); clearTimeout(eventTimer); observer.disconnect(); document.removeEventListener("keydown", keydown); document.removeEventListener("visibilitychange",visibilityChanged); unsubscribers.forEach(unsubscribe => unsubscribe()); stopMedia(); void request("assets.visibility", {visible:false}).catch(() => {}); void request("assets.endPreview").catch(() => {}); thumbnails.clear(); } };
+  return { refresh, async showAsset(id) { const asset = await request("assets.get", {id}); if (!asset || disposed || editingImage) return false; return !!(await openPreview(asset)) && !disposed && preview?.id === asset.id; }, async openAsset(asset) { if (!asset?.id || disposed || editingImage) return false; const opened = await openPreview(asset); return opened === true && !disposed && preview?.id === asset.id && root.classList.contains("has-preview"); }, dispose() { closeContextMenu(); finishMarquee(); ++selectionRevision; document.body.classList.remove("assets-fullscreen"); disposed = true; clearInterval(dragScrollTimer); ++generation; ++previewGeneration; clearTimeout(queryTimer); clearTimeout(eventTimer); observer.disconnect(); document.removeEventListener("keydown", keydown); document.removeEventListener("visibilitychange",visibilityChanged); unsubscribers.forEach(unsubscribe => unsubscribe()); stopMedia(); void request("assets.visibility", {visible:false}).catch(() => {}); void request("assets.endPreview").catch(() => {}); thumbnails.clear(); excerpts.clear(); attemptedThumbs.clear(); } };
 }
 
 function bytes(value) { return value < 1024 ? `${value} B` : value < 1024 * 1024 ? `${(value / 1024).toFixed(1)} KB` : `${(value / (1024 * 1024)).toFixed(1)} MB`; }

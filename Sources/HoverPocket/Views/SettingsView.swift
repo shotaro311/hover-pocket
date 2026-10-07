@@ -6,6 +6,7 @@ struct SettingsView: View {
     var onOpenPocketApp: ((String) -> Void)? = nil
     @ObservedObject private var calendarStore = GoogleCalendarStore.shared
     @ObservedObject private var appUpdater = AppUpdater.shared
+    @ObservedObject private var assetRuntime = AssetLibraryRuntime.shared
     @ObservedObject private var aiNativeRuntime = AINativeRuntime.shared
     @ObservedObject private var codexVoiceHost = PocketCodexLibrary.host
     @ObservedObject private var codexVoiceAccount = CodexVoiceAccountLoginController.shared
@@ -146,6 +147,15 @@ struct SettingsView: View {
                 SettingsDetails(title: localized(japanese: "表示する機能", english: "Visible features")) { providersSection }
             }
         case .library:
+            SettingsCard {
+                Text(localized(japanese: "ライブラリへの取り込み", english: "Library import")).font(.headline)
+                Toggle(localized(japanese: "コピーした画像をライブラリへ自動保存", english: "Automatically save copied images to the library"), isOn: $settings.libraryAutoImportClipboardImages)
+                Text(localized(japanese: "オンにした後の画像を保存します。重複した画像やゴミ箱の画像は追加しません。オフにしても保存済みの素材は残ります。", english: "Saves images copied after enabling. Duplicate or trashed images are not added. Turning this off keeps saved assets."))
+                    .font(.callout).foregroundStyle(.secondary)
+                if let error = assetRuntime.clipboardImportError {
+                    Text(error).font(.callout).foregroundStyle(.orange)
+                }
+            }
             AssetLibrarySyncSettings(language: language)
         case .capture:
             SettingsCard { mirrorSection }

@@ -1,4 +1,5 @@
 using System.Windows.Media.Imaging;
+using System.Runtime.InteropServices.WindowsRuntime;
 using System.Windows.Media;
 using HoverPocket.Assets;
 using Windows.Storage;
@@ -6,7 +7,7 @@ using Windows.Storage.Streams;
 
 namespace HoverPocket.Shell.Providers.Assets;
 
-internal sealed record AssetFrame(string? DataUrl, double Width, double Height, int Pages = 1, string? Error = null, string ContentType = "image/jpeg", string? FailureCode = null);
+internal sealed record AssetFrame(string? DataUrl, double Width, double Height, int Pages = 1, string? Error = null, string ContentType = "image/jpeg", string? FailureCode = null, string? TextContent = null, bool Truncated = false);
 
 internal sealed class AssetMedia(AssetStore store)
 {
@@ -18,6 +19,19 @@ internal sealed class AssetMedia(AssetStore store)
     public async Task<AssetFrame> FrameAsync(Asset asset, int page, bool thumbnail, CancellationToken token)
     {
         var stage = "start";
+        var kind = AssetPreviewFormats.Kind(asset.Extension);
+        if (kind is "text" or "document")
+        {
+            try
+            {
+                var content = await Task.Run(() => AssetDocumentPreview.ReadAsync(store.ReadOriginalPath(asset), asset.Extension, token), token);
+                return new(null, 860, 600, TextContent: thumbnail ? content.Text[..Math.Min(content.Text.Length, 700)] : content.Text, Truncated: content.Truncated);
+            }
+            catch (OperationCanceledException) { throw; }
+            catch (InvalidDataException ex) { return new(null, 860, 600, Error: ex.Message); }
+            catch (Exception ex) when (ex is IOException or InvalidDataException or System.Xml.XmlException or NotSupportedException or ArgumentException or System.Text.DecoderFallbackException)
+            { return new(null, 860, 600, Error: "文書を表示できません。形式・破損・保護を確認してください。原本は保存されています。"); }
+        }
         var cacheDirectory = Path.Combine(store.Root, "cache", thumbnail ? "thumbnails" : "previews");
         var cache = Path.Combine(cacheDirectory, $"{asset.Id}-{(thumbnail ? "thumb" : page.ToString())}.jpg");
         var metadata = cache + ".json";
@@ -41,8 +55,15 @@ internal sealed class AssetMedia(AssetStore store)
                 }
                 var max = thumbnail ? 240 : 2048;
                 BitmapSource bitmap; double width; double height; var pages = 1;
-                if (asset.Kind == "image")
+                if (kind == "image")
                 {
+                    if (asset.Extension is "heic" or "heif" or "webp" or "avif" or "jxr" or "wdp" or "dng" or "cr2" or "cr3" or "nef" or "arw" or "orf" or "rw2")
+                    {
+                        var decoded = await DecodeModernImageAsync(path, max, token);
+                        bitmap = decoded.Bitmap; width = decoded.Width; height = decoded.Height;
+                    }
+                    else
+                    {
                     using var stream = File.OpenRead(path);
                     var probe = BitmapDecoder.Create(stream, BitmapCreateOptions.DelayCreation, BitmapCacheOption.None).Frames[0];
                     width = probe.PixelWidth; height = probe.PixelHeight;
@@ -55,6 +76,7 @@ internal sealed class AssetMedia(AssetStore store)
                     image.StreamSource = stream; image.EndInit(); image.Freeze(); bitmap = image;
                     bitmap = ApplyOrientation(bitmap, orientation);
                     if (orientation >= 5) (width, height) = (height, width);
+                    }
                 }
                 else if (asset.Kind == "pdf")
                 {
@@ -65,7 +87,7 @@ internal sealed class AssetMedia(AssetStore store)
                     using var stream = new MemoryStream(Convert.FromBase64String(frame.DataUrl[(frame.DataUrl.IndexOf(',') + 1)..]));
                     bitmap = BitmapDecoder.Create(stream, BitmapCreateOptions.None, BitmapCacheOption.OnLoad).Frames[0]; bitmap.Freeze();
                 }
-                else if (asset.Kind == "video")
+                else if (kind == "video")
                 {
                     stage = "video.open";
                     var file = await StorageFile.GetFileFromPathAsync(path);
@@ -75,7 +97,7 @@ internal sealed class AssetMedia(AssetStore store)
                     var properties = await file.Properties.GetVideoPropertiesAsync(); width = properties.Width; height = properties.Height;
                     stage = "video.orientation";
                     if (properties.Orientation is global::Windows.Storage.FileProperties.VideoOrientation.Rotate90 or global::Windows.Storage.FileProperties.VideoOrientation.Rotate270) (width, height) = (height, width);
-                    if (output is null || output.Type != global::Windows.Storage.FileProperties.ThumbnailType.Image) return new(null, width, height, Error: "この動画のポスターを生成できません。手動で再生を試してください。");
+                    if (output is null || output.Type != global::Windows.Storage.FileProperties.ThumbnailType.Image) throw new IOException("動画のポスターを生成できません。");
                     // Finish WinRT awaits before constructing WPF decoder objects: BitmapFrame metadata retains thread affinity.
                     stage = "video.decode";
                     using var stream = output.AsStreamForRead(); bitmap = BitmapDecoder.Create(stream, BitmapCreateOptions.None, BitmapCacheOption.OnLoad).Frames[0]; bitmap.Freeze();
@@ -84,7 +106,7 @@ internal sealed class AssetMedia(AssetStore store)
                 token.ThrowIfCancellationRequested();
                 stage = "encode";
                 byte[] bytes; var quality = thumbnail ? 75 : 90;
-                var transparent = !thumbnail && asset.Kind == "image" && asset.Extension is "png" or "gif" or "webp";
+                var transparent = kind == "image" && asset.Extension is "png" or "gif" or "webp" or "avif" or "heic" or "heif" or "ico";
                 do
                 {
                     BitmapEncoder encoder = transparent ? new PngBitmapEncoder() : new JpegBitmapEncoder { QualityLevel = quality }; encoder.Frames.Add(BitmapFrame.Create(bitmap));
@@ -108,7 +130,57 @@ internal sealed class AssetMedia(AssetStore store)
         catch (Exception ex) when (asset.Kind == "pdf" && ex.HResult == unchecked((int)0x8007052B))
         { return new(null,0,0,Error:"パスワードで保護されたPDFです。原本は保存済みです。OSで開くか、保護を解除したファイルを追加してください。"); }
         catch (Exception ex) when (ex is not OutOfMemoryException)
-        { return new(null, 0, 0, Error: "プレビューを生成できません。形式・破損・保護・Windowsのメディア機能を確認してください。原本は保存されています。", FailureCode: $"{stage}:{ex.GetType().Name}:{ex.HResult:X8}"); }
+        {
+            if (kind is "image" or "video" && AssetCompatibleMedia.Executable is not null)
+            {
+                try
+                {
+                    var compatible = await AssetCompatibleMedia.ConvertAsync(store, asset, "image", token);
+                    var bytes = await File.ReadAllBytesAsync(compatible, token);
+                    using var decoded = new MemoryStream(bytes);
+                    BitmapSource bitmap = BitmapDecoder.Create(decoded, BitmapCreateOptions.None, BitmapCacheOption.OnLoad).Frames[0];
+                    if (thumbnail)
+                    {
+                        var scale = Math.Min(1, 240d / Math.Max(bitmap.PixelWidth, bitmap.PixelHeight));
+                        bitmap = new TransformedBitmap(bitmap, new ScaleTransform(scale, scale)); bitmap.Freeze();
+                        do
+                        {
+                            var encoder = new PngBitmapEncoder(); encoder.Frames.Add(BitmapFrame.Create(bitmap));
+                            using var output = new MemoryStream(); encoder.Save(output); bytes = output.ToArray();
+                            if (bytes.Length <= 65536) break;
+                            bitmap = new TransformedBitmap(bitmap, new ScaleTransform(.75, .75)); bitmap.Freeze();
+                        } while (Math.Max(bitmap.PixelWidth, bitmap.PixelHeight) > 32);
+                        if (bytes.Length > 65536) throw new IOException("サムネイルの表示容量の上限を超えています。");
+                    }
+                    return new("data:image/png;base64," + Convert.ToBase64String(bytes), bitmap.PixelWidth, bitmap.PixelHeight, ContentType: "image/png");
+                }
+                catch (IOException) { }
+            }
+            var browserMime = asset.Extension switch { "webp" => "image/webp", "avif" => "image/avif", "svg" => "image/svg+xml", "gif" => "image/gif", "ico" => "image/x-icon", _ => null };
+            if (browserMime is not null && asset.SizeBytes <= 8 * 1024 * 1024)
+            {
+                var bytes = await File.ReadAllBytesAsync(store.ReadOriginalPath(asset), token);
+                return new("data:" + browserMime + ";base64," + Convert.ToBase64String(bytes), 860, 600, ContentType: browserMime);
+            }
+            return new(null, 0, 0, Error: "プレビューを生成できません。形式・破損・保護・Windowsのメディア機能を確認してください。原本は保存されています。", FailureCode: $"{stage}:{ex.GetType().Name}:{ex.HResult:X8}"); }
+    }
+    private static async Task<(BitmapSource Bitmap, double Width, double Height)> DecodeModernImageAsync(string path, int maximum, CancellationToken token)
+    {
+        var file = await StorageFile.GetFileFromPathAsync(path);
+        using var stream = await file.OpenReadAsync();
+        var decoder = await global::Windows.Graphics.Imaging.BitmapDecoder.CreateAsync(stream);
+        var width = decoder.OrientedPixelWidth; var height = decoder.OrientedPixelHeight;
+        if (width == 0 || height == 0 || (double)width * height > 250_000_000) throw new InvalidDataException("画像の画素数が表示の上限を超えています。");
+        var scale = Math.Min(1, (double)maximum / Math.Max(width, height));
+        var transform = new global::Windows.Graphics.Imaging.BitmapTransform { ScaledWidth = (uint)Math.Max(1, decoder.PixelWidth * scale), ScaledHeight = (uint)Math.Max(1, decoder.PixelHeight * scale) };
+        using var software = await decoder.GetSoftwareBitmapAsync(global::Windows.Graphics.Imaging.BitmapPixelFormat.Bgra8,
+            global::Windows.Graphics.Imaging.BitmapAlphaMode.Premultiplied, transform, global::Windows.Graphics.Imaging.ExifOrientationMode.RespectExifOrientation,
+            global::Windows.Graphics.Imaging.ColorManagementMode.ColorManageToSRgb);
+        token.ThrowIfCancellationRequested();
+        var pixels = new byte[checked(software.PixelWidth * software.PixelHeight * 4)];
+        software.CopyToBuffer(pixels.AsBuffer());
+        var bitmap = BitmapSource.Create(software.PixelWidth, software.PixelHeight, 96, 96, PixelFormats.Pbgra32, null, pixels, software.PixelWidth * 4);
+        bitmap.Freeze(); return (bitmap, width, height);
     }
     internal static ushort ReadOrientation(BitmapFrame frame)
     {

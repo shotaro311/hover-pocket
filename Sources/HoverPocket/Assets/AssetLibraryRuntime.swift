@@ -9,6 +9,7 @@ final class AssetLibraryRuntime: ObservableObject {
     @Published var fullscreen = false
     @Published var editing: AssetEditorSession?
     @Published var holdCount = 0
+    var dialogActive = false
     var editorSessions: [AssetEditorSession] = []
     var pendingDropURLs: [URL] = []
     var textInput = false
@@ -33,7 +34,7 @@ final class AssetLibraryRuntime: ObservableObject {
     }
 
     func store() async throws -> AssetLibraryStore {
-        if (CommandLine.arguments.contains("--verify-asset-ui") || CommandLine.arguments.contains("--verify-library-voice")), let verificationStore { return verificationStore }
+        if (CommandLine.arguments.contains("--verify-asset-ui") || CommandLine.arguments.contains("--verify-asset-library") || CommandLine.arguments.contains("--verify-library-voice")), let verificationStore { return verificationStore }
         if let storeTask { return try await storeTask.value }
         let contract = Bundle.main.resourceURL!.appendingPathComponent("AssetLibrary")
         let root = Self.libraryRoot
@@ -43,6 +44,28 @@ final class AssetLibraryRuntime: ObservableObject {
         }
         storeTask = task
         do { return try await task.value } catch { storeTask = nil; throw error }
+    }
+    private var clipboardImportTask: Task<Void, Never>?
+    @Published var clipboardImportError: String?
+    func importClipboardImage(_ data: Data, enabled: @escaping @MainActor () -> Bool) {
+        let previous = clipboardImportTask
+        clipboardImportTask = Task { @MainActor in
+            await previous?.value
+            guard enabled() else { return }
+            let directory = FileManager.default.temporaryDirectory.appendingPathComponent("HoverPocket-LibraryClipboard-" + UUID().uuidString)
+            do {
+                try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+                defer { try? FileManager.default.removeItem(at: directory) }
+                let format = DateFormatter(); format.dateFormat = "yyyy-MM-dd HH-mm-ss"
+                let path = directory.appendingPathComponent("クリップボード画像 " + format.string(from: Date()) + ".png")
+                try await Task.detached { try data.write(to: path, options: .atomic) }.value
+                let library = try await store()
+                guard enabled() else { return }
+                let result = try await library.importFile(path, internet: true)
+                if result.status == "saved" { notifyChange() }
+                clipboardImportError = nil
+            } catch { clipboardImportError = "画像をライブラリへ保存できませんでした。クリップボード履歴から保存を再試行できます。" }
+        }
     }
     func notifyChange() { NotificationCenter.default.post(name: Self.changed, object: nil) }
     func recoverDatabase() async throws {
@@ -59,9 +82,9 @@ final class AssetLibraryRuntime: ObservableObject {
         pendingDropURLs += urls
         NotificationCenter.default.post(name: Notification.Name("HoverPocket.assets.drop"), object: nil)
     }
-    var holdsPanel: Bool { holdCount > 0 || editing != nil || textInput || incomingDrag }
+    var holdsPanel: Bool { holdCount > 0 || editing != nil || dialogActive || incomingDrag || internalDrag }
     func endPreview() {
-        panelSize = nil; fullscreen = false; textInput = false
+        panelSize = nil; fullscreen = false; textInput = false; dialogActive = false
         NotificationCenter.default.post(name: Self.closed, object: nil)
     }
     func setLayout(media: CGSize, fullscreen: Bool, screen: NSScreen, baseline: CGSize) {

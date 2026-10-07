@@ -251,6 +251,15 @@ mkdir -p "$BUNDLE_DIR/Contents/MacOS" "$BUNDLE_DIR/Contents/Frameworks" "$BUNDLE
 cp ".build/$HOVERPOCKET_SWIFT_CONFIGURATION/$PRODUCT_NAME" "$EXECUTABLE_PATH"
 chmod +x "$EXECUTABLE_PATH"
 cp "$ROOT_DIR/.build/pairing/release/hoverpocket-pairing" "$BUNDLE_DIR/Contents/MacOS/hoverpocket-pairing"
+python3 "$ROOT_DIR/script/prepare_media_tools.py" --platform macos --output "$ROOT_DIR/artifacts/media-tools-macos"
+mkdir -p "$BUNDLE_DIR/Contents/Resources/MediaTools"
+for media_file in "$ROOT_DIR/artifacts/media-tools-macos/"*; do
+  if [[ "$(basename "$media_file")" == "ffmpeg" ]]; then
+    cp "$media_file" "$BUNDLE_DIR/Contents/MacOS/ffmpeg"
+  else
+    cp "$media_file" "$BUNDLE_DIR/Contents/Resources/MediaTools/"
+  fi
+done
 mkdir -p "$BUNDLE_DIR/Contents/Resources/ThirdParty/pairing-helper"
 cp "$ROOT_DIR/shared/pairing-helper/"{LICENSE.txt,NOTICE.md,THIRD-PARTY-LICENSES.html} "$BUNDLE_DIR/Contents/Resources/ThirdParty/pairing-helper/"
 ditto "$ROOT_DIR/.build/$HOVERPOCKET_SWIFT_CONFIGURATION/HoverPocket_HoverPocket.bundle" "$BUNDLE_DIR/Contents/Resources/HoverPocket_HoverPocket.bundle"
@@ -263,7 +272,7 @@ cp "$ROOT_DIR/windows/ui/providers/assets/"*.js "$ROOT_DIR/windows/ui/providers/
 python3 "$ROOT_DIR/script/bundle_asset_ui.py" "$BUNDLE_DIR/Contents/Resources/AssetUI/app.js"
 mkdir -p "$BUNDLE_DIR/Contents/Resources/AssetLibrary/sync-v1"
 cp "$ROOT_DIR/shared/asset-library/sync-v1/002-sync.sql" "$BUNDLE_DIR/Contents/Resources/AssetLibrary/sync-v1/"
-cp "$ROOT_DIR/shared/asset-library/001-initial.sql" "$ROOT_DIR/shared/asset-library/case-fold.json" "$ROOT_DIR/shared/asset-library/manifest.schema.json" "$BUNDLE_DIR/Contents/Resources/AssetLibrary/"
+cp "$ROOT_DIR/shared/asset-library/001-initial.sql" "$ROOT_DIR/shared/asset-library/case-fold.json" "$ROOT_DIR/shared/asset-library/manifest.schema.json" "$ROOT_DIR/shared/asset-library/preview-formats.json" "$BUNDLE_DIR/Contents/Resources/AssetLibrary/"
 
 SPARKLE_FRAMEWORK_PATH="$ROOT_DIR/.build/$HOVERPOCKET_SWIFT_CONFIGURATION/Sparkle.framework"
 if [[ -d "$SPARKLE_FRAMEWORK_PATH" ]]; then
@@ -362,6 +371,7 @@ if [[ -n "$CODESIGN_IDENTITY" ]]; then
     codesign_args+=(--entitlements "$ENTITLEMENTS_PATH")
   fi
   codesign "${codesign_args[@]}" "$BUNDLE_DIR/Contents/MacOS/hoverpocket-pairing" >/dev/null
+  codesign "${codesign_args[@]}" "$BUNDLE_DIR/Contents/MacOS/ffmpeg" >/dev/null
   codesign "${codesign_args[@]}" "$BUNDLE_DIR" >/dev/null
   echo "Signed $APP_NAME.app with $CODESIGN_IDENTITY"
 else

@@ -11,6 +11,7 @@ final class AssetPaneModel: NSObject, ObservableObject, WKScriptMessageHandlerWi
     private var organizerPlacement: (NSRect, NSWindow.StyleMask, NSWindow.Level)?
     var organizerIsFullscreen: Bool { organizerPlacement != nil }
     private var revision = 0
+    private var selectedMediaID: String?
     private var mediaSize = CGSize(width: 800, height: 600)
     private let mediaScheme = AssetMediaScheme()
     private var cancellables = Set<AnyCancellable>()
@@ -48,7 +49,7 @@ final class AssetPaneModel: NSObject, ObservableObject, WKScriptMessageHandlerWi
     }
     func invalidatePreview() {
         if organizer { setOrganizerFullscreen(false) }
-        revision += 1; mediaScheme.revoke(); event("assets.previewEnded")
+        revision += 1; selectedMediaID = nil; mediaScheme.revoke(); event("assets.previewEnded")
     }
     private func setOrganizerFullscreen(_ value: Bool) {
         guard let window = web?.window else { return }
@@ -99,8 +100,8 @@ final class AssetPaneModel: NSObject, ObservableObject, WKScriptMessageHandlerWi
     }
     func request(_ method: String, _ p: [String: Any]) async throws -> Any {
         if method == "assets.ready" { consumeDrop(); return ["ok": true] }
-        if method == "panel.beginTextInput" { if !organizer, p["editing"] as? Bool == true { runtime.textInput = true }; return ["ok": true] }
-        if method == "panel.endTextInput" { runtime.textInput = false; return ["ok": true] }
+        if method == "panel.beginTextInput" { if !organizer { runtime.textInput = p["editing"] as? Bool == true; runtime.dialogActive = p["dialog"] as? Bool == true }; return ["ok": true] }
+        if method == "panel.endTextInput" { runtime.dialogActive = p["dialog"] as? Bool == true; runtime.textInput = runtime.dialogActive; return ["ok": true] }
         if method == "assets.transition" { return ["revision": revision] }
         if method == "assets.visibility" { return ["ok": true] }
         if method == "assets.endPreview" {
@@ -160,15 +161,29 @@ final class AssetPaneModel: NSObject, ObservableObject, WKScriptMessageHandlerWi
             let current = revision
             guard let a = try await store.get(text(p, "id")) else { throw LibraryError.message("素材がありません。") }
             let url = try await store.readPath(a)
-            var frame = await AssetMedia.frame(a, url: url, page: p["page"] as? Int ?? 1, thumbnail: !isPreview)
+            var frame = await AssetMedia.frame(a, url: url, page: p["page"] as? Int ?? 1, thumbnail: !isPreview, root: store.root)
             if isPreview {
                 guard current == revision, active else { return ["cancelled": true] }
+                selectedMediaID = a.id
                 mediaScheme.revoke()
-                if a.kind == "video" { frame.videoUrl = mediaScheme.lease(url) }
+                if frame.kind == "video" { frame.videoUrl = mediaScheme.lease(url) }
                 else if AssetMedia.audioExtensions.contains(a.extension) { frame.audioUrl = mediaScheme.lease(url); frame.width = 500; frame.height = 120 }
                 mediaSize = CGSize(width: max(1, frame.width), height: max(1, frame.height))
             }
             return try json(frame)
+        case "assets.get":
+            if let asset = try await store.get(text(p, "id")), !asset.trashed { return try json(asset) }
+            return NSNull()
+        case "assets.playbackFallback":
+            let id = try text(p, "id"), current = revision
+            guard active, selectedMediaID == id, let asset = try await store.get(id) else { throw LibraryError.message("プレビューが終了しています。") }
+            let kind = AssetPreviewFormats.kind(asset.extension)
+            guard ["audio", "video"].contains(kind) else { throw LibraryError.message("この素材は音声または動画ではありません。") }
+            let path = try await store.readPath(asset)
+            let compatible = try await AssetCompatibleMedia.shared.convert(path, hash: asset.sha256, mode: kind, root: store.root)
+            guard current == revision, active, selectedMediaID == id else { return ["cancelled": true] }
+            mediaScheme.revoke()
+            return ["url": mediaScheme.lease(compatible)]
         case "assets.pick":
             return await pinned {
                 let panel = NSOpenPanel(); panel.allowsMultipleSelection = true

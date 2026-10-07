@@ -276,6 +276,16 @@ final class HoverWindowController {
                 try check(previewWindow.frame == screen.frame, "notch fullscreen uses original display")
                 positionWindows(); try check(previewWindow.frame == screen.frame, "screen recovery preserves asset fullscreen")
             }
+            if index == 1 {
+                let outside = NSPoint(x: screen.frame.maxX + 100, y: screen.frame.minY - 100)
+                awaitingPointerAfterExplicitOpen = false
+                runtime.textInput = true; runtime.dialogActive = true
+                scheduleClose(at: outside); try await Task.sleep(for: .milliseconds(550))
+                try check(previewWindow.isVisible, "library dialog holds panel on hover exit")
+                runtime.dialogActive = false
+                scheduleClose(at: outside); try await Task.sleep(for: .milliseconds(550)); try await settle()
+                try check(!previewWindow.isVisible, "library text focus allows hover exit after dialog closes")
+            }
             closePreview(); try await settle()
             try check(!previewWindow.isVisible && runtime.panelSize == nil && !runtime.fullscreen && menuStore.providerStore.selectedPluginID == TimerProvider.pluginID, "asset close restores size and provider")
         }

@@ -500,6 +500,8 @@ if ($WindowsSigningGate -eq "formal") {
     $codexSandboxInstallerVerifierPath = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "verify_codex_sandbox_installer.ps1")).Path
 }
 $outputRootPath = [System.IO.Path]::GetFullPath($OutputRoot)
+& python (Join-Path $PSScriptRoot "../../script/prepare_media_tools.py") --platform windows --output (Join-Path $PSScriptRoot "../../artifacts/media-tools-windows")
+if ($LASTEXITCODE -ne 0) { throw "Media preview helper preparation failed." }
 $projectDirectory = Split-Path -Parent $projectPath
 $projectXml = [xml](Get-Content -LiteralPath $projectPath -Raw)
 $version = $projectXml.Project.PropertyGroup |

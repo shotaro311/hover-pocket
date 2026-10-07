@@ -17,6 +17,8 @@ internal sealed class ClipboardBridgeController : IDisposable
     private bool _disposed;
     private bool _providerVisible;
     private bool _privateMode;
+    private readonly HoverPocket.Assets.AssetStore? _library;
+    private readonly SemaphoreSlim _autoImports = new(1);
     private readonly SemaphoreSlim _imageReads = new(2);
 
     public ClipboardBridgeController(
@@ -24,9 +26,10 @@ internal sealed class ClipboardBridgeController : IDisposable
         IClipboardMonitor monitor,
         Func<UserSettings> settingsProvider,
         Func<bool, CancellationToken, Task<object?>> setPrivateModeAsync,
-        Func<bool> providerVisibleProvider)
+        Func<bool> providerVisibleProvider, HoverPocket.Assets.AssetStore? library = null)
     {
-        _store = store;
+        _store = store; _library = library;
+        _store.ImageCopied += OnImageCopied;
         _monitor = monitor;
         _settingsProvider = settingsProvider;
         _setPrivateModeAsync = setPrivateModeAsync;
@@ -62,14 +65,14 @@ internal sealed class ClipboardBridgeController : IDisposable
     {
         _providerVisible = providerVisible;
         _privateMode = settings.ClipboardPrivateMode;
-        if (_providerVisible && !_privateMode)
+        if ((_providerVisible || settings.LibraryAutoImportClipboardImages) && !_privateMode)
         {
             try
             {
                 if (!_monitor.IsListening)
                 {
                     _monitor.Start();
-                    _store.CaptureCurrentClipboard("monitor-start");
+                    _store.CaptureCurrentClipboard("monitor-start", imagesOnly: !_providerVisible);
                 }
             }
             catch (InvalidOperationException)
@@ -114,6 +117,7 @@ internal sealed class ClipboardBridgeController : IDisposable
 
         _disposed = true;
         _monitor.ClipboardUpdated -= OnClipboardUpdated;
+        _store.ImageCopied -= OnImageCopied;
         _monitor.Dispose();
     }
 
@@ -230,16 +234,43 @@ internal sealed class ClipboardBridgeController : IDisposable
             ?? app.MainWindow;
     }
 
+    private async void OnImageCopied(byte[] png, DateTimeOffset copiedAt)
+    {
+        if (_disposed || _privateMode || !_settingsProvider().LibraryAutoImportClipboardImages || _library is null) return;
+        await _autoImports.WaitAsync();
+        string? directory = null;
+        try
+        {
+            if (_disposed || _privateMode || !_settingsProvider().LibraryAutoImportClipboardImages) return;
+            directory = Path.Combine(Path.GetTempPath(), "HoverPocket-LibraryClipboard-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(directory);
+            var path = Path.Combine(directory, $"クリップボード画像 {copiedAt.LocalDateTime:yyyy-MM-dd HH-mm-ss}.png");
+            await File.WriteAllBytesAsync(path, png);
+            if (_disposed || _privateMode || !_settingsProvider().LibraryAutoImportClipboardImages) return;
+            var result = await _library.ImportAsync(path, internet: true);
+            if (result.Status == "failed") _store.SetLastError("画像をライブラリへ保存できませんでした。クリップボード履歴から保存を再試行できます。");
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or Microsoft.Data.Sqlite.SqliteException)
+        { _store.SetLastError("画像をライブラリへ保存できませんでした。クリップボード履歴から保存を再試行できます。"); }
+        catch (ObjectDisposedException) when (_disposed) { }
+        finally
+        {
+            // This temporary encoded copy is owned by this capture; managed originals are independent.
+            if (directory is not null) { try { Directory.Delete(directory, true); } catch (IOException) { } catch (UnauthorizedAccessException) { } }
+            _autoImports.Release();
+        }
+    }
+
     private void OnClipboardUpdated(object? sender, EventArgs e)
     {
         _ = sender;
         _ = e;
-        if (_disposed || !_providerVisible || _privateMode)
+        if (_disposed || (!_providerVisible && !_settingsProvider().LibraryAutoImportClipboardImages) || _privateMode)
         {
             return;
         }
 
-        _store.CaptureCurrentClipboard("WM_CLIPBOARDUPDATE");
+        _store.CaptureCurrentClipboard("WM_CLIPBOARDUPDATE", imagesOnly: !_providerVisible);
     }
 
     private static ClipboardHistoryItemKind ParseKind(string value)
