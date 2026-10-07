@@ -8,10 +8,13 @@ export async function verifyAssetSelection() {
   const rows = [a, { ...a, id:"b", name:"hidden.txt", favorite:false }, ...Array.from({length:218}, (_,i) => ({...a,id:`item-${i}`,favorite:false}))];
   const calls = [], checks = [];
   let releaseMatch = null, delayMatch = false, failMatch = false, releaseDrag = null, dragResult = {ok:true}, audioPreview = false;
+  let failQuery = false, delayQuery = false, releaseQuery = null;
   const matches = (row, query) => (query.view !== "favorites" || row.favorite) && (!query.kind || row.kind === query.kind) && (query.extension == null || row.extension === query.extension);
   const request = async (method, params) => {
     calls.push({method,params:structuredClone(params)});
     if (method === "assets.query") {
+      if (delayQuery) await new Promise(resolve => { releaseQuery = resolve; });
+      if (failQuery) throw Error("Synthetic library read failure");
       const items = rows.filter(row => matches(row,params));
       return {items:items.slice(params.offset,params.offset+params.limit),total:items.length,
         folders:[{id:"folder-a",name:"Fixture A",parentId:null},{id:"folder-b",name:"Fixture B",parentId:null}],tags:[],searches:[],extensions:["txt","png","mp4"]};
@@ -44,6 +47,23 @@ export async function verifyAssetSelection() {
   const clickView = async text => { button(".assets-sidebar",text).click(); await until(()=>card("a")); await wait(40); };
   try {
     await until(()=>card("a"));
+    const root = host.querySelector(".assets-root");
+    const emptyFormat = host.querySelector(".assets-format");
+    emptyFormat.value = "kind:pdf"; emptyFormat.dispatchEvent(new Event("change"));
+    await until(()=>root.dataset.queryState === "empty");
+    check(!host.querySelector(".assets-query-state").hidden && host.querySelector(".assets-query-state").textContent.includes("条件に合う素材がありません"), "zero matches explain the active filters");
+    check(!host.querySelector("[data-action=clearFilters]").hidden, "filter reset is available beside search controls");
+    host.querySelector("[data-action=clearFilters]").click(); await until(()=>root.dataset.queryState === "ready" && card("a"));
+    check(!last("assets.query").kind && !last("assets.query").extension, "one reset restores assets without changing stored files");
+    delayQuery = true; const pendingRead = provider.refresh(); await until(()=>releaseQuery);
+    check(host.querySelector(".assets-scroll").getAttribute("aria-busy") === "true", "loading is exposed while the previous list is retained");
+    delayQuery = false; releaseQuery(); releaseQuery = null; await pendingRead;
+    failQuery = true; await provider.refresh();
+    check(root.dataset.queryState === "failed" && host.querySelector(".assets-scroll").hidden && host.querySelector(".assets-query-state").textContent.includes("再読み込み"), "read failure hides stale actions and offers reload");
+    failQuery = false; button(".assets-query-state", "再読み込み").click(); await until(()=>root.dataset.queryState === "ready" && card("a"));
+    check(true, "reload recovers the list after a failed read");
+    host.querySelector("[data-action=sidebar]").click(); check(host.querySelector("[data-action=sidebar]").getAttribute("aria-expanded") === "true", "sidebar toggle announces its expanded state");
+    host.querySelector("[data-action=sidebar]").click();
     check(!host.querySelector("[data-action=folder]"),"library toolbar no longer shows folder import button");
     const format = host.querySelector(".assets-format"), sort = host.querySelector(".assets-sort-by"), slider = host.querySelector(".assets-thumbnail-size");
     check([format,sort].every(select => getComputedStyle(select).backgroundColor === "rgb(23, 26, 32)" && [...select.options].every(option => getComputedStyle(option).backgroundColor === "rgb(32, 36, 45)" && getComputedStyle(option).color === "rgb(229, 234, 244)")),"format and sort options have opaque dark backgrounds and readable text");
@@ -234,5 +254,5 @@ export async function verifyAssetSelection() {
     check(!audio.hasAttribute("src") && host.querySelector(".assets-preview").hidden,"closing audio preview releases its media source");
     return {ok:true,checks};
   } catch(error) { return {ok:false,checks,error:String(error.message || error) + "\n" + error.stack}; }
-  finally { delayMatch=false; releaseMatch?.(); releaseDrag?.(); provider.dispose(); host.remove(); }
+  finally { delayQuery=false; releaseQuery?.(); delayMatch=false; releaseMatch?.(); releaseDrag?.(); provider.dispose(); host.remove(); }
 }

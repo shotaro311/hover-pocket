@@ -414,6 +414,7 @@ internal sealed partial class PanelBridgeController : IDisposable
         Register(
             "app.getState",
             (_, _) => Task.FromResult<object?>(BuildState(surface)));
+        RegisterUx(Register, surface);
         Register("app.ready", (_, _) => Task.FromResult<object?>(new { ok = true }));
         Register("diagnostics.echo", (parameters, _) => Task.FromResult<object?>(DeserializeObject(parameters)));
         Register("settings.setPanelSize", SetPanelSizeAsync);
@@ -1006,10 +1007,10 @@ internal sealed partial class PanelBridgeController : IDisposable
     private async Task<object?> SetPanelSizeAsync(JsonElement? parameters, CancellationToken cancellationToken)
     {
         var panelSize = ParsePanelSize(ReadRequiredString(parameters, "panelSize"));
-        if (CurrentSettings.PanelSize != panelSize)
+        if (CurrentSettings.PanelSize != panelSize || CurrentSettings.PanelWidthDips is not null || CurrentSettings.PanelHeightDips is not null)
         {
             var updated = CurrentSettings.Clone();
-            updated.PanelSize = panelSize;
+            updated.PanelSize = panelSize; updated.PanelWidthDips = null; updated.PanelHeightDips = null;
             SaveSettings(updated);
         }
 
@@ -2331,7 +2332,7 @@ internal sealed partial class PanelBridgeController : IDisposable
 
     public async Task NotifyPanelClosedAsync()
     {
-        if (_inlineChat is not null) _inlineChat.Focused = false;
+        if (_inlineChat is not null) { _inlineChat.Focused = false; _inlineChat.MenuOpen = false; }
         if (_assetDropPreviousProvider is not null) await FinishAssetDropAsync(false);
         _panelOpen = false;
         _voiceCoordinator.SetMuted(true);

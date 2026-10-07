@@ -1,3 +1,4 @@
+import { createShortcutSettings } from "./shortcuts.js";
 import { createSettingsNavigation } from "./settings-navigation.js";
 import { createAssetSyncSettings } from "./asset-sync-settings.js";
 import { on, request } from "../js/bridge.js";
@@ -77,6 +78,7 @@ const resetEl = document.querySelector("[data-reset]");
 const resetBindingEl = document.querySelector("[data-reset-binding]");
 const openDataFolderEl = document.querySelector("[data-open-data-folder]");
 
+const shortcutSettings = createShortcutSettings(request);
 const navigation = createSettingsNavigation(request);
 const assetSyncSettings = createAssetSyncSettings(document.querySelector("[data-asset-sync-settings]"), request);
 let currentState = null;
@@ -98,6 +100,7 @@ async function bootstrap() {
 }
 
 function render(state) {
+  void shortcutSettings.render(state.settings.language);
   currentState = state;
   setLanguage(state.settings.language);
   weatherSettings.render(state);

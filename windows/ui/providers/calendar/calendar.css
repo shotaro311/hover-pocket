@@ -547,6 +547,13 @@
 @keyframes hp-weather-reveal { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: none; } }
 @keyframes hp-weather-breathe { 50% { opacity: .7; transform: scale(.92); } }
 @media (prefers-reduced-motion: reduce) { .hp-weather * { animation: none !important; } }
-.hp-calendar-grid { flex: 1; min-height: 0; grid-template-rows: 14px repeat(6, minmax(0, 1fr)); }
-.hp-calendar-day { height: 100%; min-height: 0; }
+.hp-calendar { grid-template-rows: minmax(0, 1fr) var(--calendar-weather-height, 108px); }
+:root[data-panel-size="small"] .hp-calendar { grid-template-rows: minmax(0, 1fr) var(--calendar-weather-height, 92px); }
+.hp-calendar-month-header { flex: 0 0 30px; }
+.hp-calendar-month-pane { overflow-x: hidden; overflow-y: auto; scrollbar-gutter: stable; }
+.hp-calendar-grid { width: var(--calendar-grid-width, var(--calendar-width)); align-self: center; flex: 0 0 auto; grid-template-rows: 14px repeat(6, var(--calendar-day-height)); }
+.hp-calendar-day { height: var(--calendar-day-height); min-height: 0; }
+.hp-calendar[data-compact="true"] .hp-calendar-month-pane { gap: 8px; }
+.hp-calendar[data-compact="true"] .hp-calendar-day { gap: 2px; }
+.hp-calendar[data-compact="true"] .hp-calendar-day-number { font-size: calc(10px * var(--hp-text-scale)); }
 .hp-calendar-load-status:empty { display: none; }

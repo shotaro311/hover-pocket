@@ -2,13 +2,14 @@ export function createSettingsNavigation(request) {
   const categories = [
     ["general", "一般", "General", "◉"], ["appearance", "表示", "Appearance", "▣"],
     ["library", "素材と同期", "Library & Sync", "▧"], ["capture", "撮影", "Capture", "◎"],
-    ["ai", "AI", "AI", "✦"], ["advanced", "詳細", "Advanced", "☷"]
+    ["shortcuts", "ショートカット", "Shortcuts", "⌨"], ["ai", "AI", "AI", "✦"], ["advanced", "詳細", "Advanced", "☷"]
   ];
   const paths = {
     general: 'M9 3h6l1 3 3 1 2 5-2 5-3 1-1 3H9l-1-3-3-1-2-5 2-5 3-1z M16 12a4 4 0 1 1-8 0 4 4 0 0 1 8 0',
     appearance: 'M3 4h18v13H3z M8 21h8 M12 17v4',
     library: 'M6 3h15v15H6z M3 6v15h15 M6 15l5-5 4 4 3-3 3 3 M16 7h.01',
     capture: 'M3 7h5l2-3h4l2 3h5v13H3z M16 13a4 4 0 1 1-8 0 4 4 0 0 1 8 0',
+    shortcuts: 'M3 6h18v12H3z M6 10h1 M10 10h1 M14 10h1 M18 10h1 M7 15h10',
     ai: 'M12 3l2.5 6.5L21 12l-6.5 2.5L12 21l-2.5-6.5L3 12l6.5-2.5z',
     advanced: 'M3 6h4 M11 6h10 M3 12h10 M17 12h4 M3 18h4 M11 18h10 M7 4h4v4H7z M13 10h4v4h-4z M7 16h4v4H7z'
   };

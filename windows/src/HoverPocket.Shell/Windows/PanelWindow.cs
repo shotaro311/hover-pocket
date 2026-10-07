@@ -1,4 +1,4 @@
-﻿using System.Diagnostics;
+using System.Diagnostics;
 using System.IO;
 using System.Text.Json;
 using System.Windows;
@@ -19,7 +19,7 @@ using DragDropEffects = System.Windows.DragDropEffects;
 
 namespace HoverPocket.Shell.Windows;
 
-internal sealed class PanelWindow : NoActivateWindow
+internal sealed partial class PanelWindow : NoActivateWindow
 {
     public const double CollapsedWidth = AccessSurfaceWindow.SurfaceWidth;
     public const double CollapsedHeight = AccessSurfaceWindow.SurfaceHeight;
@@ -164,6 +164,7 @@ internal sealed class PanelWindow : NoActivateWindow
         _root.VerticalAlignment = System.Windows.VerticalAlignment.Top;
         _root.UseLayoutRounding = true;
         Content = _root;
+        InitializeResizeGrip();
         AllowDrop = true;
         System.Windows.DragEventHandler assetDragOver = (_, args) =>
         {

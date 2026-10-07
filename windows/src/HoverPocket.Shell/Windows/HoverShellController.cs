@@ -19,7 +19,7 @@ using WpfColor = System.Windows.Media.Color;
 
 namespace HoverPocket.Shell.Windows;
 
-internal sealed class HoverShellController : IDisposable
+internal sealed partial class HoverShellController : IDisposable
 {
     public static readonly TimeSpan CloseDelay = TimeSpan.FromMilliseconds(60);
     public static readonly TimeSpan PollingInterval = TimeSpan.FromMilliseconds(120);
@@ -495,8 +495,7 @@ internal sealed class HoverShellController : IDisposable
         _settingsWindow.Activate();
     }
 
-    private bool KeepPanelForVoice => _panel.IsVisible && (_panelBridgeController.VoiceSnapshot.RealtimeAttached
-        || _panelBridgeController.KeepPanelForChat
+    private bool KeepPanelForVoice => _panel.IsVisible && (_panelBridgeController.KeepPanelForChat || _manualResizing
         || _panel.OwnedWindows.OfType<Window>().Any(window => window.IsVisible));
     private void PollPointer()
     {
@@ -608,6 +607,16 @@ internal sealed class HoverShellController : IDisposable
 
     private WindowPlacement EffectivePanelTarget(DisplaySurfaceLayout layout)
     {
+        var custom = _interactivePanelSize ?? (_panelBridgeController.CurrentSettings.PanelWidthDips is { } savedWidth && _panelBridgeController.CurrentSettings.PanelHeightDips is { } savedHeight ? new System.Windows.Size(savedWidth, savedHeight) : (System.Windows.Size?)null);
+        if (!_panel.AssetLayout.Fullscreen && custom is { } customBounds)
+        {
+            var monitor = layout.Monitor; var top = layout.PanelTarget.DipRect.Top;
+            var bounded = ResizeLimits(layout).Clamp(customBounds);
+            var width = Math.Min(bounded.Width, monitor.WorkArea.Width / monitor.ScaleX);
+            var height = Math.Min(bounded.Height, monitor.WorkArea.Bottom / monitor.ScaleY - top);
+            var left = Math.Clamp(layout.PanelTarget.DipRect.Left + (layout.PanelTarget.DipRect.Width - width) / 2, monitor.WorkArea.Left / monitor.ScaleX, monitor.WorkArea.Right / monitor.ScaleX - width);
+            return new WindowPlacement(new Rect(left, top, width, height), new PhysicalRect((int)Math.Round(left * monitor.ScaleX), layout.PanelTarget.PhysicalRect.Top, (int)Math.Round(width * monitor.ScaleX), (int)Math.Round(height * monitor.ScaleY)));
+        }
         if (_panel.AssetLayout is { Active: true } asset && (!asset.PinOnly || asset.Width > 0 && asset.Height > 0 || asset.Fullscreen || asset.Organizer))
         {
             var monitor = layout.Monitor;
@@ -636,7 +645,7 @@ internal sealed class HoverShellController : IDisposable
             withChat,
             layout.Monitor,
             _panelBridgeController.CurrentSettings.PanelSize,
-            _panelBridgeController.PreferredRuntimeVoiceLaneMode,
+            _panelBridgeController.VoiceSnapshot.RealtimeAttached ? _panelBridgeController.PreferredRuntimeVoiceLaneMode : VoiceLaneMode.Disabled,
             out var resolvedMode);
         _panelBridgeController.SetResolvedVoiceLaneMode(resolvedMode);
         var availableHeight = Math.Max(1, layout.Monitor.WorkArea.Bottom - target.PhysicalRect.Top);
@@ -798,6 +807,7 @@ internal sealed class HoverShellController : IDisposable
 
     private void AttachPanelWindow(PanelWindow panel)
     {
+        panel.UserResize += OnUserResize;
         panel.AssetDragChanged += OnAssetDragChanged;
         panel.AssetOrganizerRequested += OpenAssetLibraryFromUser;
         panel.AssetPreviewDismissRequested += () =>
@@ -1373,7 +1383,8 @@ internal sealed class HoverShellController : IDisposable
             return;
         }
 
-        var panelSizeChanged = _lastAppliedSettings.PanelSize != settings.PanelSize
+        try { _panelBridgeController.VoiceCapture?.ApplyShortcuts(settings.Shortcuts); } catch (ArgumentException ex) { AppDiagnostics.Record("shortcuts.registration.failed", ex); }
+        var panelSizeChanged = _lastAppliedSettings.PanelWidthDips != settings.PanelWidthDips || _lastAppliedSettings.PanelHeightDips != settings.PanelHeightDips || _lastAppliedSettings.PanelSize != settings.PanelSize
             || _lastAppliedSettings.PanelAttachmentStyle != settings.PanelAttachmentStyle
             || _lastAppliedSettings.AutomaticScreenEdgeAttachment != settings.AutomaticScreenEdgeAttachment
             || _lastAppliedSettings.ReduceMotion != settings.ReduceMotion;

@@ -100,6 +100,8 @@ internal static class AssetInteractionVerifier
             catch (TimeoutException) { throw new TimeoutException($"Native header: active={controller.Panel.IsActive}, animating={controller.Panel.IsAnimating}; " + await web.ExecuteScriptAsync("({clicks:window.__editorHeaderClicks,focus:document.activeElement.tagName,pressed:document.querySelector('[data-size-id][aria-pressed=true]').dataset.sizeId,hit:window.__surfaceClickTarget})")); }
             await ClickSurfaceAsync(web, web.CoreWebView2, $"[data-size-id='{previousSize}']");
             await UntilAsync(async () => await web.ExecuteScriptAsync($"document.querySelector('[data-size-id={previousSize}]').getAttribute('aria-pressed')==='true'") == "true");
+            await UntilAsync(() => Task.FromResult(!controller.Panel.IsAnimating));
+            await UntilAsync(async () => await web.ExecuteScriptAsync("!document.querySelector('[data-refresh]').disabled") == "true");
             await ClickSurfaceAsync(web, web.CoreWebView2, "[data-refresh]");
             try { await UntilAsync(async () => await web.ExecuteScriptAsync("window.__editorHeaderClicks===3") == "true"); }
             catch (TimeoutException) { throw new TimeoutException("Native header refresh: " + await web.ExecuteScriptAsync("({clicks:window.__editorHeaderClicks,focus:document.activeElement.tagName,hit:window.__surfaceClickTarget,refreshDisabled:document.querySelector('[data-refresh]').disabled})")); }

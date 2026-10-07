@@ -36,6 +36,22 @@ export function renderCalendarProvider(context) {
   const weatherElement = document.createElement("section");
   root.append(weatherElement);
   const weather = renderWeather(weatherElement, context);
+  const resizeObserver = new ResizeObserver(([entry]) => {
+    const { width, height } = entry.contentRect;
+    if (!width || !height) return;
+    const compact = width < 560 || height < 330;
+    const gap = compact ? 4 : 5;
+    const paneGap = compact ? 9 : 14;
+    const weatherHeight = compact ? 92 : 108;
+    const desiredWidth = Math.max(248, Math.min(392, (width - paneGap * 2 - 1) * .47));
+    const availableDayHeight = Math.max(22, (height - weatherHeight - 8 - 30 - 8 - 14 - gap * 5) / 6);
+    const dayWidth = Math.max(24, Math.min((desiredWidth - 17 - gap * 6) / 7, availableDayHeight / .875));
+    root.dataset.compact = String(compact);
+    for (const [name, value] of Object.entries({ width: desiredWidth, "grid-width": dayWidth * 7 + gap * 6, "day-width": dayWidth, "day-height": dayWidth * .875, "grid-gap": gap, "pane-gap": paneGap, "weather-height": weatherHeight })) {
+      root.style.setProperty(`--calendar-${name}`, `${value}px`);
+    }
+  });
+  resizeObserver.observe(root);
 
   const scheduleEl = root.querySelector("[data-schedule]");
   const connectionEl = root.querySelector("[data-connection]");
@@ -119,6 +135,7 @@ export function renderCalendarProvider(context) {
     },
     dispose() {
       disposed = true;
+      resizeObserver.disconnect();
       weather.dispose();
       void context.request("panel.endTextInput").catch(() => {});
     },

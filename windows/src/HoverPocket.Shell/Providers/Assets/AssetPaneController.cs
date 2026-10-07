@@ -87,7 +87,7 @@ internal sealed class AssetPaneController : IDisposable
         Register("assets.endPreview", _ => { EndPreview(); return Task.FromResult<object?>(new { ok = true }); });
         Register("assets.organizer", _ => { _previewLayout = new(true, Organizer: true); _layout(_previewLayout); return Task.FromResult<object?>(new { ok = true }); });
         Register("assets.openOrganizer", _ => { openOrganizer?.Invoke(); return Task.FromResult<object?>(new { ok = true }); });
-        Register("assets.capture", async p => { var kind = Optional(p, "kind") ?? "settings"; if (kind is not ("settings" or "screenshot" or "recording" or "cameraPhoto" or "cameraVideo" or "audio")) throw new ArgumentException("Unknown capture action."); if (capture is not null) await capture(kind, Optional(p, "folderId")); return new { ok = capture is not null }; });
+        Register("assets.capture", async p => { var kind = Optional(p, "kind") ?? "settings"; if (kind is not ("settings" or "screenshot" or "recording" or "regionRecording" or "cameraPhoto" or "cameraVideo" or "audio")) throw new ArgumentException("Unknown capture action."); if (capture is not null) await capture(kind, Optional(p, "folderId")); return new { ok = capture is not null }; });
         Register("assets.pick", PickAsync);
         Register("assets.cancelImport", _ => { _import?.Cancel(); return Task.FromResult<object?>(new { ok = true }); });
         Register("assets.importState", _ => Task.FromResult<object?>(Progress()));

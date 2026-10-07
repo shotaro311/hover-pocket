@@ -14,7 +14,7 @@ export function renderAssetsProvider({ container, request, state }) {
     menu:'<path d="M5 6h14M5 12h14M5 18h14"/>', search:'<circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 4 4"/>',
     add:'<path d="M12 5v14M5 12h14"/>', folder:'<path d="M3 7V5h7l2 3h9v12H3Z"/>', paste:'<rect x="6" y="5" width="14" height="16" rx="2"/><path d="M9 5V3h8v2M3 8v10M10 11h6M10 15h6"/>',
     camera:'<path d="M3 7h4l2-3h6l2 3h4v13H3Z"/><circle cx="12" cy="13" r="4"/>', video:'<rect x="3" y="6" width="12" height="12" rx="2"/><path d="m15 10 6-4v12l-6-4"/>',
-    organize:'<rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18M9 9h12"/>', filter:'<path d="M4 7h16M4 17h16"/><circle cx="9" cy="7" r="2"/><circle cx="15" cy="17" r="2"/>', grid:'<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>'
+    more:'<circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/>', organize:'<rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18M9 9h12"/>', filter:'<path d="M4 7h16M4 17h16"/><circle cx="9" cy="7" r="2"/><circle cx="15" cy="17" r="2"/>', grid:'<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>'
   }[name]}</svg>`;
   root.innerHTML = `<div class="assets-toolbar">
     <div class="assets-toolbar-primary">
@@ -26,7 +26,7 @@ export function renderAssetsProvider({ container, request, state }) {
         <span class="assets-toolbar-divider"></span>
         <button class="assets-icon-button assets-capture-button" data-action="screenshot" title="スクリーンショットを撮影" aria-label="スクリーンショットを撮影">${icon("camera")}</button>
         <button class="assets-icon-button assets-capture-button" data-action="recording" title="画面収録を開始・停止" aria-label="画面収録を開始・停止">${icon("video")}</button>
-        <button class="assets-icon-button" data-action="captureMenu" title="カメラ撮影・録音" aria-label="カメラ撮影・録音">${icon("add")}</button>
+        <button class="assets-icon-button" data-action="captureMenu" title="範囲収録・カメラ・録音" aria-label="範囲収録・カメラ・録音" aria-haspopup="dialog">${icon("more")}</button>
         <button class="assets-icon-button" data-action="organizer" title="広い画面で整理する" aria-label="広い画面で整理する">${icon("organize")}</button>
       </div>
     </div>
@@ -46,6 +46,29 @@ export function renderAssetsProvider({ container, request, state }) {
   const details = document.createElement("aside"); details.className = "assets-detail"; details.setAttribute("aria-label", "素材の詳細"); root.querySelector(".assets-body").append(details);
   const find = selector => root.querySelector(selector), scroll = find(".assets-scroll"), grid = find(".assets-grid"), media = find(".assets-media");
   const contextMenu = find(".assets-context-menu");
+  const queryState = document.createElement("div"); queryState.className = "assets-query-state"; queryState.hidden = true; queryState.setAttribute("role", "status"); find(".assets-main").append(queryState);
+  const clearFilters = document.createElement("button"); clearFilters.dataset.action = "clearFilters"; clearFilters.textContent = english ? "Clear filters" : "絞り込みを解除"; clearFilters.hidden = true; find(".assets-toolbar-filters").append(clearFilters);
+  const hasFilters = () => !!(query.text?.trim() || query.kind || query.extension != null || query.createdAfter || query.createdBefore || query.folderId || query.tagId || query.folderIds?.length || query.tagIds?.length);
+  function clearQueryFilters() {
+    clearTimeout(queryTimer);
+    for (const key of ["text", "kind", "extension", "createdAfter", "createdBefore", "folderId", "tagId", "folderIds", "tagIds"]) delete query[key];
+    query.text = ""; input.value = ""; resetQuery();
+  }
+  function renderQueryState(kind) {
+    root.dataset.queryState = kind; scroll.setAttribute("aria-busy", String(kind === "loading")); queryState.replaceChildren();
+    const show = kind === "failed" || kind === "empty" || kind === "loading" && !page;
+    queryState.hidden = !show; scroll.hidden = show;
+    if (!show) return;
+    const heading = document.createElement("strong"), description = document.createElement("p");
+    heading.textContent = english ? ({loading:"Loading library…",failed:"Could not load library",empty:hasFilters()?"No matching assets":query.view==="trash"?"Trash is empty":query.view==="favorites"?"No favorites yet":"No assets here yet"})[kind] : ({loading:"ライブラリを読み込み中…",failed:"ライブラリを読み込めませんでした",empty:hasFilters()?"条件に合う素材がありません":query.view==="trash"?"ゴミ箱は空です":query.view==="favorites"?"お気に入りはまだありません":"素材はまだありません"})[kind];
+    description.textContent = english ? (kind==="failed"?"Your saved assets are kept. Try loading again.":kind==="loading"?"Preparing the list.":hasFilters()?"Change your search or clear the filters.":query.view==="trash"?"Assets moved to trash appear here.":query.view==="favorites"?"Add a star to an asset to find it here.":"Drop files here or import them.") : (kind==="failed"?"保存した素材は保持しています。もう一度読み込んでください。":kind==="loading"?"一覧を準備しています。":hasFilters()?"検索語を変えるか、絞り込みを解除してください。":query.view==="trash"?"ゴミ箱へ移した素材をここから復元できます。":query.view==="favorites"?"素材の星を押すと、ここから見つけられます。":"ファイルをドロップするか、取り込んでください。");
+    queryState.append(heading, description);
+    if (kind === "failed") queryState.append(button(english?"Load again":"再読み込み", () => void refresh()));
+    else if (kind === "empty") {
+      if (hasFilters()) queryState.append(button(english?"Clear filters":"絞り込みを解除", clearQueryFilters));
+      else if (query.view !== "trash" && query.view !== "favorites") queryState.append(button("ファイルを取り込む", () => void run("assets.pick")));
+    }
+  }
   function closeContextMenu() { if (contextMenu.open) contextMenu.close(); }
   contextMenu.addEventListener("cancel", event => { event.preventDefault(); closeContextMenu(); });
   contextMenu.addEventListener("pointerdown", event => { if (event.target === contextMenu) { const bounds = contextMenu.getBoundingClientRect(); if (event.clientX < bounds.left || event.clientX > bounds.right || event.clientY < bounds.top || event.clientY > bounds.bottom) closeContextMenu(); } });
@@ -90,6 +113,7 @@ export function renderAssetsProvider({ container, request, state }) {
     const descending = query.descending !== false, direction = find(".assets-sort-direction");
     direction.textContent = (descending ? "↓ " : "↑ ") + t(descending ? "降順" : "昇順"); direction.title = t(descending ? "昇順に切り替え" : "降順に切り替え"); direction.setAttribute("aria-label", direction.title);
     find(".assets-more-filters").classList.toggle("is-active", !!(query.createdAfter || query.createdBefore));
+    clearFilters.hidden = !hasFilters();
   }
   renderToolbar();
   input.addEventListener("compositionstart", () => { composing = true; clearTimeout(queryTimer); });
@@ -102,8 +126,10 @@ export function renderAssetsProvider({ container, request, state }) {
     closeContextMenu();
     const current = ++generation, filter = { ...query };
     selectionReady = false; renderSelection(); renderDetails();
+    renderQueryState("loading");
     const result = await run("assets.query", filter);
-    if (!result || disposed || current !== generation) return;
+    if (disposed || current !== generation) return;
+    if (!result) { renderQueryState("failed"); return; }
     const visibleIds = new Set(result.items.map(asset => asset.id));
     const matches = await Promise.all([...selection].filter(id => !visibleIds.has(id)).map(async id =>
       [id, await run("assets.matches", { id, query: filter })]));
@@ -114,6 +140,7 @@ export function renderAssetsProvider({ container, request, state }) {
     selectedAsset = result.items.find(a => a.id === previous?.id && selection.has(a.id))
       || (selection.has(previous?.id) ? previous : result.items.find(a => selection.has(a.id))) || null;
     page = result;
+    renderQueryState(result.total ? "ready" : "empty");
     if (preview && !selection.has(preview.id)) {
       await endPreview();
       if (disposed || current !== generation) return;
@@ -518,13 +545,13 @@ export function renderAssetsProvider({ container, request, state }) {
   function captureMenu() {
     const dialog = document.createElement("dialog"); dialog.className="assets-dialog";
     const title=document.createElement("h3"); title.textContent=english?"Camera & audio":"カメラ撮影・録音"; dialog.append(title);
-    for (const [kind,label] of [["cameraPhoto",english?"Camera photo":"カメラで写真を撮る"],["cameraVideo",english?"Camera video":"カメラで動画を収録"],["audio",english?"Audio recording":"音声を録音"]]) {
+    for (const [kind,label] of [["regionRecording",english?"Record a selected region":"範囲を選択して画面収録"],["cameraPhoto",english?"Camera photo":"カメラで写真を撮る"],["cameraVideo",english?"Camera video":"カメラで動画を収録"],["audio",english?"Audio recording":"音声を録音"]]) {
       dialog.append(button(label,()=>{dialog.close();void run("assets.capture",{kind,folderId:currentFolderId()});}));
     }
     dialog.append(button("閉じる",()=>dialog.close())); root.append(dialog); dialog.addEventListener("close",()=>dialog.remove()); dialog.showModal();
   }
   const actions = {
-    sidebar: () => root.classList.toggle("show-sidebar"), add: () => run("assets.pick"), folder: () => run("assets.pick", { kind: "folder" }), clipboard: () => run("assets.clipboard"),
+    sidebar: () => { const open = root.classList.toggle("show-sidebar"); find('[data-action="sidebar"]').setAttribute("aria-expanded", String(open)); }, clearFilters: clearQueryFilters, add: () => run("assets.pick"), folder: () => run("assets.pick", { kind: "folder" }), clipboard: () => run("assets.clipboard"),
     organizer: () => run("assets.openOrganizer"),
     screenshot: () => run("assets.capture", { kind:"screenshot", folderId: currentFolderId() }), recording: () => run("assets.capture", { kind:"recording", folderId: currentFolderId() }),
     captureMenu, filters, sortDirection: () => { query.descending = query.descending === false; resetQuery(); },

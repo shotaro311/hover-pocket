@@ -48,6 +48,7 @@ internal sealed class SettingsWindow : Window
         _bridgeController.SettingsChanged += OnSettingsChanged;
         Closed += (_, _) =>
         {
+            try { _bridgeController.VoiceCapture?.SuspendShortcuts(false); } catch (ArgumentException ex) { AppDiagnostics.Record("shortcuts.restore.failed", ex); }
             _bridgeController.SettingsChanged -= OnSettingsChanged;
             _bridgeController.CancelDevicePairing();
             _bridgeAttachment?.Dispose();

@@ -27,11 +27,16 @@ internal static class CodexChatVerifier
                 var harness = new Harness(); harnesses.Add(harness); return Task.FromResult(harness.Client());
             }, tools, history);
             Check(harnesses.Count == 0 && chat.Snapshot.Messages.Count == 0, "idle starts no server");
+            await chat.LoadModelsAsync(token);
+            Check(chat.Models.Count == 1, "server model catalog loads with supported efforts");
+            try { chat.Configure("foreign-model", "high"); throw new InvalidOperationException("invalid model accepted"); } catch (ArgumentException) { }
+            chat.Configure("fixture-model", "high");
             var sending = chat.SendAsync("ライブラリを検索して", token);
             await Until(() => harnesses.Count > 0 && harnesses[0].TurnStarted, token);
             var h = harnesses[0];
             Check(h.Requests.Single(r => r.Method == "thread/start").Parameters.GetProperty("ephemeral").GetBoolean() == false, "history owned by app server");
             Check(h.Requests.Single(r => r.Method == "turn/start").Parameters.GetProperty("input")[0].GetProperty("text").GetString() == "ライブラリを検索して", "explicit exact text send");
+            Check(h.Requests.Single(r => r.Method == "turn/start").Parameters.GetProperty("model").GetString() == "fixture-model" && h.Requests.Single(r => r.Method == "turn/start").Parameters.GetProperty("effort").GetString() == "high", "selected model and effort reach the turn");
             h.Notify("item/agentMessage/delta", new { threadId = "foreign", turnId = "turn-1", itemId = "a", delta = "unwanted" });
             h.Notify("item/agentMessage/delta", new { threadId = "chat-1", turnId = "old-turn", itemId = "a", delta = "unwanted" });
             h.Notify("item/agentMessage/delta", new { threadId = "chat-1", turnId = "turn-1", itemId = "answer", delta = "結果" });
@@ -43,8 +48,16 @@ internal static class CodexChatVerifier
             await Until(() => h.Responses.Count == 3, token);
             Check(tools.Calls == 1 && h.Responses.Count(r => r.TryGetProperty("error", out _)) == 2, "root/turn/tool fences");
             h.Notify("item/completed", new { threadId = "chat-1", turnId = "turn-1", item = new { type = "agentMessage", id = "answer", text = "結果です" } });
+            h.Notify("item/completed", new { threadId = "chat-1", turnId = "turn-1", item = new { type = "agentMessage", id = "answer-final", text = "結果です" } });
+            await Until(() => chat.Snapshot.Messages.Any(m => m.Text == "結果です"), token);
+            await Task.Delay(80, token);
+            Check(chat.Snapshot.Messages.Count(m => m.Role == "assistant") == 1, "same reply finalized under another ID stays one message");
+            h.Notify("item/agentMessage/delta", new { threadId = "chat-1", turnId = "turn-1", itemId = "answer", delta = "late" });
+            h.Notify("item/agentMessage/delta", new { threadId = "chat-1", turnId = "turn-1", itemId = "answer-final", delta = "late" });
+            await Task.Delay(80, token);
+            Check(chat.Snapshot.Messages.Single(m => m.Role == "assistant").Text == "結果です", "late deltas cannot append to a finalized reply or recreate its duplicate");
             h.Complete("completed"); await sending;
-            Check(chat.Snapshot.Messages.Single(m => m.Id == "answer").Text == "結果です" && !chat.Snapshot.Busy, "stream final replaces delta once");
+            Check(chat.Snapshot.Messages.Single(m => m.Role == "assistant").Text == "結果です" && !chat.Snapshot.Busy, "stream final replaces delta once");
             Check(history.Read().Count == 1 && !File.ReadAllText(Path.Combine(root, "chat-history.json")).Contains("ライブラリ"), "index stores no transcript");
             var corruptRoot = Path.Combine(root, "corrupt"); Directory.CreateDirectory(corruptRoot);
             File.WriteAllText(Path.Combine(corruptRoot, "chat-history.json"), "[{\"ThreadId\":\"ok\",\"ToolDigest\":null}]");
@@ -52,6 +65,7 @@ internal static class CodexChatVerifier
             catch (IOException) { Check(true, "corrupt history fails safely"); }
             await chat.SelectAsync("chat-1", token);
             Check(chat.Snapshot.Messages.Any(m => m.Text == "以前の返答"), "history resume renders saved messages");
+            Check(chat.Snapshot.Messages.Count(m => m.Text == "以前の返答") == 2, "history collapses duplicate IDs within a turn and keeps equal answers from different turns");
             h = harnesses[1];
             sending = chat.SendAsync("長い依頼", token); await Until(() => h.TurnStarted, token);
             h.Call(704, "item/tool/call", new { threadId = "chat-1", turnId = "turn-1", tool = "library_search", callId = "waiting", arguments = new { wait = true } });
@@ -84,7 +98,7 @@ internal static class CodexChatVerifier
             {
                 inline.SetDraft("未送信の下書き");
                 inline.Focused = true;
-                Check(harnesses.Count == 2 && inline.Draft == "未送信の下書き" && inline.KeepOpen, "inline draft pins panel without starting AI or microphone");
+                Check(harnesses.Count == 2 && inline.Draft == "未送信の下書き" && !inline.KeepOpen, "inline draft allows hover exit without starting AI or microphone");
                 inline.Focused = false;
                 Check(!inline.KeepOpen && inline.Draft == "未送信の下書き", "manual hide preserves draft without keeping panel open");
             }
@@ -170,10 +184,13 @@ internal static class CodexChatVerifier
             var name = method.GetString()!; var p = r.GetProperty("params"); Requests.Enqueue((name, p.Clone()));
             object result = name switch
             {
+                "model/list" => new { data = new[] { new { model = "fixture-model", displayName = "Fixture Model", defaultReasoningEffort = "medium", supportedReasoningEfforts = new[] { new { reasoningEffort = "medium" }, new { reasoningEffort = "high" } } } }, nextCursor = (string?)null },
                 "account/read" => new { account = new { type = "chatgpt" }, requiresOpenaiAuth = true },
                 "thread/start" => new { thread = new { id = "chat-1" } },
                 "turn/start" => new { turn = new { id = "turn-1", status = "inProgress" } },
-                "thread/resume" => new { thread = new { id = "chat-1", turns = new[] { new { items = new[] { new { type = "agentMessage", id = "saved", text = "以前の返答" } } } } } },
+                "thread/resume" => new { thread = new { id = "chat-1", turns = new[] {
+                    new { items = new[] { new { type = "agentMessage", id = "saved", text = "以前の返答" }, new { type = "agentMessage", id = "saved-copy", text = "以前の返答" } } },
+                    new { items = new[] { new { type = "agentMessage", id = "saved-next-turn", text = "以前の返答" } } } } } },
                 _ => new { }
             };
             if (name == "turn/start") Notify("turn/started", new { threadId = "chat-1", turn = new { id = "turn-1" } });

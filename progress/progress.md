@@ -1,9 +1,39 @@
 ---
 project_slug: hover-menu-preview
-updated: 2026-10-05
+updated: 2026-10-06
 updated_by: codex
-status: windows-0.2.10-installed; public-windows-0.2.10; reported-freeze-incident-unconfirmed-reproduced-preview-races-fixed; published-macos-644; macos-inline-chat-local-667; macos-physical-acceptance-partial
+status: chat-duplicate-windows-57816-running; macos-676-71460-running; reply-normalization-and-live-ui-verified; original-trigger-unconfirmed; macos-recording-permission-pending
 ---
+
+## 2026-10-06 チャットの二重表示を防ぐ処理
+
+- 同じターンの同じ返信を複数IDで受け取った場合の重複と、確定後の遅延文字列を防止。Macも確定通知で本文を更新する。別ターンの同じ回答は維持する。画像の症状の発生条件は未特定。
+- Windowsのコア25・実パネル40項目、Macの会話37項目が成功。Windowsの同じ入力の実接続と画面では返信1件を確認。Windows57816とMac676／71460を起動。[調査・修正・検証・readback](2026-10/2026-10-06_hover-pocket-chat-duplicate.md)。
+
+## 2026-10-06 モデル選択が反映されない問題
+
+- Windowsで実クリックの途中にメニューが閉じ、選択が取り消される問題を修正。再表示後の名称、保存値、次の送信要求へのモデル／推論の反映を確認した。
+- Windowsの会話39項目、Macの選択／保存を含む会話33項目が成功。修正版Windows56640を起動し、Mac675／67480の稼働を確認。[原因・検証・readback](2026-10/2026-10-06_hover-pocket-model-selection.md)。
+
+## 2026-10-06 モデル・推論メニューの自動収納
+
+- モデル／推論の選択中にパネルが閉じる問題を両OSで修正。メニュー表示中だけ保持し、選択・取消・フォーカス解除後は通常のホバー収納へ戻す。Windowsは選択肢をパネル内へ収める。
+- Windowsの会話37項目・全UI、Macの実メニュー選択／取消・100回開閉・会話・配置128＋160条件が成功。Windows90728とMac開発版675／67480を起動。[修正・検証・readback](2026-10/2026-10-06_hover-pocket-model-menu.md)。
+
+## 2026-10-06 ライブラリ・AIのUIUXレビューと改善
+
+- 両OSのライブラリに空表示・検索0件の案内、絞り込み解除、読み込み失敗時の再読み込みを追加。AIのエラーから設定への導線、下書き保持、推論名称を改善し、Macの履歴選択と自作ツール画面の順序も整理した。
+- 共通ライブラリUI62項目、Windowsの全UI・会話・サイズ70条件、Macの保存54・UI77・会話・配置128＋160条件が成功。Windows44216とMac開発版674／65973を起動。[レビュー・変更・検証](2026-10/2026-10-06_hover-pocket-library-ai-ux.md)。
+
+## 2026-10-06 自由サイズの上下限と配置
+
+- 最小を旧Small、最大を旧Extra Largeの約15%増へ制限。ドラッグ中もカレンダーの日付比率と左右の幅、各画面のカード・一覧・スクロールを表示領域へ合わせる。最小Controlsの隠れた操作とMac本文の余白による切れも修正した。
+- Windowsの70条件と既存全UI・会話、Macの128＋160条件と100回開閉等が成功。修正版Windows71160とMac開発版673／62003を起動した。[変更・検証・readback](2026-10/2026-10-06_hover-pocket-resize-layout.md)。前回のMac実録画はOS許可待ち。
+
+## 2026-10-06 会話UI・キー設定・範囲録画・自由サイズ
+
+- WindowsとMacへ履歴サイドバー、入力／音声／送信、モデル／推論、進行表示、会話中のホバー収納、8操作のキー設定、範囲収録、右下のサイズ変更を実装した。音声文字起こし専用は現行接続で非対応のため理由付きで無効。
+- Windowsは修正版69504が起動し、会話・モデル／推論・キー保存・実範囲動画・全UI検査が成功。Macは開発版672が起動し、会話と100回開閉等が成功。Macの実録画はOSの画面収録許可待ち。変更は独立worktreeに未コミットで保持。[変更と検証の記録](2026-10/2026-10-06_hover-pocket-conversation-ux.md) / [共通仕様](../docs/requirement/conversation-ux-20261006.md)。
 
 ## 2026-10-05 チャットをパネル内へ統合
 

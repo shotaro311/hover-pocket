@@ -1,5 +1,5 @@
 import { on, request } from "./bridge.js";
-import { createInlineChat } from "./inline-chat.js";
+import { chatIcon, createInlineChat } from "./inline-chat.js";
 import { renderAssetsProvider } from "../providers/assets/assets.js";
 import { labelForSize, setLanguage, t } from "./i18n.js";
 import { renderCalculatorProvider, runCalculatorUiVerify } from "../providers/calculator/calculator.js";
@@ -26,12 +26,18 @@ const providerContainerEl = document.querySelector("[data-provider-container]");
 const voiceLaneEl = document.querySelector("[data-voice-lane]");
 const voiceContentEl = document.createElement("div"); voiceContentEl.className = "hp-voice-content";
 voiceLaneEl.append(voiceContentEl);
-const inlineChat = createInlineChat({ container: voiceLaneEl, request, on });
+const inlineChat = createInlineChat({ container: voiceLaneEl, request, on, toggleVoice: () => { void ((currentState?.voiceLane?.realtimeAttached || voiceTransport || voiceTransportStarting) ? endVoiceRealtime() : startVoiceRealtime()); }, toggleMute: () => { const muted = !currentState?.voiceLane?.muted; setVoiceTransportMuted(muted); void request("voice.setMuted", { muted }).then(render); } });
 const providerIconsEl = document.querySelector("[data-provider-icons]");
 const sizeSwitchEl = document.querySelector("[data-size-switch]");
 const refreshButtonEl = document.querySelector("[data-refresh]");
 const settingsButtonEl = document.querySelector("[data-settings]");
 const chatButtonEl = document.querySelector("[data-chat]");
+
+function updateResponsivePanelSize() {
+  const width = document.documentElement.clientWidth;
+  document.documentElement.dataset.panelSize = width < 560 ? "small" : width < 640 ? "medium" : width < 730 ? "large" : "extraLarge";
+}
+new ResizeObserver(updateResponsivePanelSize).observe(document.documentElement);
 
 /** @type {any} */
 let currentState = null;
@@ -106,7 +112,7 @@ async function renderNow(state, options = {}) {
   document.documentElement.style.setProperty("--hp-chat-height", `${state.panel.chatHeight ?? 82}px`);
   document.documentElement.dataset.textSize = state.settings.textSize;
   document.documentElement.dataset.panelAttachment = state.settings.effectivePanelAttachmentStyle;
-  document.documentElement.dataset.panelSize = state.settings.panelSize;
+  updateResponsivePanelSize();
   setLanguage(state.settings.language);
   if (chatButtonEl) {
     const label = state.settings.language === "en" ? "Write a message" : "メッセージを入力";
@@ -486,12 +492,14 @@ function renderVoiceLane(state) {
   voiceContentEl.replaceChildren();
   voiceLaneEl.setAttribute("aria-label", t("voiceRegionLabel"));
   const lane = state.voiceLane;
+  inlineChat.updateVoice({ ...lane, starting: voiceTransportStarting }, lane?.availability === "ready" ? "" : voiceStatusText(lane));
   const mode = lane?.mode ?? "disabled";
   voiceLaneEl.hidden = false;
-  voiceContentEl.hidden = mode === "disabled";
+  voiceContentEl.hidden = mode === "disabled" || (!lane?.realtimeAttached && !(lane?.pendingApprovals?.length) && lane?.sessionStatus !== "stopping" && !lane?.physicalMediaConfirmationAvailable);
+  if (voiceContentEl.hidden) document.documentElement.style.setProperty("--hp-voice-height", "0px");
   voiceLaneEl.dataset.mode = mode;
   if (voiceContentEl.hidden) {
-    cancelLocalVoiceTransport();
+    if (mode === "disabled") cancelLocalVoiceTransport();
     return;
   }
 
@@ -531,13 +539,15 @@ function createVoiceWaveform(lane) {
 function createVoiceMuteButton(lane) {
   const mute = voiceButton(
     lane.muted ? t("voiceUnmute") : t("voiceMute"),
-    lane.muted ? "M" : "S",
+    "",
     () => {
       const muted = !lane.muted;
       setVoiceTransportMuted(muted);
       void request("voice.setMuted", { muted }).then(render);
     },
   );
+  mute.innerHTML = chatIcon(lane.muted ? "muted" : "mic");
+  mute.title = lane.muted ? t("voiceUnmute") : t("voiceMute");
   mute.disabled = !lane.realtimeAttached;
   return mute;
 }
@@ -574,8 +584,6 @@ function renderCompactVoiceLane(lane) {
   const root = document.createElement("div");
   root.className = "hp-voice-compact";
 
-  const microphone = createVoiceMicrophoneButton(lane);
-  const waveform = createVoiceWaveform(lane);
 
   const conversation = document.createElement("div");
   conversation.className = "hp-voice-conversation";
@@ -587,33 +595,13 @@ function renderCompactVoiceLane(lane) {
   preview.textContent = lane.transcriptPreview || t("voiceRuntimeInactive");
   conversation.append(status, preview);
 
-  const count = document.createElement("span");
-  count.className = "hp-voice-session-count";
-  count.textContent = String(lane.visibleSessionCount ?? 0);
-  count.setAttribute("aria-label", formatText("voiceSessionCount", {
-    count: lane.visibleSessionCount ?? 0,
-  }));
-
-  const mute = createVoiceMuteButton(lane);
   const physicalConfirmation = createVoicePhysicalMediaConfirmationButton(lane);
   root.classList.toggle("hp-voice-has-physical-confirmation", physicalConfirmation !== null);
-  const expand = voiceButton(
-    t("voiceExpand"),
-    "⌄",
-    () => request("voice.setLayout", { layout: "expanded" }).then(render),
-    false,
-  );
-  const end = voiceButton(
-    t("voiceEndSession"),
-    "×",
-    () => { void endVoiceRealtime(); },
-  );
-
-  root.append(microphone, waveform, conversation, count, mute);
+  root.append(conversation);
   if (physicalConfirmation) {
     root.append(physicalConfirmation);
   }
-  root.append(expand, end);
+  // Session controls live beside the chat input.
   voiceContentEl.append(root);
 }
 
@@ -626,34 +614,14 @@ function renderExpandedVoiceLane(lane) {
   const status = document.createElement("span");
   status.className = "hp-voice-status";
   status.textContent = voiceStatusText(lane);
-  const microphone = createVoiceMicrophoneButton(lane);
-  const waveform = createVoiceWaveform(lane);
   const spacer = document.createElement("span");
   spacer.className = "hp-voice-spacer";
-  const count = document.createElement("span");
-  count.className = "hp-voice-session-count";
-  count.textContent = String(lane.visibleSessionCount ?? 0);
-  count.setAttribute("aria-label", formatText("voiceSessionCount", {
-    count: lane.visibleSessionCount ?? 0,
-  }));
-  const mute = createVoiceMuteButton(lane);
   const physicalConfirmation = createVoicePhysicalMediaConfirmationButton(lane);
-  const collapse = voiceButton(
-    t("voiceCollapse"),
-    "⌃",
-    () => request("voice.setLayout", { layout: "compact" }).then(render),
-    true,
-  );
-  const end = voiceButton(
-    t("voiceEndSession"),
-    "×",
-    () => { void endVoiceRealtime(); },
-  );
-  toolbar.append(microphone, waveform, status, spacer, count, mute);
+  toolbar.append(status, spacer);
   if (physicalConfirmation) {
     toolbar.append(physicalConfirmation);
   }
-  toolbar.append(collapse, end);
+  // Session controls live beside the chat input.
 
   const grid = document.createElement("div");
   grid.className = "hp-voice-expanded-grid";
@@ -1518,15 +1486,22 @@ window.__hoverPocketVerify = {
         ));
         const rootBounds = controlsRoot.getBoundingClientRect();
         const sections = [...controlsRoot.querySelectorAll(":scope > .hp-controls-section")];
+        const canScroll = ["auto", "scroll"].includes(getComputedStyle(controlsRoot).overflowY);
+        const contentTop = rootBounds.top - controlsRoot.scrollTop;
+        const contentBottom = canScroll ? contentTop + controlsRoot.scrollHeight : rootBounds.bottom;
         controlsRenderedOk = !controlsRoot.classList.contains("is-error") && sections.length === 3;
         controlsLayoutOk = rootBounds.width > 0
           && rootBounds.height > 0
           && sections.every((section) => {
             const bounds = section.getBoundingClientRect();
             return bounds.left >= rootBounds.left - 1
-              && bounds.top >= rootBounds.top - 1
+              && bounds.top >= contentTop - 1
               && bounds.right <= rootBounds.right + 1
-              && bounds.bottom <= rootBounds.bottom + 1;
+              && bounds.bottom <= contentBottom + 1
+              && [...section.querySelectorAll("button,input")].every(control => {
+                const controlBounds = control.getBoundingClientRect();
+                return controlBounds.top >= bounds.top - 1 && controlBounds.bottom <= bounds.bottom + 1;
+              });
           });
         const mediaButtons = [...controlsRoot.querySelectorAll(".hp-media-commands button")];
         controlsHitAreasOk = mediaButtons.length >= 6 && mediaButtons.every((button) => {
@@ -1785,22 +1760,19 @@ window.__hoverPocketVerify = {
       && !voiceContentEl.hidden
       && voiceLaneEl.dataset.mode === "compact"
       && voiceLaneEl.querySelector(".hp-voice-compact") !== null
-      && voiceLaneEl.querySelector("button.hp-voice-waveform")?.disabled === true;
-    setLanguage("ja");
+      && voiceLaneEl.querySelector("[data-chat-voice]")?.disabled === true;
+    setLanguage("ja"); inlineChat.updateLanguage("ja");
     renderVoiceLane({
       settings: { voiceEnabled: true },
       voiceLane: { ...voiceFixture, mode: "compact" },
     });
-    const japaneseCompactOk = voiceLaneEl.getAttribute("aria-label") === "音声レーン"
-      && voiceLaneEl.querySelector(".hp-voice-status")?.textContent === "利用可能 · 承認待ち"
-      && voiceLaneEl.querySelector(".hp-voice-preview")?.textContent === "マイクを押すと音声会話を開始します。"
-      && voiceLaneEl.querySelector(".hp-voice-microphone")?.getAttribute("aria-label") === "マイクを開始"
-      && voiceLaneEl.querySelector(".hp-voice-microphone")?.disabled === false
-      && voiceLaneEl.querySelector("button.hp-voice-waveform")?.disabled === false
-      && voiceLaneEl.querySelector(".hp-voice-session-count")?.getAttribute("aria-label") === "セッション 1件";
+    const japaneseCompactOk = voiceContentEl.hidden
+      && voiceLaneEl.querySelector('[data-chat-voice]')?.disabled === false
+      && voiceLaneEl.querySelector('[data-chat-voice]')?.getAttribute('aria-label') === '音声会話を開始'
+      && voiceLaneEl.querySelector('.hp-chat-unavailable')?.hidden === true;
     renderVoiceLane({
       settings: { voiceEnabled: true },
-      voiceLane: { ...voiceFixture, mode: "expanded" },
+      voiceLane: { ...voiceFixture, realtimeAttached: true, mode: "expanded" },
     });
     const japaneseExpandedOk = voiceLaneEl.querySelector(".hp-voice-transcript-event")?.textContent === "あなた: 予定を確認して"
       && voiceLaneEl.querySelector(".hp-voice-session-card span")?.textContent?.startsWith("ユーザー操作待ち · 更新 ")
@@ -1810,21 +1782,18 @@ window.__hoverPocketVerify = {
       availability: "signedOut",
       safeErrorCode: "signed_out",
     }) === "サインインが必要";
-    setLanguage("en");
+    setLanguage("en"); inlineChat.updateLanguage("en");
     renderVoiceLane({
       settings: { voiceEnabled: true },
       voiceLane: { ...voiceFixture, mode: "compact" },
     });
-    const englishCompactOk = voiceLaneEl.getAttribute("aria-label") === "Voice Lane"
-      && voiceLaneEl.querySelector(".hp-voice-status")?.textContent === "Ready · Waiting for approval"
-      && voiceLaneEl.querySelector(".hp-voice-preview")?.textContent === "Press the microphone to start a Voice conversation."
-      && voiceLaneEl.querySelector(".hp-voice-microphone")?.getAttribute("aria-label") === "Start microphone"
-      && voiceLaneEl.querySelector(".hp-voice-microphone")?.disabled === false
-      && voiceLaneEl.querySelector("button.hp-voice-waveform")?.disabled === false
-      && voiceLaneEl.querySelector(".hp-voice-session-count")?.getAttribute("aria-label") === "1 sessions";
+    const englishCompactOk = voiceContentEl.hidden
+      && voiceLaneEl.querySelector('[data-chat-voice]')?.disabled === false
+      && voiceLaneEl.querySelector('[data-chat-voice]')?.getAttribute('aria-label') === 'Start voice conversation'
+      && voiceLaneEl.querySelector('.hp-chat-unavailable')?.hidden === true;
     renderVoiceLane({
       settings: { voiceEnabled: true },
-      voiceLane: { ...voiceFixture, mode: "expanded" },
+      voiceLane: { ...voiceFixture, realtimeAttached: true, mode: "expanded" },
     });
     const englishExpandedOk = voiceLaneEl.querySelector(".hp-voice-transcript-event")?.textContent === "You: 予定を確認して"
       && voiceLaneEl.querySelector(".hp-voice-session-card span")?.textContent?.startsWith("Waiting for user · updated ")
@@ -1848,7 +1817,7 @@ window.__hoverPocketVerify = {
       && voiceErrorText("invalid_remote_sdp") === "The Voice connection response could not be verified"
       && voiceErrorText("installed_broker_only_tool_policy_missing")
         === "Voice was stopped because this Codex version cannot enforce Broker-only tools";
-    setLanguage(state.settings.language);
+    setLanguage(state.settings.language); inlineChat.updateLanguage(state.settings.language);
     renderVoiceLane(state);
     window.__hoverPocketVerifyStep = "complete";
 

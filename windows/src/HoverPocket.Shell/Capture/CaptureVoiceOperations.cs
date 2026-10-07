@@ -17,7 +17,7 @@ internal sealed partial class CaptureController
         _finishRecording?.IsCompletedSuccessfully == true ? _finishRecording.Result.AssetIds : [],
         _finishRecording?.IsCompletedSuccessfully == true ? _finishRecording.Result.Error : null);
 
-    internal async Task<string> ScreenshotForVoiceAsync(string targetId, string? folderId, string? name, CancellationToken token)
+    internal async Task<string> ScreenshotForVoiceAsync(string targetId, string? folderId, string? name, CancellationToken token, System.Windows.Int32Rect? crop = null)
     {
         if (_disposed || Busy || Recording) throw new InvalidOperationException("capture_busy");
         token.ThrowIfCancellationRequested();
@@ -55,7 +55,7 @@ internal sealed partial class CaptureController
         finally { _busy = false; Report(_status); }
     }
 
-    private async Task BeginRecordingAsync(GraphicsCaptureItem item, CapturePreferences options, string? name, CancellationToken token)
+    private async Task BeginRecordingAsync(GraphicsCaptureItem item, CapturePreferences options, string? name, CancellationToken token, System.Windows.Int32Rect? crop = null)
     {
         token.ThrowIfCancellationRequested();
         var stage = _files.CreateStage();
@@ -63,7 +63,7 @@ internal sealed partial class CaptureController
         {
             var path = Path.Combine(stage, $"画面収録 {DateTime.Now:yyyy-MM-dd HH-mm-ss}.mp4");
             using (File.Create(path)) { }
-            var recorder = await ScreenRecorder.StartAsync(item, path, options.SystemAudio, options.Microphone);
+            var recorder = await ScreenRecorder.StartAsync(item, path, options.SystemAudio, options.Microphone, crop);
             if (token.IsCancellationRequested)
             {
                 recorder.Stop();

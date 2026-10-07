@@ -59,3 +59,9 @@ body.assets-fullscreen .hp-voice-lane{display:none!important}body.assets-fullscr
 .assets-root select option,.assets-root select optgroup{background-color:#20242d;color:#e5eaf4}
 
 .assets-sidebar .is-drop-target{background:#6d9de64a;outline:2px solid #9cbaff;outline-offset:-2px}.assets-root.is-dragging .assets-sidebar [data-drop-kind]{border:1px dashed #a5bdee38}
+
+.assets-main{position:relative;min-width:0}
+.assets-query-state{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;height:100%;box-sizing:border-box;padding:18px;text-align:center;overflow:auto;color:#e5eaf4}
+.assets-query-state strong{font-size:13px}.assets-query-state p{font-size:12px;line-height:1.5;margin:0;color:#aeb8ca;max-width:330px}
+.assets-query-state button{margin-top:4px;min-height:32px;border-color:#9ab9ff66}
+.assets-query-state[hidden],.assets-scroll[hidden],.assets-toolbar button[hidden]{display:none}

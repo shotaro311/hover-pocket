@@ -61,6 +61,15 @@ internal sealed class SettingsVerifier
                 || await window.WebViewForVerify.ExecuteScriptAsync("document.querySelector('[data-voice-heading]')?.textContent === 'チャットと音声'") != "true")
                 await Task.Delay(100, timeout.Token);
             var web = window.WebViewForVerify;
+            while (await web.ExecuteScriptAsync("document.querySelectorAll('[data-shortcut]').length === 8") != "true")
+                await Task.Delay(50, timeout.Token);
+            await web.ExecuteScriptAsync("document.querySelector('[data-category=shortcuts]').click();const field=document.querySelector('[data-shortcut=panel]');field.focus();field.dispatchEvent(new KeyboardEvent('keydown',{key:'F21',code:'F21',ctrlKey:true,altKey:true,bubbles:true,cancelable:true}));field.blur();document.querySelector('[data-shortcuts-save]').click()");
+            while (controller.CurrentSettings.Shortcuts["panel"] != "Ctrl+Alt+F21") await Task.Delay(50, timeout.Token);
+            if (store.Load(providers.ProviderIds).Shortcuts["panel"] != "Ctrl+Alt+F21") _failures.Add("shortcut UI did not persist recorded keys");
+            await web.ExecuteScriptAsync("document.querySelector('[data-shortcut=chat]').value='Alt+Ctrl+F21';document.querySelector('[data-shortcuts-save]').click()");
+            while (await web.ExecuteScriptAsync("document.querySelector('[data-shortcuts-status]').textContent.includes('同じキー')") != "true") await Task.Delay(50, timeout.Token);
+            if (controller.CurrentSettings.Shortcuts["chat"] == "Alt+Ctrl+F21") _failures.Add("duplicate shortcut changed settings");
+            VerifyConsole.WriteLine("PASS shortcut settings UI: category, key recording, durable save, equivalent-key conflict keeps previous settings");
             var state = JsonSerializer.SerializeToNode(controller.BuildState(BridgeSurface.Settings))!;
             state["settings"]!["voiceProviderId"] = VoiceProviderIds.CodexAppServer;
             state["settings"]!["voiceEnabled"] = true;

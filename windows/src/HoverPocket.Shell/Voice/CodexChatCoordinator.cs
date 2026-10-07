@@ -5,9 +5,12 @@ using System.Text.Json;
 namespace HoverPocket.Shell.Voice;
 
 internal sealed record CodexChatMessage(string Id, string Role, string Text);
-internal sealed record CodexChatSnapshot(string? ThreadId, bool Busy, string? ErrorCode, IReadOnlyList<CodexChatMessage> Messages);
+internal sealed record CodexChatSnapshot(string? ThreadId, bool Busy, string? ErrorCode, IReadOnlyList<CodexChatMessage> Messages)
+{
+    public string Phase { get; init; } = "idle";
+}
 
-internal sealed class CodexChatCoordinator(
+internal sealed partial class CodexChatCoordinator(
     Func<CancellationToken, Task<CodexAppServerClient>> startClient,
     ICodexVoiceDynamicToolRuntime tools,
     CodexChatHistory history) : IAsyncDisposable
@@ -24,18 +27,24 @@ internal sealed class CodexChatCoordinator(
     private ActiveTurn? _active;
     private CancellationTokenSource? _pending;
     private bool _busy;
+    private string _phase = "idle";
+    internal string? Model { get; private set; }
+    internal string? Effort { get; private set; }
+    internal IReadOnlyList<ChatModelChoice> Models { get; private set; } = [];
     private bool _disposed;
     private sealed class ActiveTurn(string threadId)
     {
         public string ThreadId { get; } = threadId;
         public string? Id;
         public bool Stopping;
+        public HashSet<string> MessageIds { get; } = [];
+        public HashSet<string> CompletedMessageIds { get; } = [];
         public CancellationTokenSource Cancellation { get; } = new();
         public TaskCompletionSource Done { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
     }
 
     public event EventHandler<CodexChatSnapshot>? Changed;
-    public CodexChatSnapshot Snapshot { get { lock (_sync) return new(_threadId, _busy, _error, _messages.ToArray()); } }
+    public CodexChatSnapshot Snapshot { get { lock (_sync) return new(_threadId, _busy, _error, _messages.ToArray()) { Phase = _phase }; } }
     public IReadOnlyList<CodexChatHistoryEntry> History => history.Read();
     private string Digest => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(tools.Definitions.GetRawText())));
     private void Publish() => Changed?.Invoke(this, Snapshot);
@@ -47,7 +56,7 @@ internal sealed class CodexChatCoordinator(
         ActiveTurn? active = null;
         try
         {
-            lock (_sync) { ObjectDisposedException.ThrowIf(_disposed, this); _busy = true; _error = null; }
+            lock (_sync) { ObjectDisposedException.ThrowIf(_disposed, this); _busy = true; _error = null; _phase = "thinking"; }
             Publish();
             using var linked = CancellationTokenSource.CreateLinkedTokenSource(token, _lifetime.Token);
             lock (_sync) _pending = linked;
@@ -63,7 +72,7 @@ internal sealed class CodexChatCoordinator(
             Publish();
             var response = await _client!.SendRequestAsync("turn/start", JsonSerializer.SerializeToElement(new
             {
-                threadId = active.ThreadId,
+                threadId = active.ThreadId, model = Model, effort = Effort,
                 input = new[] { new { type = "text", text, textElements = Array.Empty<object>() } }
             }), linked.Token);
             var turnId = response.GetProperty("turn").GetProperty("id").GetString();
@@ -129,7 +138,7 @@ internal sealed class CodexChatCoordinator(
         if (!await _gate.WaitAsync(0, token)) throw new InvalidOperationException("chat_busy");
         try
         {
-            lock (_sync) { ObjectDisposedException.ThrowIf(_disposed, this); _busy = true; _error = null; }
+            lock (_sync) { ObjectDisposedException.ThrowIf(_disposed, this); _busy = true; _error = null; _phase = "thinking"; }
             Publish();
             var entry = threadId is null ? null : history.Read().SingleOrDefault(e => e.ThreadId == threadId)
                 ?? throw new InvalidOperationException("chat_unknown_thread");
@@ -180,6 +189,7 @@ internal sealed class CodexChatCoordinator(
         if (digest != _connectionToolDigest) throw new CodexAppServerProtocolException("chat_tools_changed_start_new");
         var parameters = JsonSerializer.SerializeToElement(new
         {
+            model = Model,
             ephemeral = false, sandbox = "read-only", approvalPolicy = "never",
             environments = Array.Empty<object>(), runtimeWorkspaceRoots = Array.Empty<object>(), selectedCapabilityRoots = Array.Empty<object>(),
             dynamicTools = tools.Definitions,
@@ -218,14 +228,36 @@ internal sealed class CodexChatCoordinator(
             }
             else if (active.Id is not null && !active.Stopping && p.TryGetProperty("turnId", out var turnId) && turnId.GetString() == active.Id)
             {
-                if (notification.Method == "item/agentMessage/delta")
-                    Upsert(p.GetProperty("itemId").GetString()!, "assistant", p.GetProperty("delta").GetString()!, append: true);
+                if (notification.Method.StartsWith("item/reasoning/", StringComparison.Ordinal)) _phase = "thinking";
+                else if (notification.Method == "item/agentMessage/delta")
+                {
+                    _phase = "responding";
+                    UpsertReply(active, p.GetProperty("itemId").GetString()!, p.GetProperty("delta").GetString()!, append: true);
+                }
                 else if (notification.Method == "item/completed" && p.TryGetProperty("item", out var item) && item.GetProperty("type").GetString() == "agentMessage")
-                    Upsert(item.GetProperty("id").GetString()!, "assistant", item.GetProperty("text").GetString()!, append: false);
+                    UpsertReply(active, item.GetProperty("id").GetString()!, item.GetProperty("text").GetString()!, append: false);
             }
             else return;
         }
         Publish();
+    }
+
+    private void UpsertReply(ActiveTurn turn, string id, string text, bool append)
+    {
+        if (append && turn.CompletedMessageIds.Contains(id)) return;
+        turn.MessageIds.Add(id);
+        Upsert(id, "assistant", text, append);
+        if (append) return;
+        turn.CompletedMessageIds.Add(id);
+        // A completed reply may repeat a streamed or completed item under a new ID.
+        // Scope this to the current turn so later identical answers remain visible.
+        if (text.Length == 0) return;
+        var finalText = _messages.Single(m => m.Id == id).Text;
+        foreach (var duplicate in _messages.Where(m => m.Id != id && m.Role == "assistant" && turn.MessageIds.Contains(m.Id) && m.Text == finalText).ToArray())
+        {
+            turn.CompletedMessageIds.Add(duplicate.Id);
+            _messages.Remove(duplicate);
+        }
     }
 
     private void Upsert(string id, string role, string text, bool append)
@@ -242,13 +274,20 @@ internal sealed class CodexChatCoordinator(
     {
         if (!thread.TryGetProperty("turns", out var turns)) return;
         foreach (var turn in turns.EnumerateArray())
+        {
+            var replies = new HashSet<string>(StringComparer.Ordinal);
             foreach (var item in turn.GetProperty("items").EnumerateArray())
             {
                 var type = item.GetProperty("type").GetString();
-                if (type == "agentMessage") Upsert(item.GetProperty("id").GetString()!, "assistant", item.GetProperty("text").GetString()!, false);
+                if (type == "agentMessage")
+                {
+                    var text = item.GetProperty("text").GetString()!;
+                    if (replies.Add(text)) Upsert(item.GetProperty("id").GetString()!, "assistant", text, false);
+                }
                 else if (type == "userMessage") Upsert(item.GetProperty("id").GetString()!, "user",
                     string.Join("\n", item.GetProperty("content").EnumerateArray().Where(c => c.GetProperty("type").GetString() == "text").Select(c => c.GetProperty("text").GetString())), false);
             }
+        }
     }
 
     private async void OnRequest(object? sender, CodexAppServerRequest request)

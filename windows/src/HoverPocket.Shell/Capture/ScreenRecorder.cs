@@ -30,6 +30,7 @@ internal sealed class ScreenRecorder : IDisposable
     private byte[]? _lastPixels, _scratchPixels;
     private readonly int _width, _height;
     private readonly int _inputWidth, _inputHeight;
+    private readonly System.Windows.Int32Rect _crop;
     public string? StopReason { get; private set; }
     public long VideoFrames => Interlocked.Read(ref _videoCount);
     public bool HasAudio => _audio is not null;
@@ -37,13 +38,15 @@ internal sealed class ScreenRecorder : IDisposable
     public TimeSpan Duration => _clock.Elapsed;
     public Task Completion { get; private set; } = Task.CompletedTask;
 
-    private ScreenRecorder(GraphicsCaptureItem item, bool systemAudio, bool microphone)
+    private ScreenRecorder(GraphicsCaptureItem item, bool systemAudio, bool microphone, System.Windows.Int32Rect? crop = null)
     {
         _item = item; _device = WindowsGraphicsCapturePreviewService.CreateDirect3DDevice();
         _inputWidth = item.Size.Width; _inputHeight = item.Size.Height;
         if ((long)_inputWidth * _inputHeight > 32_000_000) { _device.Dispose(); throw new NotSupportedException("収録対象が大きすぎます。小さい画面またはウィンドウを選択してください。"); }
-        var scale = Math.Min(1, Math.Min(1920.0 / _inputWidth, 1080.0 / _inputHeight));
-        _width = Math.Max(2, ((int)(_inputWidth * scale) / 2) * 2); _height = Math.Max(2, ((int)(_inputHeight * scale) / 2) * 2);
+        _crop = crop ?? new(0, 0, _inputWidth, _inputHeight);
+        if (_crop.X < 0 || _crop.Y < 0 || _crop.Width < 2 || _crop.Height < 2 || _crop.X + _crop.Width > _inputWidth || _crop.Y + _crop.Height > _inputHeight) { _device.Dispose(); throw new ArgumentException("収録範囲が画面の外です。"); }
+        var scale = Math.Min(1, Math.Min(1920.0 / _crop.Width, 1080.0 / _crop.Height));
+        _width = Math.Max(2, ((int)(_crop.Width * scale) / 2) * 2); _height = Math.Max(2, ((int)(_crop.Height * scale) / 2) * 2);
         try
         {
             _pool = Direct3D11CaptureFramePool.CreateFreeThreaded(_device, DirectXPixelFormat.B8G8R8A8UIntNormalized, 3, item.Size);
@@ -53,10 +56,10 @@ internal sealed class ScreenRecorder : IDisposable
         }
         catch { _session?.Dispose(); _pool?.Dispose(); _device.Dispose(); throw; }
     }
-    public static async Task<ScreenRecorder> StartAsync(GraphicsCaptureItem item, string path, bool systemAudio, bool microphone)
+    public static async Task<ScreenRecorder> StartAsync(GraphicsCaptureItem item, string path, bool systemAudio, bool microphone, System.Windows.Int32Rect? crop = null)
     {
         if (!GraphicsCaptureSession.IsSupported()) throw new NotSupportedException("このWindowsでは画面収録を利用できません。");
-        var recorder = new ScreenRecorder(item, systemAudio, microphone);
+        var recorder = new ScreenRecorder(item, systemAudio, microphone, crop);
         try
         {
             await recorder.PrepareAsync(path).WaitAsync(TimeSpan.FromSeconds(15));
@@ -143,7 +146,7 @@ internal sealed class ScreenRecorder : IDisposable
                         {
                             var size = checked(bitmap.PixelWidth * bitmap.PixelHeight * 4);
                             if (_scratchPixels is null || _scratchPixels.Length != size) _scratchPixels = new byte[size];
-                            bitmap.CopyToBuffer(_scratchPixels.AsBuffer()); _lastPixels = ScalePixels(_scratchPixels, bitmap.PixelWidth, _inputWidth, _inputHeight, _width, _height);
+                            bitmap.CopyToBuffer(_scratchPixels.AsBuffer()); _lastPixels = ScalePixels(_scratchPixels, bitmap.PixelWidth, _crop, _width, _height);
                         }
                     }
                     // The immutable CPU snapshot releases the capture pool immediately. Repeating
@@ -159,11 +162,11 @@ internal sealed class ScreenRecorder : IDisposable
         finally { deferral.Complete(); }
     }
     public void Stop(string? reason = null) { if (reason is not null) StopReason ??= reason; _stop.Cancel(); _frames.Writer.TryComplete(); }
-    private static byte[] ScalePixels(byte[] source, int strideWidth, int inputWidth, int inputHeight, int width, int height)
+    internal static byte[] ScalePixels(byte[] source, int strideWidth, System.Windows.Int32Rect crop, int width, int height)
     {
         var output = new byte[width * height * 4];
         var pixels = System.Runtime.InteropServices.MemoryMarshal.Cast<byte, uint>(source.AsSpan()); var target = System.Runtime.InteropServices.MemoryMarshal.Cast<byte, uint>(output.AsSpan());
-        for (var y = 0; y < height; y++) { var row = y * inputHeight / height * strideWidth; for (var x = 0; x < width; x++) target[y * width + x] = pixels[row + x * inputWidth / width] | 0xFF000000; }
+        for (var y = 0; y < height; y++) { var row = (crop.Y + y * crop.Height / height) * strideWidth + crop.X; for (var x = 0; x < width; x++) target[y * width + x] = pixels[row + x * crop.Width / width] | 0xFF000000; }
         return output;
     }
     public void Dispose()

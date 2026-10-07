@@ -46,6 +46,8 @@ internal sealed class UiVerifier
                 return await VoiceLibraryVerifier.RunAsync(_controller);
             if (ready && Environment.GetEnvironmentVariable("HOVERPOCKET_CHAT_PANEL_VERIFY_ONLY") == "1")
                 return await CodexChatVerifier.RunPanelAsync(_controller);
+            if (ready && Environment.GetEnvironmentVariable("HOVERPOCKET_RESIZE_VERIFY_ONLY") == "1")
+                return await PanelResizeVerifier.RunAsync(_controller);
             if (ready && Environment.GetEnvironmentVariable("HOVERPOCKET_INLINE_CHAT_LIVE_VERIFY_ONLY") == "1")
                 return await InlineChatPanelVerifier.RunLiveAsync(_controller);
             if (ready && Environment.GetEnvironmentVariable("HOVERPOCKET_CLIPBOARD_LOAD_VERIFY_ONLY") == "1")

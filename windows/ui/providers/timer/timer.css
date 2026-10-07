@@ -1,4 +1,6 @@
 .hp-timer {
+  max-width: 760px;
+  margin-inline: auto;
   height: 100%;
   overflow: hidden;
 }

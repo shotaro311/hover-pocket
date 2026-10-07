@@ -46,6 +46,10 @@ internal static class CaptureVerifier
             var legacyPreferences = System.Text.Json.JsonSerializer.Deserialize<CapturePreferences>("{\"SystemAudio\":false}");
             if (legacyPreferences?.OpenEditorAfterScreenshot != true || legacyPreferences.ScreenshotToastSeconds != 5) failures.Add("legacy editor default changed");
             VerifyConsole.WriteLine("PASS capture preferences: legacy JSON remains readable; screenshots now edit in place");
+            var samplePixels = Enumerable.Range(0, 24).SelectMany(i => new byte[] { (byte)i, 0, 0, 255 }).ToArray();
+            var selectedPixels = ScreenRecorder.ScalePixels(samplePixels, 6, new(2, 1, 2, 2), 2, 2);
+            if (!new[] { selectedPixels[0], selectedPixels[4], selectedPixels[8], selectedPixels[12] }.SequenceEqual(new byte[] { 8, 9, 14, 15 })) failures.Add("recording crop offset leaked outside region");
+            VerifyConsole.WriteLine("PASS recording region: output samples come only from selected offsets");
             var crop = ScreenshotSelectionWindow.Crop(source, new(10, 10, 130, 80));
             if (crop.PixelWidth != 130 || crop.PixelHeight != 80) failures.Add("crop dimensions");
             editor = new ScreenshotEditorWindow(source); editor.Show(); await Task.Delay(120);
@@ -70,6 +74,20 @@ internal static class CaptureVerifier
                 using (var conflict = new CaptureHotkeys(_ => { })) if (!conflict.Apply("Ctrl+Alt+F21", "Ctrl+Alt+F22").Contains("使用中")) failures.Add("hotkey conflict not reported");
                 try { keys.Apply("Ctrl+Alt+S", "Ctrl+Alt+S"); failures.Add("duplicate shortcut accepted"); } catch (ArgumentException) { }
             }
+            var namedActions = new List<string>();
+            using (var named = new CaptureHotkeys(namedActions.Add, true))
+            {
+                named.ApplyBindings(new() { ["chat"] = "Ctrl+Alt+F21", ["panel"] = "Ctrl+Alt+F22" });
+                named.Suspend(true); SendMessage(named.HandleForVerify, 0x0312, 1, 0);
+                if (namedActions.Count != 0) failures.Add("shortcut capture triggered an app action");
+                named.Suspend(false); SendMessage(named.HandleForVerify, 0x0312, 1, 0);
+                if (!namedActions.SequenceEqual(new[] { "chat" })) failures.Add("named shortcut action dispatch");
+                using var occupied = new CaptureHotkeys(_ => { }); occupied.Apply("Ctrl+Alt+F23", "Ctrl+Alt+F24");
+                try { named.ApplyBindings(new() { ["chat"] = "Ctrl+Alt+F23" }); failures.Add("shortcut conflict accepted"); } catch (ArgumentException) { }
+                SendMessage(named.HandleForVerify, 0x0312, 1, 0);
+                if (namedActions.Count != 2) failures.Add("shortcut conflict lost prior registration");
+            }
+            VerifyConsole.WriteLine("PASS configurable shortcuts: named dispatch, capture suspension, conflict rollback");
             using (var secondKeys = new CaptureHotkeys(_ => { })) if (secondKeys.Apply("Ctrl+Alt+F21", "Ctrl+Alt+F22").Contains("使用中")) failures.Add("hotkeys not unregistered");
             using (var configuration = new CaptureController(store, root, () => Task.CompletedTask, () => { }, () => { }))
             {
@@ -249,6 +267,14 @@ internal static class CaptureVerifier
             CaptureFiles.MarkComplete(videoStage, [videoPath], folder); await captureFiles.ImportCompletedAsync(videoStage);
             page = await store.QueryAsync(new(FolderId: folder)); if (page.Total != 3 || page.Items.Count(asset => asset.Kind == "image") != 2 || page.Items.Count(asset => asset.Kind == "video") != 1) failures.Add("recording library classification");
             VerifyConsole.WriteLine($"PASS recording: frames={recorder.VideoFrames}, duration_ms={properties.Duration.TotalMilliseconds:0}, dimensions={properties.Width}x{properties.Height}, audio_track_nonzero={soundEnergy > .00001}, microphone_packets={recorder.MicrophonePackets}, automatic_import=true");
+            var regionPath = Path.Combine(root, "region.mp4"); using (File.Create(regionPath)) { }
+            using (var region = await ScreenRecorder.StartAsync(item, regionPath, false, false, new(40, 40, 180, 100)))
+            {
+                await Task.Delay(800); region.Stop(); await region.Completion.WaitAsync(TimeSpan.FromSeconds(20));
+                var regionProperties = await (await StorageFile.GetFileFromPathAsync(regionPath)).Properties.GetVideoPropertiesAsync();
+                if (regionProperties.Width != 180 || regionProperties.Height != 100 || region.VideoFrames < 2) failures.Add("selected-region encoded dimensions");
+                VerifyConsole.WriteLine($"PASS selected-region recording: frames={region.VideoFrames}, encoded={regionProperties.Width}x{regionProperties.Height}");
+            }
             var silentStage = captureFiles.CreateStage(); var silentPath = Path.Combine(silentStage, "silent.mp4"); using (File.Create(silentPath)) { }
             using (var silent = await ScreenRecorder.StartAsync(item, silentPath, false, false))
             {

@@ -267,6 +267,8 @@ public partial class App : System.Windows.Application
                 shellController.HideForCaptureAsync, shellController.RestoreAfterCapture, shellController.OpenAssetLibraryFromUser);
             shellController.PanelBridgeController.AssetCaptureRequested = _captureController.FromLibraryAsync;
             shellController.PanelBridgeController.VoiceCapture = _captureController;
+            _captureController.ShortcutInvoked += shellController.RunShortcut;
+            try { _captureController.ApplyShortcuts(shellController.PanelBridgeController.CurrentSettings.Shortcuts); } catch (ArgumentException ex) { Services.AppDiagnostics.Record("shortcuts.registration.failed", ex); }
             shellController.PanelBridgeController.VoiceLibraryRequested = shellController.OpenAssetLibraryForVoiceAsync;
             updaterService.BeforeRestart = _captureController.StopRecordingAsync;
             _trayIconService = new TrayIconService(shellController, updaterService, _captureController);

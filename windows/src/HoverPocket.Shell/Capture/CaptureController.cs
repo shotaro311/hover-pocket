@@ -30,6 +30,11 @@ internal sealed partial class CaptureController : IDisposable
     private readonly Action _restoreShell;
     private readonly Action _openLibrary;
     private CapturePreferences _preferences = new();
+    private Dictionary<string, string> _additionalShortcuts = [];
+    internal CapturePreferences Preferences => _preferences;
+    internal event Action<string>? ShortcutInvoked;
+    internal void SuspendShortcuts(bool suspended) => _hotkeys.Suspend(suspended);
+    internal void ApplyShortcuts(Dictionary<string, string> additional) { var all = new Dictionary<string, string>(additional) { ["screenshot"] = _preferences.ScreenshotKey, ["recording"] = _preferences.RecordingKey }; _hotkeys.ApplyBindings(all); _additionalShortcuts = new(additional); }
     private CaptureWindow? _window;
     private ScreenshotToastWindow? _toast;
     internal ScreenshotToastWindow? ToastForVerify => _toast;
@@ -55,9 +60,9 @@ internal sealed partial class CaptureController : IDisposable
         try { if (File.Exists(_preferencesPath)) _preferences = JsonSerializer.Deserialize<CapturePreferences>(File.ReadAllText(_preferencesPath)) ?? new(); }
         catch (Exception ex) when (ex is IOException or JsonException or UnauthorizedAccessException) { _status = "撮影設定を読めませんでした。既定値で開始します。"; }
         if (_preferences.ScreenshotToastSeconds is < 0 or > 30) _preferences = _preferences with { ScreenshotToastSeconds = 5 };
-        _hotkeys = new(record => { if (record) _ = ToggleRecordingAsync(); else _ = ScreenshotAsync(); });
+        _hotkeys = new((string key) => { if (key == "recording") _ = ToggleRecordingAsync(); else if (key == "screenshot") _ = ScreenshotAsync(); else if (key == "regionRecording") _ = ToggleRegionRecordingAsync(); else ShortcutInvoked?.Invoke(key); }, true);
         try { _status = _hotkeys.Apply(_preferences.ScreenshotKey, _preferences.RecordingKey); }
-        catch (ArgumentException) { _preferences = new(); _status = _hotkeys.Apply(_preferences.ScreenshotKey, _preferences.RecordingKey); }
+        catch (ArgumentException ex) { _status = ex.Message; }
         _clock.Tick += (_, _) => Tick();
     }
     public void Open(string? folder = null, bool useCurrentFolder = false)
@@ -78,18 +83,20 @@ internal sealed partial class CaptureController : IDisposable
         catch (Exception ex) { Report("素材ライブラリを開けません: " + ex.Message); }
     }
     private void Report(string message) { _status = message; _window?.Update(_busy, Recording, _recorder?.Duration ?? TimeSpan.Zero, message); StateChanged?.Invoke(); }
-    public void SavePreferences(CapturePreferences preferences)
+    internal void SaveShortcutBindings(Dictionary<string, string> additional, CapturePreferences preferences) => SavePreferences(preferences, additional);
+    public void SavePreferences(CapturePreferences preferences) => SavePreferences(preferences, _additionalShortcuts);
+    private void SavePreferences(CapturePreferences preferences, Dictionary<string, string> additional)
     {
         if (preferences.ScreenshotToastSeconds is < 0 or > 30) throw new ArgumentOutOfRangeException(nameof(preferences), "通知時間は0〜30秒で指定してください。");
-        var status = _hotkeys.Apply(preferences.ScreenshotKey, preferences.RecordingKey);
+        var status = _hotkeys.ApplyBindings(new Dictionary<string, string>(additional) { ["screenshot"] = preferences.ScreenshotKey, ["recording"] = preferences.RecordingKey });
         try
         {
             Directory.CreateDirectory(Path.GetDirectoryName(_preferencesPath)!);
             var temporary = _preferencesPath + ".tmp";
             using (var output = new FileStream(temporary, FileMode.Create, FileAccess.Write, FileShare.None)) { JsonSerializer.Serialize(output, preferences); output.Flush(true); }
-            File.Move(temporary, _preferencesPath, true); _preferences = preferences; Report(status);
+            File.Move(temporary, _preferencesPath, true); _preferences = preferences; _additionalShortcuts = new(additional); Report(status);
         }
-        catch { _hotkeys.Apply(_preferences.ScreenshotKey, _preferences.RecordingKey); throw; }
+        catch { ApplyShortcuts(_additionalShortcuts); throw; }
     }
     public Task FromLibraryAsync(string kind, string? folder)
     {
@@ -100,6 +107,7 @@ internal sealed partial class CaptureController : IDisposable
             _deviceCapture.Open(kind, folder); return Task.CompletedTask;
         }
         if (kind == "screenshot") return ScreenshotAsync(folderId: folder, useCurrentFolder: true);
+        if (kind == "regionRecording") return ToggleRegionRecordingAsync(folder, useCurrentFolder: true);
         if (kind == "recording") return ToggleRecordingAsync(folderId: folder, useCurrentFolder: true);
         if (kind != "settings") throw new ArgumentException("Unknown capture action.", nameof(kind));
         Open(folder, useCurrentFolder: true); return Task.CompletedTask;

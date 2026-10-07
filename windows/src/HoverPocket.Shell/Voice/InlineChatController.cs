@@ -27,9 +27,12 @@ internal sealed class InlineChatController : IAsyncDisposable
     internal bool Expanded { get; private set; }
     internal bool Focused { get; set; }
     internal bool Busy => _pending || _chat.Snapshot.Busy;
-    internal bool KeepOpen => Focused || Busy;
+    internal bool MenuOpen { get; set; }
+    internal bool KeepOpen => MenuOpen;
     internal string Draft => _drafts.GetValueOrDefault(_draftKey, "");
     internal CodexChatSnapshot Snapshot => _chat.Snapshot;
+    internal Task LoadModelsAsync(CancellationToken token) => _chat.LoadModelsAsync(token);
+    internal void Configure(string model, string effort) => _chat.Configure(model, effort);
     internal Task OperationForVerify => _operation;
 
     internal object State()
@@ -39,7 +42,7 @@ internal sealed class InlineChatController : IAsyncDisposable
         try { history = _chat.History; }
         catch (IOException) { history = []; _error = "chat_history_failed"; }
         return new { threadId = snapshot.ThreadId, busy = Busy, errorCode = _error ?? snapshot.ErrorCode,
-            draft = Draft, draftVersion = _draftVersion, expanded = Expanded, messages = snapshot.Messages, history };
+            draft = Draft, draftVersion = _draftVersion, expanded = Expanded, phase = snapshot.Phase, model = _chat.Model, effort = _chat.Effort, models = _chat.Models, messages = snapshot.Messages, history };
     }
     internal void SetDraft(string text)
     {
