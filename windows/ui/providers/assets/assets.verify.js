@@ -32,7 +32,7 @@ export async function verifyAssetSelection() {
     if (method === "assets.update" && params.operation === "favorite") for (const row of rows.filter(row => params.ids.includes(row.id))) row.favorite = !row.favorite;
     if (method === "assets.get") return rows.find(row=>row.id===params.id);
     if (method === "assets.preview" && audioPreview) return {id:params.id,kind:"other",width:500,height:120,audioUrl:"data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA="};
-    if (method === "assets.preview") return {id:params.id,kind:"image",width:1,height:1,dataUrl:"data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs="};
+    if (method === "assets.preview") return {id:params.id,kind:"image",width:1,height:1,dataUrl:"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGMQ0bD5DwACRAF4aig0hQAAAABJRU5ErkJggg=="};
     if (method === "assets.copy" && params.mode === "drag") { await new Promise(resolve => { releaseDrag=resolve; }); return dragResult; }
     if (method === "assets.importState") return {busy:false,completed:0,duplicates:0,skipped:0,failed:0};
     return {ok:true};

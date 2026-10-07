@@ -13,7 +13,7 @@
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
     <StartupObject>HoverPocket.Shell.Program</StartupObject>
-    <Version>0.2.12</Version>
+    <Version>0.2.13</Version>
     <NoWarn>$(NoWarn);WFO0003</NoWarn>
     <GoogleOAuthClientId Condition="'$(GoogleOAuthClientId)' == ''"></GoogleOAuthClientId>
     <GoogleOAuthClientSecret Condition="'$(GoogleOAuthClientSecret)' == ''"></GoogleOAuthClientSecret>
@@ -21,6 +21,7 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <EmbeddedResource Include="../../../shared/asset-library/preview-formats.json" LogicalName="AssetLibrary.preview-formats.json" />
     <PackageReference Include="NAudio.Wasapi" Version="3.1.0" />
     <ProjectReference Include="..\HoverPocket.Assets\HoverPocket.Assets.csproj" />
     <EmbeddedResource Include="..\..\..\Resources\AppIcon.ico" LogicalName="HoverPocket.AppIcon.ico" />
@@ -55,6 +56,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <Content Include="../../../artifacts/media-tools-windows/*" Link="MediaTools/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <Content Include="..\..\Resources\ThirdParty\NAudio-LICENSE.txt" Link="ThirdParty\NAudio-LICENSE.txt" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="..\..\ui\**\*">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
@@ -76,4 +78,3 @@
     <Content Include="..\..\..\shared\pairing-helper\THIRD-PARTY-LICENSES.html" Link="ThirdParty\Pairing-LICENSES.html" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>
-

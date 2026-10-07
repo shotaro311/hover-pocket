@@ -66,6 +66,7 @@ const capabilityHistorySummaryEl = document.querySelector("[data-capability-hist
 const capabilityHistoryClearEl = document.querySelector("[data-capability-history-clear]");
 const capabilityHistoryNoteEl = document.querySelector("[data-capability-history-note]");
 const disableFullscreenEl = document.querySelector("[data-disable-fullscreen]");
+const libraryAutoClipboardEl = document.querySelector("[data-library-auto-clipboard]");
 const clipboardPrivateEl = document.querySelector("[data-clipboard-private]");
 const stickyUndoToastEl = document.querySelector("[data-sticky-undo-toast]");
 const stickyGridSizeEl = document.querySelector("[data-sticky-grid-size]");
@@ -205,6 +206,7 @@ function render(state) {
   reduceMotionEl.checked = Boolean(state.settings.reduceMotion);
   disableFullscreenEl.checked = state.settings.disableTopEdgeInFullscreen !== false;
   clipboardPrivateEl.checked = Boolean(state.settings.clipboardPrivateMode);
+  libraryAutoClipboardEl.checked = Boolean(state.settings.libraryAutoImportClipboardImages);
   renderStickySettings();
   startupEl.checked = Boolean(state.settings.startWithWindows);
   startupStatusEl.textContent = state.settings.startWithWindowsRegistered ? t("registered") : t("off");
@@ -788,6 +790,7 @@ autoUpdatesEl.addEventListener("change", () => {
   update("settings.setAutoCheckForUpdates", { enabled: autoUpdatesEl.checked });
 });
 
+libraryAutoClipboardEl.addEventListener("change", () => { update("settings.setLibraryAutoImportClipboardImages", { enabled: libraryAutoClipboardEl.checked }); });
 clipboardPrivateEl.addEventListener("change", () => {
   update("settings.setClipboardPrivateMode", { enabled: clipboardPrivateEl.checked });
 });

@@ -1,0 +1,7 @@
+{
+  "image": ["jpg", "jpeg", "jpe", "png", "apng", "gif", "bmp", "dib", "webp", "tif", "tiff", "heic", "heif", "avif", "ico", "icns", "jxr", "wdp", "svg", "psd", "dng", "cr2", "cr3", "nef", "arw", "orf", "rw2"],
+  "video": ["mp4", "mov", "m4v", "webm", "avi", "mkv", "mpg", "mpeg", "wmv", "mts", "m2ts", "ts", "3gp", "ogv"],
+  "audio": ["m4a", "mp3", "aac", "wav", "aiff", "aif", "flac", "ogg", "oga", "opus", "wma", "caf", "m4b"],
+  "text": ["txt", "md", "markdown", "csv", "tsv", "log", "json", "xml", "yaml", "yml", "toml", "ini", "conf", "html", "htm", "css", "js", "mjs", "ts", "tsx", "jsx", "py", "swift", "cs", "c", "h", "cpp", "rs", "sh", "sql", "tex", "srt", "vtt"],
+  "document": ["docx", "xlsx", "pptx", "odt", "ods", "odp", "rtf", "doc", "xls", "ppt", "pages", "numbers", "key", "epub"]
+}

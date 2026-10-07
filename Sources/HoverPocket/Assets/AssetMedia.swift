@@ -4,6 +4,7 @@ import PDFKit
 import ImageIO
 import WebKit
 import UniformTypeIdentifiers
+import QuickLookThumbnailing
 
 struct LibraryFrame: Codable, Sendable {
     let id: String
@@ -15,10 +16,12 @@ struct LibraryFrame: Codable, Sendable {
     var videoUrl: String? = nil
     var audioUrl: String? = nil
     var error: String? = nil
+    var textContent: String? = nil
+    var truncated = false
 }
 
 enum AssetMedia {
-    static let audioExtensions: Set<String> = ["m4a", "mp3", "aac", "wav", "aiff", "aif", "flac", "ogg"]
+    static var audioExtensions: Set<String> { Set(AssetPreviewFormats.formats["audio"] ?? []) }
     static func image(_ url: URL, maximum: Int = 4096) throws -> CGImage {
         guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
               let props = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
@@ -37,12 +40,23 @@ enum AssetMedia {
         guard CGImageDestinationFinalize(dest) else { throw LibraryError.message("画像の保存に失敗しました。") }
         return data as Data
     }
-    static func frame(_ a: LibraryAsset, url: URL, page: Int = 1, thumbnail: Bool = false) async -> LibraryFrame {
-        var result = LibraryFrame(id: a.id, kind: a.kind)
+    private static func quickLook(_ url: URL, maximum: Int) async throws -> CGImage {
+        let request = QLThumbnailGenerator.Request(fileAt: url, size: CGSize(width: maximum, height: maximum), scale: 1, representationTypes: .thumbnail)
+        return try await withCheckedThrowingContinuation { continuation in
+            QLThumbnailGenerator.shared.generateBestRepresentation(for: request) { result, error in
+                if let image = result?.cgImage { continuation.resume(returning: image) }
+                else { continuation.resume(throwing: error ?? LibraryError.message("この形式を表示できません。原本は保存されています。")) }
+            }
+        }
+    }
+    static func frame(_ a: LibraryAsset, url: URL, page: Int = 1, thumbnail: Bool = false, root: URL? = nil) async -> LibraryFrame {
+        var result = LibraryFrame(id: a.id, kind: AssetPreviewFormats.kind(a.extension))
         do {
             var image: CGImage?
-            switch a.kind {
-            case "image": image = try Self.image(url, maximum: thumbnail ? 360 : 4096)
+            switch result.kind {
+            case "image":
+                do { image = try Self.image(url, maximum: thumbnail ? 360 : 4096) }
+                catch { image = try await quickLook(url, maximum: thumbnail ? 360 : 2200) }
             case "pdf":
                 guard let document = PDFDocument(url: url) else { throw LibraryError.message("PDFが破損しているか未対応です。") }
                 guard !document.isEncrypted else { throw LibraryError.message("暗号化PDFはアプリ内で表示できません。") }
@@ -61,13 +75,29 @@ enum AssetMedia {
                 let generator = AVAssetImageGenerator(asset: asset); generator.appliesPreferredTrackTransform = true
                 generator.maximumSize = CGSize(width: thumbnail ? 360 : 1280, height: thumbnail ? 360 : 1280)
                 image = try await generator.image(at: .zero).image
+            case "text", "document":
+                do {
+                    let content = try await Task.detached { try AssetDocumentPreview.read(url, ext: a.extension) }.value
+                    result.textContent = thumbnail ? String(content.text.prefix(700)) : content.text
+                    result.truncated = content.truncated; result.width = 860; result.height = 600
+                } catch {
+                    if result.kind == "document" { image = try await quickLook(url, maximum: thumbnail ? 360 : 2200) }
+                    else { throw error }
+                }
             default: break
             }
             if let image {
-                if a.kind != "video" { result.width = image.width; result.height = image.height }
+                if result.kind != "video" { result.width = image.width; result.height = image.height }
                 result.dataUrl = "data:image/png;base64," + (try png(image)).base64EncodedString()
             }
-        } catch { result.error = error.localizedDescription }
+        } catch {
+            if ["image", "video"].contains(result.kind), let root, AssetCompatibleMedia.executable != nil,
+               let converted = try? await AssetCompatibleMedia.shared.convert(url, hash: a.sha256, mode: "image", root: root),
+               let image = try? Self.image(converted, maximum: thumbnail ? 360 : 2200), let bytes = try? png(image) {
+                result.dataUrl = "data:image/png;base64," + bytes.base64EncodedString()
+                result.width = image.width; result.height = image.height
+            } else { result.error = error.localizedDescription }
+        }
         return result
     }
 }

@@ -496,7 +496,7 @@ internal sealed partial class HoverShellController : IDisposable
     }
 
     private bool KeepPanelForVoice => _panel.IsVisible && (_panelBridgeController.KeepPanelForChat || _manualResizing
-        || _panel.OwnedWindows.OfType<Window>().Any(window => window.IsVisible));
+        || _panel.HasOwnedDialog);
     private void PollPointer()
     {
         if (_captureSuppressed || _assetDropOverlay?.IsVisible == true) return;

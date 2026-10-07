@@ -67,6 +67,7 @@ internal sealed partial class PanelWindow : NoActivateWindow
     private bool _closed;
     private AssetPaneController? _assetPane;
     public AssetPreviewLayout AssetLayout { get; private set; } = new(false);
+    internal bool HasOwnedDialog => OwnedWindows.OfType<Window>().Any(window => window.IsVisible && window != _resizeOverlay);
     public event Action<AssetPreviewLayout>? AssetLayoutChanged;
     public event Action? AssetOrganizerRequested;
     public event Action? AssetPreviewDismissRequested;

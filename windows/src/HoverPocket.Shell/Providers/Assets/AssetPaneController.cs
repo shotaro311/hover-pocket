@@ -29,6 +29,7 @@ internal sealed class AssetPaneController : IDisposable
     private CancellationTokenSource? _import;
     private Asset? _selected;
     private string? _lease;
+    private string? _compatiblePath;
     private int _generation;
     private int _completed, _failed, _duplicates;
     private int _skipped, _restoreAvailable;
@@ -76,6 +77,18 @@ internal sealed class AssetPaneController : IDisposable
         Register("assets.thumbnail", async p => { var token = _thumbnails.Token; var asset = await _store.GetAsync(Text(p, "id")); return asset is null ? null : await _media.FrameAsync(asset, 1, true, token); });
         Register("assets.visibility", p => { _thumbnails.Cancel(); _thumbnails.Dispose(); _thumbnails = new(); if (!p!.Value.GetProperty("visible").GetBoolean()) _thumbnails.Cancel(); return Task.FromResult<object?>(new { ok = true }); });
         Register("assets.preview", PreviewAsync);
+        Register("assets.playbackFallback", async p =>
+        {
+            var asset = _selected;
+            if (asset is null || asset.Id != Text(p, "id") || _preview is null || _provider() != "assets") throw new InvalidOperationException("プレビューが終了しています。");
+            var generation = _generation; var token = _preview.Token;
+            var kind = AssetPreviewFormats.Kind(asset.Extension);
+            if (kind is not ("audio" or "video")) throw new InvalidOperationException("この素材は音声または動画ではありません。");
+            var path = await AssetCompatibleMedia.ConvertAsync(_store, asset, kind, token);
+            if (generation != _generation || _disposed || token.IsCancellationRequested) return new { cancelled = true };
+            _mediaServer?.CloseStreams(); _compatiblePath = path; _lease = Guid.NewGuid().ToString("N");
+            return new { url = $"https://asset-media.hoverpocket.local/{_lease}/{asset.Id}" };
+        });
         Register("assets.transition", async p =>
         {
             if (_owner is not Windows.PanelWindow panel) return new { revision = 0L };
@@ -114,7 +127,7 @@ internal sealed class AssetPaneController : IDisposable
             return new { removed };
         });
         _mediaServer = new AssetMediaServer(store, web,
-            () => _selected is not null && _provider() == "assets" ? new(_selected, _lease) : null);
+            () => _selected is not null && _provider() == "assets" ? new(_selected, _lease, _compatiblePath) : null);
         web.ContainsFullScreenElementChanged += OnBrowserFullscreenChanged;
     }
 
@@ -154,17 +167,18 @@ internal sealed class AssetPaneController : IDisposable
         var asset = await _store.GetAsync(id) ?? throw new FileNotFoundException();
         if (generation != _generation || _disposed || token.IsCancellationRequested) return new { cancelled = true };
         if (_provider() != "assets") throw new InvalidOperationException("素材画面でプレビューしてください。");
-        _selected = asset; _lease = Guid.NewGuid().ToString("N");
-        _layout(_previewLayout with { Active = true, PinOnly = !_previewLayout.Active });
+        _selected = asset; _compatiblePath = null; _lease = Guid.NewGuid().ToString("N");
+        _layout(_previewLayout with { Active = true, PinOnly = false });
         _previewLayout = _previewLayout with { Active = true };
         var page = p!.Value.TryGetProperty("page", out var number) ? Math.Max(1, number.GetInt32()) : 1;
-        var audio = AssetMediaServer.AudioMime(asset) is not null;
+        var kind = AssetPreviewFormats.Kind(asset.Extension);
+        var audio = kind == "audio";
         var frame = audio ? new AssetFrame(null, 640, 160) : await _media.FrameAsync(asset, page, false, token);
         if (generation != _generation || _disposed) return new { cancelled = true };
         _previewLayout = new(true, _previewLayout.Fullscreen, frame.Width, frame.Height, _previewLayout.Organizer);
         // The client presents this layout after the preview image has decoded.
-        return new { id, generation, asset.Kind, frame.DataUrl, frame.Width, frame.Height, frame.Pages, frame.Error,
-            videoUrl = asset.Kind == "video" ? $"https://asset-media.hoverpocket.local/{_lease}/{asset.Id}" : null,
+        return new { id, generation, kind, frame.DataUrl, frame.Width, frame.Height, frame.Pages, frame.Error, frame.TextContent, frame.Truncated,
+            videoUrl = kind == "video" ? $"https://asset-media.hoverpocket.local/{_lease}/{asset.Id}" : null,
             audioUrl = audio ? $"https://asset-media.hoverpocket.local/{_lease}/{asset.Id}" : null };
     }
     private bool _editingImage;

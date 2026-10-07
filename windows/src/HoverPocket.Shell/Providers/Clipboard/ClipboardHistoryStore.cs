@@ -44,6 +44,7 @@ internal sealed class ClipboardHistoryStore
     public string HistoryPath { get; }
 
     public string? LastErrorMessage { get; private set; }
+    internal event Action<byte[], DateTimeOffset>? ImageCopied;
 
     public IReadOnlyList<ClipboardTextHistoryItem> TextItems
     {
@@ -67,13 +68,13 @@ internal sealed class ClipboardHistoryStore
         }
     }
 
-    public void CaptureCurrentClipboard(string source)
+    public void CaptureCurrentClipboard(string source, bool imagesOnly = false)
     {
         try
         {
             WithClipboardRetry(() =>
             {
-                if (WpfClipboard.ContainsText(WpfTextDataFormat.UnicodeText))
+                if (!imagesOnly && WpfClipboard.ContainsText(WpfTextDataFormat.UnicodeText))
                 {
                     var text = WpfClipboard.GetText(WpfTextDataFormat.UnicodeText);
                     AddText(text, source);
@@ -133,6 +134,7 @@ internal sealed class ClipboardHistoryStore
         _ = source;
         var pngBytes = EncodePng(image);
         var hash = ComputeHash(pngBytes);
+        if (source == "WM_CLIPBOARDUPDATE") ImageCopied?.Invoke(pngBytes, _clock());
 
         lock (_gate)
         {

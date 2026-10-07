@@ -209,6 +209,11 @@ final class ProviderStore: ObservableObject {
             }
             .store(in: &settingsCancellables)
 
+        settings.$libraryAutoImportClipboardImages
+            .dropFirst().removeDuplicates()
+            .sink { [weak self] _ in self?.scheduleSettingsDidChange() }
+            .store(in: &settingsCancellables)
+
         settings.$aiNativeEnabled
             .dropFirst()
             .removeDuplicates()
@@ -288,7 +293,9 @@ final class ProviderStore: ObservableObject {
 
     private func syncProviderSideEffects() {
         let clipboardVisible = visibleManifests.contains { $0.id == ClipboardProvider.pluginID }
-        if clipboardVisible {
+        ClipboardHistoryStore.shared.capturesText = clipboardVisible
+        ClipboardHistoryStore.shared.autoImportEnabled = { [weak self] in self?.settings.libraryAutoImportClipboardImages == true }
+        if clipboardVisible || settings.libraryAutoImportClipboardImages {
             ClipboardHistoryStore.shared.startMonitoring()
         } else {
             ClipboardHistoryStore.shared.stopMonitoring()

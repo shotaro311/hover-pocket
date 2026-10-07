@@ -67,6 +67,7 @@ final class EphemeralAppSettingsDefaults: AppSettingsDefaultsStoring, @unchecked
 
 @MainActor
 final class AppSettings: ObservableObject {
+    @Published var libraryAutoImportClipboardImages: Bool { didSet { defaults.set(libraryAutoImportClipboardImages, forKey: "libraryAutoImportClipboardImages") } }
     @Published var panelResizing = false
     @Published var customPanelSize: CGSize? {
         didSet { if !panelResizing { persistPanelSize() } }
@@ -305,6 +306,7 @@ final class AppSettings: ObservableObject {
         chatEffort = defaults.string(forKey: "chatEffort") ?? "medium"
         shortcuts = defaults.object(forKey: "shortcuts") as? [String: String] ?? AppShortcutBindings.defaults
         self.disabledPocketLibraries = Set(defaults.stringArray(forKey: "disabledPocketLibraries") ?? [])
+        self.libraryAutoImportClipboardImages = defaults.bool(forKey: "libraryAutoImportClipboardImages")
         self.pocketToolModel = defaults.string(forKey: "pocketToolModel") ?? CodexAppServerPocketGenerator.model
         self.pocketToolReasoningEffort = defaults.string(forKey: "pocketToolReasoningEffort") ?? "medium"
         let languageRawValue = defaults.string(forKey: Self.appLanguageKey)

@@ -46,6 +46,7 @@ internal sealed class UserSettings
     public VoiceLaneLayoutPreference VoiceLaneLayout { get; set; } = VoiceLaneLayoutPreference.Compact;
 
     public bool ClipboardPrivateMode { get; set; }
+    public bool LibraryAutoImportClipboardImages { get; set; }
 
     public bool RememberLastSelectedProvider { get; set; } = true;
 
@@ -91,6 +92,7 @@ internal sealed class UserSettings
             VoiceCalendarAccessGranted = VoiceCalendarAccessGranted,
             VoiceLaneLayout = VoiceLaneLayout,
             ClipboardPrivateMode = ClipboardPrivateMode,
+            LibraryAutoImportClipboardImages = LibraryAutoImportClipboardImages,
             RememberLastSelectedProvider = RememberLastSelectedProvider,
             PreferredProviderId = PreferredProviderId,
             LastSelectedProviderId = LastSelectedProviderId,

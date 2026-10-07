@@ -38,6 +38,8 @@ internal sealed class UiVerifier
 
             if (ready && Environment.GetEnvironmentVariable("HOVERPOCKET_SYNC_VERIFY_ONLY") == "1")
                 return await AssetSyncVerifier.RunAsync(_controller);
+            if (ready && Environment.GetEnvironmentVariable("HOVERPOCKET_LIBRARY_MEDIA_VERIFY_ONLY") == "1")
+                return await LibraryMediaVerifier.RunAsync(_controller);
             if (ready && Environment.GetEnvironmentVariable("HOVERPOCKET_RESPONSE_VERIFY_ONLY") == "1")
                 return await ProviderResponseVerifier.RunAsync(_controller.Panel.WebView!);
             if (ready && Environment.GetEnvironmentVariable("HOVERPOCKET_LIBRARY_EXTENSIONS_VERIFY_ONLY") == "1")
