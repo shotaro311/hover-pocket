@@ -166,9 +166,9 @@ enum LiquidPanelGeometry {
         let preserveTop = attachment.contentTop
             + (attachment.preservedNeckTop - attachment.contentTop) * connectionReveal
         let drawTop = preserveTop * (1 - blend)
-        // Align the meniscus with the hardware edges, including one pixel of overlap.
-        // An inset anchor exposes a step where the hardware meets the drawn curve.
-        let expandedNeck = neckWidth + (width - neckWidth) * blend
+        // Hide the upper anchor just inside the hardware; keep the curved vertical overlap.
+        let preservedNeck = attachment.notchWidth > 0 ? max(0, attachment.notchWidth - 2) : neckWidth
+        let expandedNeck = preservedNeck + (width - preservedNeck) * blend
         let spread = max(0, (width - expandedNeck) / 2)
         let upperRadius = min(8 * p * blend, max(0, bodyTop - drawTop))
         let preserveRadius = min(18, preserveWidth / 2, max(0, preserveBottom - attachment.contentTop) / 2)
