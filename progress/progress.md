@@ -2,12 +2,12 @@
 project_slug: hover-menu-preview
 updated: 2026-10-08
 updated_by: codex
-status: production-macos-0.2.16; production-windows-0.2.14
+status: production-macos-0.2.17; production-windows-0.2.15
 ---
 
 ## 2026-10-08 チャット欄の折りたたみ
 
-- 両OSの会話欄の右上へ開閉ボタンを追加。下書きと会話を保持し、返信を継続したまま見出しだけへ収納できる。Windowsの実パネル検証は成功。MacとCIを検証中。[実装・検証](2026-10/2026-10-08_hover-pocket-chat-collapse.md)。
+- 両OSの会話欄の右上へ開閉ボタンを追加。下書きと会話を保持し、返信を継続したまま見出しだけへ収納できる。Windows 0.2.15とMac 0.2.17 / build683を公開・本番へ適用。両OSの開閉・返信中・下書き保持、最終PR CI、公開99項目、更新・復元CIが成功。設定・素材30件・会話を保持し、旧アプリとデータはバックアップへ残した。統合main CIも成功。[実装・検証](2026-10/2026-10-08_hover-pocket-chat-collapse.md)。
 
 ## 2026-10-08 Macのノッチ左右の微調整
 
