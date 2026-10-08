@@ -21,6 +21,6 @@
 - 公開フィード・配布物99項目が成功。Mac実機でも公開物を別途ダウンロードし、署名・公証・Gatekeeperを確認。Windowsで初回の署名検査はOpenSSLがPATHにないため失敗し、既存Git付属のOpenSSLを指定して99項目が成功した。
 - 本番アプリを通常終了し、旧アプリとユーザーデータを`startup-backup/`へ保持して公開版から更新。`/Applications/HoverPocket.app` 0.2.15 / build681、PID91780の一意な起動と公開バイナリ・同梱メディア補助プログラムの一致を確認した。
 - 素材30件・DB・原本・設定・チャット・Clipboardのすべてが更新前後で一致。Clipboardの画像20件、テキスト30件も入れ替わりなし。旧アプリは`installed-old-moved.app`にも保持した。
-- [PR最終CI](https://github.com/shotaro311/hover-pocket/actions/runs/37737228353)、[公開物CI](https://github.com/shotaro311/hover-pocket/actions/runs/37738147892)、[Mac 0.2.14→0.2.15の更新・復元・再インストールCI](https://github.com/shotaro311/hover-pocket/actions/runs/37738152044)が成功。mainへの統合後CIは進行中。
+- [PR最終CI](https://github.com/shotaro311/hover-pocket/actions/runs/37737228353)、[main統合後CI](https://github.com/shotaro311/hover-pocket/actions/runs/37737929235)、[公開物CI](https://github.com/shotaro311/hover-pocket/actions/runs/37738147892)、[Mac 0.2.14→0.2.15の更新・復元・再インストールCI](https://github.com/shotaro311/hover-pocket/actions/runs/37738152044)が成功。
 
 作業と検証の証拠は独立worktree内の`artifacts/mac-model-notch-20261008/`に保持する。元の未コミット変更とMac側の保存済み変更は保持する。
