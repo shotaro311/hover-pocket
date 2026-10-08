@@ -80,25 +80,25 @@ struct HoverPanelShell: View {
                     VoiceLaneHostView(runtime: voiceRuntime, settings: settings, height: chatHeight, onOpenSettings: onOpenSettings)
                         .overlay(alignment: .top) {
                             if !chat.panelFolded {
-                            RoundedRectangle(cornerRadius: 2).fill(Color.secondary.opacity(0.6))
-                                .frame(width: 40, height: 2).frame(maxWidth: .infinity).frame(height: 8)
-                                .contentShape(Rectangle()).offset(y: -4)
-                                .help(settings.appLanguage == .japanese ? "ドラッグして素材とチャットの高さを調整" : "Drag to resize tools and chat")
-                                .accessibilityLabel("Resize tools and chat")
-                                .accessibilityIdentifier("chat-splitter")
-                                .accessibilityAdjustableAction { direction in
-                                    let delta = direction == .increment ? 0.03 : -0.03
-                                    settings.chatSplitRatio = min(0.9, max(0.1, Double(chatHeight / contentHeight) + delta))
-                                }
-                                .gesture(DragGesture(minimumDistance: 0, coordinateSpace: .global)
-                                    .onChanged { value in
-                                        if splitStart == nil { splitStart = chatHeight; settings.panelResizing = true }
-                                        splitRatio = min(0.9, max(0.1, Double(((splitStart ?? chatHeight) - value.translation.height) / contentHeight)))
+                                RoundedRectangle(cornerRadius: 2).fill(Color.secondary.opacity(0.6))
+                                    .frame(width: 40, height: 2).frame(maxWidth: .infinity).frame(height: 8)
+                                    .contentShape(Rectangle()).offset(y: -4)
+                                    .help(settings.appLanguage == .japanese ? "ドラッグして素材とチャットの高さを調整" : "Drag to resize tools and chat")
+                                    .accessibilityLabel("Resize tools and chat")
+                                    .accessibilityIdentifier("chat-splitter")
+                                    .accessibilityAdjustableAction { direction in
+                                        let delta = direction == .increment ? 0.03 : -0.03
+                                        settings.chatSplitRatio = min(0.9, max(0.1, Double(chatHeight / contentHeight) + delta))
                                     }
-                                    .onEnded { _ in
-                                        if let splitRatio { settings.chatSplitRatio = splitRatio }
-                                        splitStart = nil; splitRatio = nil; settings.panelResizing = false
-                                    })
+                                    .gesture(DragGesture(minimumDistance: 0, coordinateSpace: .global)
+                                        .onChanged { value in
+                                            if splitStart == nil { splitStart = chatHeight; settings.panelResizing = true }
+                                            splitRatio = min(0.9, max(0.1, Double(((splitStart ?? chatHeight) - value.translation.height) / contentHeight)))
+                                        }
+                                        .onEnded { _ in
+                                            if let splitRatio { settings.chatSplitRatio = splitRatio }
+                                            splitStart = nil; splitRatio = nil; settings.panelResizing = false
+                                        })
                             }
                         }
                 }

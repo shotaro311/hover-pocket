@@ -17,8 +17,7 @@ export function createInlineChat({ container, request, on, toggleVoice, toggleMu
   const menu=createChatChoiceMenu(root,open=>void request("chat.menu",{open}).catch(fail));
   const views=new Map(),text=(ja,en)=>english?en:ja;
   const title=(element,value)=>{element.title=value;element.setAttribute("aria-label",value);};
-  const fail=()=>{status.textContent=text("接続を確認できません。下書きは保持しています。","Connection unavailable. Your draft is kept.");if(state.folded&&state.busy)status.textContent=text(state.phase==="responding"?"返答中…":"考え中…",state.phase==="responding"?"Responding…":"Thinking…");
-    status.title=status.textContent;recover.textContent=text("設定を開く","Settings");recover.hidden=false;};
+  const fail=()=>{status.textContent=text("接続を確認できません。下書きは保持しています。","Connection unavailable. Your draft is kept.");status.title=status.textContent;recover.textContent=text("設定を開く","Settings");recover.hidden=false;};
   async function action(method,params){try{const next=await request(method,params);if(next?.messages)render(next);return next;}catch{fail();return null;}}
   function draftChanged(){void request("chat.draft",{text:draft.value}).catch(fail);controls();}
   async function submit(){
@@ -90,6 +89,7 @@ export function createInlineChat({ container, request, on, toggleVoice, toggleMu
     if(model.dataset.key!==key){model.textContent=modelItems().find(item=>item.value===(state.model||""))?.label||state.model||text("モデル: 自動","Model: Default");effort.textContent=effortItems().find(item=>item.value===(state.effort||""))?.label||text("推論: 自動","Reasoning: Default");model.dataset.key=key;refreshMenu();}
     title(model,text("モデルを選択","Choose model"));title(effort,text("推論の強さ","Reasoning effort"));login.textContent=text("ログイン","Sign in");login.hidden=state.errorCode!=="chat_sign_in_required";
     status.textContent=state.errorCode==="chat_sign_in_required"?text("ログインが必要です","Sign in to send"):state.errorCode==="chat_stopped"?text("停止しました","Stopped"):state.errorCode==="chat_tools_changed_start_new"?text("新しい会話を開始してください","Start a new conversation"):state.errorCode==="chat_models_unavailable"?text("モデルを取得できません。接続を確認してください。","Models unavailable. Check your connection."):state.errorCode==="chat_history_failed"?text("履歴を読み込めませんでした。会話は保持しています。","Could not load history. Conversations are kept."):state.errorCode?text("応答を確認できません。送信前に会話を確認してください。","Response could not be confirmed. Check the conversation before sending again."):"";
+    if(state.folded&&state.busy&&!state.errorCode)status.textContent=text(state.phase==="responding"?"返答中…":"考え中…",state.phase==="responding"?"Responding…":"Thinking…");
     status.title=status.textContent;recover.hidden=!state.errorCode||state.errorCode==="chat_stopped"||state.errorCode==="chat_tools_changed_start_new";recover.textContent=text("設定を開く","Settings");title(recover,text("AIの接続設定を確認","Check AI connection settings"));
     progress.hidden=!state.busy;find("progress").textContent=text(state.phase==="responding"?"返答中…":"考え中…",state.phase==="responding"?"Responding…":"Thinking…");controls();renderVoice();
   }

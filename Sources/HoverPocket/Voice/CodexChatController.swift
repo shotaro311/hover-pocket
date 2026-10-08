@@ -228,6 +228,7 @@ final class CodexChatController: ObservableObject {
     }
     func newConversation() {
         guard !busy, !loadingModels else { return }
+        setPanelFolded(false)
         stop(); archiveCurrent(); rootID = nil; threadTools = []; messages = []; draft = ""; status = ""; persist()
     }
     private func archiveCurrent() {
@@ -241,6 +242,7 @@ final class CodexChatController: ObservableObject {
         guard !busy, !loadingModels else { return }
         stop(); archiveCurrent()
         guard let entry = conversations.first(where: { $0.id == id }) else { return }
+        setPanelFolded(false)
         rootID = entry.id; threadTools = entry.tools; messages = entry.messages; draft = entry.draft
         status = ""; panelExpanded = true; persist()
     }
@@ -317,17 +319,23 @@ final class CodexChatController: ObservableObject {
         model.panelExpanded = true
         model.panelExpanded = false
         try check(model.draft == "未送信の依頼" && model.messages.last?.text == "保存しました", "collapsing preserves draft and conversation")
-        model.panelExpanded = true; model.busy = true
-        let retainedMessages = model.messages
-        model.setPanelFolded(true)
-        model.resolvePanelHeight(panelSize: "small", voiceMode: .expanded, availableHeight: 700)
-        try check(model.panelHeight == CodexChatPanelLayout.headerHeight && !model.composerFocused && model.busy, "folding during a response keeps only the header without stopping voice or chat")
-        event("item/agentMessage/delta", ["threadId": .string("fixture-chat"), "turnId": .string("turn-1"), "delta": .string("late")])
-        try check(model.panelFolded && model.messages == retainedMessages, "incoming events keep manual folding and finalized history")
-        model.setPanelFolded(false)
-        model.resolvePanelHeight(panelSize: "small", voiceMode: .disabled, availableHeight: 700)
-        try check(model.panelHeight > CodexChatPanelLayout.composerHeight && model.panelExpanded && model.draft == "未送信の依頼" && model.messages == retainedMessages, "unfolding restores transcript, draft and expanded layout")
-        model.busy = false
+        let foldedFixture = CodexChatController(storage: root.appendingPathComponent("folded-chat/history.json"))
+        foldedFixture.rootID = "folded-thread"; foldedFixture.turnID = "folded-turn"
+        foldedFixture.panelExpanded = true; foldedFixture.busy = true; foldedFixture.draft = "未送信の依頼"
+        foldedFixture.setPanelFolded(true)
+        foldedFixture.resolvePanelHeight(panelSize: "small", voiceMode: .expanded, availableHeight: 700)
+        try check(foldedFixture.panelHeight == CodexChatPanelLayout.headerHeight && !foldedFixture.composerFocused && foldedFixture.busy, "folding during a response keeps only the header without stopping voice or chat")
+        foldedFixture.receive(CodexAppServerNotification(method: "item/agentMessage/delta", params: .object([
+            "threadId": .string("folded-thread"), "turnId": .string("folded-turn"), "itemId": .string("folded-reply"), "delta": .string("折りたたみ中の返信")
+        ])))
+        try check(foldedFixture.panelFolded && foldedFixture.messages.last?.text == "折りたたみ中の返信" && foldedFixture.busy, "incoming response is retained while the chat stays manually folded")
+        foldedFixture.receive(CodexAppServerNotification(method: "turn/completed", params: .object([
+            "threadId": .string("folded-thread"), "turn": .object(["id": .string("folded-turn"), "status": .string("completed")])
+        ])))
+        try check(foldedFixture.panelFolded && !foldedFixture.busy, "completion keeps manual folding")
+        foldedFixture.setPanelFolded(false)
+        foldedFixture.resolvePanelHeight(panelSize: "small", voiceMode: .disabled, availableHeight: 700)
+        try check(foldedFixture.panelHeight > CodexChatPanelLayout.composerHeight && foldedFixture.panelExpanded && foldedFixture.draft == "未送信の依頼" && foldedFixture.messages.last?.text == "折りたたみ中の返信", "unfolding restores transcript, draft and expanded layout")
         let reopened = CodexChatController(storage: file)
         try check(reopened.messages == model.messages && reopened.rootID == "fixture-chat", "history restores with its thread")
         model.busy = true; model.turnID = "turn-2"; model.stop()
