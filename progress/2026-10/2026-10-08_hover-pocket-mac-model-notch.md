@@ -9,9 +9,18 @@
 
 ## 検証・配布
 
-- 初回のMac releaseビルドと会話42項目が成功。標準ポップアップの実追跡、選択・取消、設定の保存と表示反映を検証した。
-- 内蔵Retina画面のノッチ寸法を取得して配置を確認。丸い角を含む接続を検査する条件を追加した。
-- 最終ビルド、実カタログ、液体アニメーション・配置・ホバー収納の回帰検査と公開更新は進行中。本番はMac 0.2.14 / build680、Windows 0.2.14を維持している。
+- Mac releaseビルドと会話43項目が成功。標準ポップアップの実追跡、選択・取消、設定の保存と表示反映、利用不可モデルの表示を検証した。実Codex接続では8モデルを取得・選択保存し、会話やチャット履歴が作られないことも確認した。
+- 内蔵Retina画面は1512×982、倍率2、上端32、ノッチ幅185。丸い角を含む接続を、幅185/246・倍率1/2/3で検証した。接続を広げたため旧検査の外側座標を更新した。アニメーション開始時の検査が1回失敗したが、同じバイナリの再実行では両接続方式のホバー収納・メニュー・100回開閉まで成功した。失敗ログも保持している。
+- 配置160条件、両接続方式の実メニュー選択・取消と収納、100回開閉、PR最終CIが成功。画面収録のOS権限がないため画面上のピクセル検査はスキップ。更新直前のユーザー報告時は本番0.2.14であり、更新後の目視確認は依頼中。
 - 前回保留した完了記録3ファイルは、ユーザーの直接反映承認を受けmain `636560b0f34b634b195ccfbc311f2aeb232632ee`へ反映し、読み戻しを確認した。
+
+## 本番反映・読み戻し
+
+- [PR #53](https://github.com/shotaro311/hover-pocket/pull/53)をmain `a4a79f7339ec0b4d29db4a07150b847bcc126624`へ統合。Macのビルド元 `f26ed7fcbd3e94e7c57bdd420a7801bddf436204`とmainの製品ソース・配布スクリプトが一致することを確認した。
+- [Mac 0.2.15 / build681](https://github.com/shotaro311/hover-pocket/releases/tag/v0.2.15-681)を署名・公証して公開。Appleの公証はAccepted、submission `1ba42546-4657-4ff1-9988-c17bccc0782e`。公開ZIPのSHA256は `60b728bc298b3e8a0bd58b0a9e72a8faab277ddcacda9d417d059a88f62368cd`。Windowsは0.2.14。
+- 公開フィード・配布物99項目が成功。Mac実機でも公開物を別途ダウンロードし、署名・公証・Gatekeeperを確認。Windowsで初回の署名検査はOpenSSLがPATHにないため失敗し、既存Git付属のOpenSSLを指定して99項目が成功した。
+- 本番アプリを通常終了し、旧アプリとユーザーデータを`startup-backup/`へ保持して公開版から更新。`/Applications/HoverPocket.app` 0.2.15 / build681、PID91780の一意な起動と公開バイナリ・同梱メディア補助プログラムの一致を確認した。
+- 素材30件・DB・原本・設定・チャット・Clipboardのすべてが更新前後で一致。Clipboardの画像20件、テキスト30件も入れ替わりなし。旧アプリは`installed-old-moved.app`にも保持した。
+- [PR最終CI](https://github.com/shotaro311/hover-pocket/actions/runs/37737228353)、[main統合後CI](https://github.com/shotaro311/hover-pocket/actions/runs/37737929235)、[公開物CI](https://github.com/shotaro311/hover-pocket/actions/runs/37738147892)、[Mac 0.2.14→0.2.15の更新・復元・再インストールCI](https://github.com/shotaro311/hover-pocket/actions/runs/37738152044)が成功。
 
 作業と検証の証拠は独立worktree内の`artifacts/mac-model-notch-20261008/`に保持する。元の未コミット変更とMac側の保存済み変更は保持する。
