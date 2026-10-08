@@ -123,9 +123,21 @@ enum LiquidMotionVerificationCommand {
                       abs(shape.neckRect.maxX - hardwareRight - pixel) < 1e-9 else {
                     throw PanelSoakVerificationError.failed("liquid_notch_edge_alignment scale=\(scale) notch=\(notch)")
                 }
+                // Sample the rounded hardware corner above the old 6pt join.
+                // A straight-edge check alone misses the exposed wedge in this band.
+                for header: CGFloat in [24, 32, 38] {
+                    let roundedMetrics = PanelAttachmentMetrics(headerHeight: header, notchWidth: notch, pixelOverlap: pixel)
+                    let rounded = LiquidPanelGeometry.shape(progress: 1, panelRect: frame,
+                        originWidth: notch, attachment: roundedMetrics, attachmentBlend: 0)
+                    for side in [hardwareLeft + pixel / 2, hardwareRight - pixel / 2] {
+                        guard rounded.path.contains(CGPoint(x: side, y: frame.minY + header - 8)) else {
+                            throw PanelSoakVerificationError.failed("liquid_rounded_notch_corner_gap scale=\(scale) header=\(header)")
+                        }
+                    }
+                }
             }
         }
-        print("liquid_notch_edge_alignment=ok scales=1,2,3 notch_widths=185,246 sides=left,right")
+        print("liquid_notch_edge_alignment=ok scales=1,2,3 notch_widths=185,246 sides=left,right rounded_corners=covered")
     }
 
     private static func verifyOpeningOrigins() throws {

@@ -2,8 +2,13 @@
 project_slug: hover-menu-preview
 updated: 2026-10-08
 updated_by: codex
-status: production-0.2.14; library-chat-actions-released; public-and-transition-readback-passed
+status: mac-model-notch-verification; production-macos-0.2.14; production-windows-0.2.14
 ---
+
+## 2026-10-08 Macのモデル選択とノッチ境界
+
+- モデル一覧を会話の接続準備から分離し、モデル・推論を標準ポップアップで選択する。クリック時の再取得を廃止し、丸いノッチ下角へ接続する描画も調整した。
+- 初回ビルドと会話42項目が成功。最終カタログ・配置・アニメーション検査とMac本番更新を進める。[変更・検証](2026-10/2026-10-08_hover-pocket-mac-model-notch.md)。
 
 ## 2026-10-08 素材メニュー・会話の境界・Codex操作権限の本番反映
 

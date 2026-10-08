@@ -105,9 +105,9 @@ struct PanelAttachmentMetrics: Equatable {
     var pixelOverlap: CGFloat = 0.5
 
     var preservedNeckTop: CGFloat {
-        // Only the compact lower meniscus may blend into the physical notch.
+        // Overlap the hardware's rounded bottom corners before the curve widens.
         if notchWidth > 0 {
-            let top = headerHeight - min(6, max(0, headerHeight / 2))
+            let top = headerHeight - min(16, max(0, headerHeight / 2))
             guard pixelOverlap > 0 else { return top }
             return min(headerHeight, ceil(top / pixelOverlap) * pixelOverlap)
         }

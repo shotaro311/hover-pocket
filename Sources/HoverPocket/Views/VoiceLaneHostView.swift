@@ -29,6 +29,7 @@ struct VoiceLaneHostView: View {
         .background(Color.white.opacity(0.025))
         .overlay(alignment: .top) { Divider().overlay(Color.white.opacity(0.08)) }
         .onAppear { chat.configure(settings: settings) }
+        .task { await chat.loadModels() }
         .onChange(of: chat.messages.count) { _, _ in showsVoiceHistory = false }
         .accessibilityElement(children: .contain)
         .accessibilityLabel(localized(japanese: "チャットと音声", english: "Chat and Voice"))
@@ -58,24 +59,26 @@ struct VoiceLaneHostView: View {
                     .frame(height: 34)
                     .help(localized(japanese: "Enterで送信 · Shift+Enterで改行", english: "Enter to send · Shift+Enter for a new line"))
                 HStack(spacing: 8) {
-                    Menu {
-                        if chat.models.isEmpty { Text(localized(japanese: "モデルを読み込んでいます…", english: "Loading models…")) }
-                        ForEach(chat.models) { choice in
-                            Button(choice.displayName) { chat.chooseModel(choice.model) }
-                        }
-                    } label: { Text(chat.loadingModels ? localized(japanese: "モデルを確認中…", english: "Loading models…") : chat.models.first(where: { $0.model == settings.chatModel })?.displayName ?? settings.chatModel).lineLimit(1) }
-                    .menuStyle(.borderlessButton).fixedSize().frame(maxWidth: 150)
-                    .disabled(chat.busy || chat.loadingModels)
-                    .simultaneousGesture(TapGesture().onEnded { Task { await chat.loadModels() } })
-                    .onHover { inside in if inside { Task { await chat.loadModels() } } }
+                    ChatChoiceMenu(choices: chat.models.map { .init(id: $0.model, title: $0.displayName) },
+                        selectedID: settings.chatModel,
+                        placeholder: !chat.models.isEmpty ? settings.chatModel + localized(japanese: "（利用不可）", english: " (unavailable)")
+                            : chat.loadingModels ? localized(japanese: "モデルを確認中…", english: "Loading models…")
+                                : localized(japanese: "モデル未取得", english: "Models unavailable"),
+                        enabled: !chat.busy && !chat.loadingModels, onChoose: chat.chooseModel)
+                    .frame(maxWidth: 150).frame(height: 20)
                     .help(localized(japanese: "モデルを選択", english: "Choose model"))
-                    Menu {
-                        ForEach(chat.models.first(where: { $0.model == settings.chatModel })?.efforts ?? [], id: \.self) { effort in
-                            Button(effort) { chat.chooseEffort(effort) }
-                        }
-                    } label: { Text(ChatEffortPresentation.title(settings.chatEffort, language: settings.appLanguage)) }
-                    .menuStyle(.borderlessButton).fixedSize().disabled(chat.busy || chat.models.isEmpty)
+                    ChatChoiceMenu(choices: (chat.models.first(where: { $0.model == settings.chatModel })?.efforts ?? []).map {
+                            .init(id: $0, title: ChatEffortPresentation.title($0, language: settings.appLanguage))
+                        }, selectedID: settings.chatEffort,
+                        placeholder: ChatEffortPresentation.title(settings.chatEffort, language: settings.appLanguage),
+                        enabled: !chat.busy, onChoose: chat.chooseEffort)
+                    .frame(maxWidth: 120).frame(height: 20)
                     .help(localized(japanese: "推論の強さ", english: "Reasoning effort"))
+                    if chat.models.isEmpty && !chat.loadingModels {
+                        Button { Task { await chat.loadModels() } } label: { Image(systemName: "arrow.clockwise") }
+                            .buttonStyle(.plain).disabled(chat.busy)
+                            .help(localized(japanese: "モデルを再読み込み", english: "Reload models"))
+                    }
                     Spacer(minLength: 0)
                     Button {} label: { Image(systemName: "mic").frame(width: 24, height: 28) }
                         .buttonStyle(.plain).disabled(true).help(CodexChatController.dictationNotice)

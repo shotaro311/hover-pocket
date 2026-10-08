@@ -239,23 +239,13 @@ final class CodexChatController: ObservableObject {
     }
     func loadModels() async {
         guard !busy, !loadingModels, models.isEmpty else { return }
+        guard HoverPocketRuntimeEnvironment.shared.externalIntegrationsEnabled
+            || HoverPocketRuntimeEnvironment.shared.isIsolatedVoiceE2E else { return }
         loadingModels = true; defer { loadingModels = false }
         do {
-            try await connect()
-            var choices: [ChatModelChoice] = [], cursor: String?
-            for _ in 0..<8 {
-                var params: [String: CodexJSONValue] = ["limit": .integer(100)]
-                if let cursor { params["cursor"] = .string(cursor) }
-                guard let result = try await client?.sendRequest("model/list", params: .object(params)).objectValue,
-                      let values = result["data"]?.arrayValue else { throw LibraryError.message("モデルを取得できません。") }
-                for value in values {
-                    guard let row = value.objectValue, row["hidden"]?.boolValue != true, let model = row["model"]?.stringValue else { continue }
-                    let efforts = row["supportedReasoningEfforts"]?.arrayValue?.compactMap { $0.objectValue?["reasoningEffort"]?.stringValue } ?? []
-                    choices.append(ChatModelChoice(model: model, displayName: row["displayName"]?.stringValue ?? model, defaultEffort: row["defaultReasoningEffort"]?.stringValue ?? "medium", efforts: efforts))
-                }
-                cursor = result["nextCursor"]?.stringValue
-                if cursor == nil { break }
-            }
+            let catalog = try CodexAppServerPocketGenerator(
+                workspaceRoot: HoverPocketRuntimeEnvironment.shared.storageDirectory("ChatWorkspace"))
+            let choices = try await catalog.availableModels()
             models = choices; status = choices.isEmpty ? "モデル一覧を取得できませんでした。" : ""
         } catch { status = "モデルを取得できません。Codexへのログインを確認してください。" }
     }
@@ -266,6 +256,22 @@ final class CodexChatController: ObservableObject {
     func chooseEffort(_ effort: String) {
         guard !busy, let settings, models.first(where: { $0.model == settings.chatModel })?.efforts.contains(effort) == true else { return }
         settings.chatEffort = effort
+    }
+
+    static func verifyModelCatalog(at root: URL) async throws {
+        let model = CodexChatController(storage: root.appendingPathComponent("history.json"))
+        let settings = AppSettings(defaults: EphemeralAppSettingsDefaults())
+        model.configure(settings: settings)
+        await model.loadModels()
+        guard !model.models.isEmpty, model.client == nil, model.rootID == nil,
+              !FileManager.default.fileExists(atPath: model.storage.path) else {
+            throw LibraryError.message("Model catalog must load without starting or saving a conversation: " + model.status)
+        }
+        print("PASS chat catalog: live model list without conversation, tool routing, or history writes; choices=\(model.models.count)")
+        let choice = model.models.first(where: { $0.model != settings.chatModel }) ?? model.models[0]
+        model.chooseModel(choice.model)
+        guard settings.chatModel == choice.model else { throw LibraryError.message("Live model selection failed") }
+        print("PASS chat catalog: discovered model selection persists")
     }
     static func verify(at root: URL) throws {
         let file = root.appendingPathComponent("chat/history.json")
