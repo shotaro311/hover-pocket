@@ -347,8 +347,11 @@ private enum LiquidCompositionVerification {
                 throw PanelSoakVerificationError.failed("liquid_composition_menu_hit")
             }
             if style == .preserveMenu {
-                for point in [NSPoint(x: 300, y: 1), NSPoint(x: 300, y: 16), NSPoint(x: 300, y: 26),
-                              NSPoint(x: 20, y: 16), NSPoint(x: 200, y: 32), NSPoint(x: 400, y: 32)] {
+                let shape = surface.currentShape
+                for point in [NSPoint(x: 300, y: 1), NSPoint(x: 300, y: metrics.preservedNeckTop - 1),
+                              NSPoint(x: 20, y: 16),
+                              NSPoint(x: shape.neckRect.minX - shape.joinRadius - 1, y: 32),
+                              NSPoint(x: shape.neckRect.maxX + shape.joinRadius + 1, y: 32)] {
                     guard surface.hitTest(surface.convert(point, to: surface.superview)) == nil else {
                         throw PanelSoakVerificationError.failed("liquid_composition_above_join_hit")
                     }
