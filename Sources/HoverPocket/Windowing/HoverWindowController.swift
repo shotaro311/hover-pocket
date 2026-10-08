@@ -594,7 +594,7 @@ final class HoverWindowController {
         let chat = CodexChatController.shared
         let originalSize = settings.panelSize, originalDraft = chat.draft
         defer {
-            chat.composerFocused = false; chat.panelExpanded = false; chat.draft = originalDraft
+            chat.setPanelFolded(false); chat.composerFocused = false; chat.panelExpanded = false; chat.draft = originalDraft
             settings.panelSize = originalSize
             resizePreviewForPanelSizeChange()
         }
@@ -624,12 +624,26 @@ final class HoverWindowController {
                 if let editor = view as? ChatInputTextView { return editor }
                 return view.subviews.lazy.compactMap { composer(in: $0) }.first
             }
-            guard let content = window.contentView, let editor = composer(in: content) else {
+            guard let content = window.contentView, composer(in: content) != nil else {
                 throw PanelSoakVerificationError.failed("chat_native_composer_missing")
             }
+            chat.setPanelFolded(true); resizePreviewForPanelSizeChange()
+            await settlePanelSoakRunLoop(milliseconds: 100)
+            guard chat.panelHeight == CodexChatPanelLayout.headerHeight, composer(in: content) == nil,
+                  chat.draft == "未送信の下書き", chat.panelExpanded,
+                  ObjectIdentifier(previewWindow!) == panelID else {
+                throw PanelSoakVerificationError.failed("chat_folded_layout_failed_\(size)")
+            }
+            chat.setPanelFolded(false); resizePreviewForPanelSizeChange()
+            await settlePanelSoakRunLoop(milliseconds: 100)
+            guard let restoredEditor = composer(in: content), chat.panelHeight > CodexChatPanelLayout.composerHeight,
+                  chat.draft == "未送信の下書き" else {
+                throw PanelSoakVerificationError.failed("chat_unfolded_layout_failed_\(size)")
+            }
+            print("PASS chat panel: \(size) folded header, native composer removal/restoration, retained draft and transcript layout")
             window.makeFirstResponder(nil)
             AssetLibraryRuntime.shared.textInput = true
-            window.makeFirstResponder(editor)
+            window.makeFirstResponder(restoredEditor)
             guard chat.composerFocused, !AssetLibraryRuntime.shared.textInput else {
                 throw PanelSoakVerificationError.failed("chat_focus_did_not_release_web_input_hold")
             }
@@ -1600,6 +1614,14 @@ final class HoverWindowController {
             .store(in: &settingsCancellables)
 
         CodexChatController.shared.$panelExpanded
+            .removeDuplicates()
+            .dropFirst()
+            .sink { [weak self] _ in
+                DispatchQueue.main.async { self?.resizePreviewForPanelSizeChange() }
+            }
+            .store(in: &settingsCancellables)
+
+        CodexChatController.shared.$panelFolded
             .removeDuplicates()
             .dropFirst()
             .sink { [weak self] _ in
