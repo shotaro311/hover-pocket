@@ -378,6 +378,11 @@ final class HoverWindowController {
                 let metrics = panelFrames(on: screen).attachment
                 try check(surface.currentShape.rect.height < frame.height, "opening_height")
                 if style == .preserveMenu {
+                    let firstFrameDeadline = Date().addingTimeInterval(0.5)
+                    while liquidAnimator.reveal.value == 0 && Date() < firstFrameDeadline {
+                        await settlePanelSoakRunLoop(milliseconds: 10)
+                    }
+                    print("liquid_opening_readback progress=\(liquidAnimator.reveal.value) blend=\(liquidAnimator.attachmentReveal.value) body_top=\(surface.currentShape.rect.minY) fill=\(surface.currentShape.fillOpacity) draw_top=\(surface.currentShape.path.boundingBoxOfPath.minY) expected_top=\(metrics.preservedNeckTop)...\(metrics.contentTop) join=\(surface.currentShape.joinRadius)")
                     try check(surface.currentShape.rect.minY == metrics.contentTop
                               && surface.currentShape.fillOpacity == 1
                               && surface.currentShape.path.boundingBoxOfPath.minY >= metrics.preservedNeckTop

@@ -115,12 +115,13 @@ enum LiquidMotionVerificationCommand {
                 let hardwareLeft = frame.midX - notch / 2
                 let hardwareRight = frame.midX + notch / 2
                 let sampleY = shape.neckRect.minY + pixel / 2
-                // Both physical edges must remain covered before the curve spreads outward.
-                // The old 2pt inset leaves these points transparent, creating a visible step.
-                guard shape.path.contains(CGPoint(x: hardwareLeft, y: sampleY)),
-                      shape.path.contains(CGPoint(x: hardwareRight, y: sampleY)),
-                      abs(hardwareLeft - shape.neckRect.minX - pixel) < 1e-9,
-                      abs(shape.neckRect.maxX - hardwareRight - pixel) < 1e-9 else {
+                // The hardware covers the upper anchor; drawn pixels must not protrude at either edge.
+                guard shape.path.contains(CGPoint(x: shape.neckRect.minX + pixel / 2, y: sampleY)),
+                      shape.path.contains(CGPoint(x: shape.neckRect.maxX - pixel / 2, y: sampleY)),
+                      !shape.path.contains(CGPoint(x: hardwareLeft, y: sampleY)),
+                      !shape.path.contains(CGPoint(x: hardwareRight, y: sampleY)),
+                      abs(shape.neckRect.minX - hardwareLeft - 1) < 1e-9,
+                      abs(hardwareRight - shape.neckRect.maxX - 1) < 1e-9 else {
                     throw PanelSoakVerificationError.failed("liquid_notch_edge_alignment scale=\(scale) notch=\(notch)")
                 }
                 // Sample the rounded hardware corner above the old 6pt join.
@@ -129,15 +130,20 @@ enum LiquidMotionVerificationCommand {
                     let roundedMetrics = PanelAttachmentMetrics(headerHeight: header, notchWidth: notch, pixelOverlap: pixel)
                     let rounded = LiquidPanelGeometry.shape(progress: 1, panelRect: frame,
                         originWidth: notch, attachment: roundedMetrics, attachmentBlend: 0)
-                    for side in [hardwareLeft + pixel / 2, hardwareRight - pixel / 2] {
+                    for side in [rounded.neckRect.minX + pixel / 2, rounded.neckRect.maxX - pixel / 2] {
                         guard rounded.path.contains(CGPoint(x: side, y: frame.minY + header - 8)) else {
                             throw PanelSoakVerificationError.failed("liquid_rounded_notch_corner_gap scale=\(scale) header=\(header)")
+                        }
+                    }
+                    for side in [hardwareLeft, hardwareRight] {
+                        guard rounded.path.contains(CGPoint(x: side, y: frame.minY + header - 4)) else {
+                            throw PanelSoakVerificationError.failed("liquid_inset_notch_join_gap scale=\(scale) header=\(header)")
                         }
                     }
                 }
             }
         }
-        print("liquid_notch_edge_alignment=ok scales=1,2,3 notch_widths=185,246 sides=left,right rounded_corners=covered")
+        print("liquid_notch_edge_alignment=ok scales=1,2,3 notch_widths=185,246 sides=left,right inset_points=1 rounded_corners=connected upper_protrusion=absent")
     }
 
     private static func verifyOpeningOrigins() throws {
