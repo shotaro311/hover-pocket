@@ -13,6 +13,7 @@ final class CodexChatController: ObservableObject {
     static let shared = CodexChatController()
     @Published var draft = ""
     @Published var panelExpanded = false
+    @Published private(set) var panelFolded = false
     @Published private(set) var panelHeight: CGFloat = CodexChatPanelLayout.composerHeight
     @Published var composerFocused = false
     @Published private(set) var focusRequest = 0
@@ -22,8 +23,13 @@ final class CodexChatController: ObservableObject {
 
     func configure(settings: AppSettings) { self.settings = settings }
 
+    func setPanelFolded(_ folded: Bool) {
+        panelFolded = folded
+        if folded { composerFocused = false }
+    }
+
     func resolvePanelHeight(panelSize: String, voiceMode: VoiceLaneMode, availableHeight: CGFloat) {
-        let height = CodexChatPanelLayout.height(panelSize: panelSize,
+        let height = panelFolded ? CodexChatPanelLayout.headerHeight : CodexChatPanelLayout.height(panelSize: panelSize,
             expanded: panelExpanded || voiceMode == .expanded, availableHeight: availableHeight)
         if panelHeight != height { panelHeight = height }
     }
@@ -78,6 +84,7 @@ final class CodexChatController: ObservableObject {
     }
     func show(settings: AppSettings) {
         configure(settings: settings)
+        setPanelFolded(false)
         if !messages.isEmpty { panelExpanded = true }
         openPanel?()
         focusRequest &+= 1
@@ -310,6 +317,17 @@ final class CodexChatController: ObservableObject {
         model.panelExpanded = true
         model.panelExpanded = false
         try check(model.draft == "未送信の依頼" && model.messages.last?.text == "保存しました", "collapsing preserves draft and conversation")
+        model.panelExpanded = true; model.busy = true
+        let retainedMessages = model.messages
+        model.setPanelFolded(true)
+        model.resolvePanelHeight(panelSize: "small", voiceMode: .expanded, availableHeight: 700)
+        try check(model.panelHeight == CodexChatPanelLayout.headerHeight && !model.composerFocused && model.busy, "folding during a response keeps only the header without stopping voice or chat")
+        event("item/agentMessage/delta", ["threadId": .string("fixture-chat"), "turnId": .string("turn-1"), "delta": .string("late")])
+        try check(model.panelFolded && model.messages == retainedMessages, "incoming events keep manual folding and finalized history")
+        model.setPanelFolded(false)
+        model.resolvePanelHeight(panelSize: "small", voiceMode: .disabled, availableHeight: 700)
+        try check(model.panelHeight > CodexChatPanelLayout.composerHeight && model.panelExpanded && model.draft == "未送信の依頼" && model.messages == retainedMessages, "unfolding restores transcript, draft and expanded layout")
+        model.busy = false
         let reopened = CodexChatController(storage: file)
         try check(reopened.messages == model.messages && reopened.rootID == "fixture-chat", "history restores with its thread")
         model.busy = true; model.turnID = "turn-2"; model.stop()

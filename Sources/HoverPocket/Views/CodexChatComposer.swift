@@ -9,8 +9,9 @@ enum ChatEffortPresentation {
     }
 }
 
-/// One compact composer remains visible even when voice is disabled.
+/// Folding keeps the header reachable without discarding the conversation.
 enum CodexChatPanelLayout {
+    static let headerHeight: CGFloat = 28
     static let composerHeight: CGFloat = 126
 
     static func height(panelSize: String, expanded: Bool, availableHeight: CGFloat) -> CGFloat {

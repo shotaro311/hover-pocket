@@ -455,6 +455,8 @@ input {
 
 /* Chat input and history share one compact surface. */
 .hp-chat-lane { gap: 6px; padding: 8px 12px; }
+.hp-chat-lane[data-folded=true] .hp-chat-compose, .hp-chat-lane[data-folded=true] .hp-chat-unavailable, .hp-chat-splitter[hidden] { display:none; }
+.hp-chat-lane[data-folded=true][data-busy=true] .hp-chat-status::before { content:""; display:inline-block; width:10px; height:10px; margin-right:6px; border:2px solid #415269; border-top-color:#c8dcff; border-radius:50%; vertical-align:middle; animation:hp-chat-spin 1s linear infinite; }
 .hp-chat-header { display:flex; align-items:center; gap:4px; height:26px; flex-shrink:0; }
 .hp-chat-lane button { display:flex; align-items:center; justify-content:center; min-width:26px; height:26px; padding:4px; }
 .hp-chat-lane svg, .hp-voice-button svg { width:18px; height:18px; }

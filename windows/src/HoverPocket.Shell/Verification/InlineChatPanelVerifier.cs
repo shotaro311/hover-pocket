@@ -75,6 +75,17 @@ internal static class InlineChatPanelVerifier
                 await web.ExecuteScriptAsync($"window.__chatTestRequest('settings.setPanelSize',{{panelSize:'{size}'}})");
                 await Until(() => Task.FromResult(!controller.Panel.IsAnimating), token); await Task.Delay(180, token);
                 Check(await web.ExecuteScriptAsync("(()=>{const input=document.querySelector('[data-chat-draft]').getBoundingClientRect(),send=document.querySelector('[data-chat-send]').getBoundingClientRect(),m=document.querySelector('.hp-chat-messages');return input.top>=0&&input.bottom<=innerHeight&&send.right<=innerWidth&&m.clientHeight>40&&m.scrollHeight>m.clientHeight&&getComputedStyle(m).overflowY==='auto';})()") == "true", size + " composer/stop fit viewport and long replies scroll internally");
+                var savedSplit = bridge.CurrentSettings.ChatSplitRatio;
+                var savedMessages = bridge.InlineChat.Snapshot.Messages.Count;
+                await web.ExecuteScriptAsync("document.querySelector('[data-chat-fold]').click()");
+                await Until(async () => bridge.InlineChat.Folded && !controller.Panel.IsAnimating && await web.ExecuteScriptAsync("document.querySelector('.hp-chat-lane').clientHeight<=43 && document.querySelector('[data-chat-fold]').getAttribute('aria-expanded')==='false'") == "true", token);
+                Check(await web.ExecuteScriptAsync("document.querySelector('[data-chat-draft]').getClientRects().length===0 && document.querySelector('.hp-chat-body').getClientRects().length===0 && document.querySelector('[data-chat-fold]').getBoundingClientRect().right<=innerWidth") == "true" && bridge.InlineChat.Busy && bridge.InlineChat.Draft == "次の下書き", size + " fold toggle leaves a reachable header and preserves response and draft");
+                harness.Notify("item/agentMessage/delta", new { threadId = "chat-1", turnId = "turn-1", itemId = "reply", delta = "late" });
+                await Task.Delay(50, token);
+                Check(bridge.InlineChat.Folded && bridge.InlineChat.Snapshot.Messages.Count == savedMessages, "incoming response keeps the manually folded chat");
+                await web.ExecuteScriptAsync("document.querySelector('[data-chat-fold]').click()");
+                await Until(async () => !bridge.InlineChat.Folded && !controller.Panel.IsAnimating && await web.ExecuteScriptAsync("document.querySelector('[data-chat-draft]').getClientRects().length>0 && document.querySelector('[data-chat-fold]').getAttribute('aria-expanded')==='true'") == "true", token);
+                Check(bridge.InlineChat.Expanded && bridge.InlineChat.Busy && bridge.InlineChat.Draft == "次の下書き" && bridge.CurrentSettings.ChatSplitRatio == savedSplit && await web.ExecuteScriptAsync("__chatInput===document.querySelector('[data-chat-draft]')") == "true", size + " unfold restores the same input, conversation and saved boundary");
                 if (Environment.GetEnvironmentVariable("HOVERPOCKET_VERIFY_LOG") is { Length: > 0 } log)
                 {
                     using var screenshot = File.Create(Path.Combine(Path.GetDirectoryName(log)!, "inline-chat-" + size + ".png"));

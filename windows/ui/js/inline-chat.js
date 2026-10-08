@@ -1,14 +1,14 @@
 import { createChatChoiceMenu } from "./chat-choice-menu.js";
 
-const paths = {sidebar:'M3 4h18v16H3zM9 4v16',new:'M12 5v14M5 12h14',send:'m6 11 6-6 6 6M12 5v15',stop:'M6 6h12v12H6z',voice:'M4 9v6M8 5v14M12 8v8M16 4v16M20 9v6',mic:'M9 6a3 3 0 0 1 6 0v6a3 3 0 0 1-6 0zM5 10v2a7 7 0 0 0 14 0v-2M12 19v3',muted:'m3 3 18 18M9 9v3a3 3 0 0 0 5 2M9 5a3 3 0 0 1 6 0v6M5 10v2a7 7 0 0 0 12 5M19 10v2M12 19v3'};
+const paths = {collapse:'m6 15 6-6 6 6',expand:'m6 9 6 6 6-6',sidebar:'M3 4h18v16H3zM9 4v16',new:'M12 5v14M5 12h14',send:'m6 11 6-6 6 6M12 5v15',stop:'M6 6h12v12H6z',voice:'M4 9v6M8 5v14M12 8v8M16 4v16M20 9v6',mic:'M9 6a3 3 0 0 1 6 0v6a3 3 0 0 1-6 0zM5 10v2a7 7 0 0 0 14 0v-2M12 19v3',muted:'m3 3 18 18M9 9v3a3 3 0 0 0 5 2M9 5a3 3 0 0 1 6 0v6M5 10v2a7 7 0 0 0 12 5M19 10v2M12 19v3'};
 export const chatIcon = name => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${paths[name]}"/></svg>`;
 export function createInlineChat({ container, request, on, toggleVoice, toggleMute }) {
   const root = document.createElement("div"); root.className = "hp-chat-lane";
-  root.innerHTML = `<header class="hp-chat-header"><button data-chat-sidebar>${chatIcon("sidebar")}</button><button data-chat-new>${chatIcon("new")}</button><span class="hp-chat-status" role="status"></span><button data-chat-login hidden></button></header>
+  root.innerHTML = `<header class="hp-chat-header"><button data-chat-sidebar>${chatIcon("sidebar")}</button><button data-chat-new>${chatIcon("new")}</button><span class="hp-chat-status" role="status"></span><button data-chat-login hidden></button><button data-chat-fold aria-expanded="true"></button></header>
     <div class="hp-chat-body" hidden><aside class="hp-chat-sidebar" hidden><div class="hp-chat-history"></div></aside><div class="hp-chat-thread"><div class="hp-chat-messages" tabindex="0"></div><div class="hp-chat-progress" role="status" hidden><span class="hp-chat-spinner"></span><span data-chat-progress></span></div></div></div>
     <div class="hp-chat-compose"><textarea data-chat-draft rows="1" maxlength="16000" spellcheck="false"></textarea><div class="hp-chat-tools"><button type="button" data-chat-model aria-haspopup="listbox" aria-expanded="false"></button><button type="button" data-chat-effort aria-haspopup="listbox" aria-expanded="false"></button><span class="hp-chat-spacer"></span><button data-chat-dictation disabled>${chatIcon("mic")}</button><button data-chat-voice>${chatIcon("voice")}</button><button data-chat-mute hidden>${chatIcon("mic")}</button><button data-chat-send>${chatIcon("send")}</button></div></div><div class="hp-chat-unavailable" role="status" hidden></div>`;
   container.append(root);
-  const recover=document.createElement("button");recover.dataset.chatRecover="";recover.hidden=true;root.querySelector(".hp-chat-header").append(recover);
+  const recover=document.createElement("button");recover.dataset.chatRecover="";recover.hidden=true;root.querySelector(".hp-chat-header").insertBefore(recover,root.querySelector("[data-chat-fold]"));
   const empty=document.createElement("p");empty.className="hp-chat-empty";root.querySelector(".hp-chat-messages").append(empty);
   const find = name => root.querySelector(`[data-chat-${name}]`);
   const draft=find("draft"),send=find("send"),create=find("new"),login=find("login"),model=find("model"),effort=find("effort");
@@ -17,7 +17,8 @@ export function createInlineChat({ container, request, on, toggleVoice, toggleMu
   const menu=createChatChoiceMenu(root,open=>void request("chat.menu",{open}).catch(fail));
   const views=new Map(),text=(ja,en)=>english?en:ja;
   const title=(element,value)=>{element.title=value;element.setAttribute("aria-label",value);};
-  const fail=()=>{status.textContent=text("接続を確認できません。下書きは保持しています。","Connection unavailable. Your draft is kept.");status.title=status.textContent;recover.textContent=text("設定を開く","Settings");recover.hidden=false;};
+  const fail=()=>{status.textContent=text("接続を確認できません。下書きは保持しています。","Connection unavailable. Your draft is kept.");if(state.folded&&state.busy)status.textContent=text(state.phase==="responding"?"返答中…":"考え中…",state.phase==="responding"?"Responding…":"Thinking…");
+    status.title=status.textContent;recover.textContent=text("設定を開く","Settings");recover.hidden=false;};
   async function action(method,params){try{const next=await request(method,params);if(next?.messages)render(next);return next;}catch{fail();return null;}}
   function draftChanged(){void request("chat.draft",{text:draft.value}).catch(fail);controls();}
   async function submit(){
@@ -37,8 +38,9 @@ export function createInlineChat({ container, request, on, toggleVoice, toggleMu
   root.addEventListener("focusin",()=>void request("chat.focus",{focused:true}).catch(fail));
   root.addEventListener("focusout",()=>queueMicrotask(()=>{if(!root.contains(document.activeElement))void request("chat.focus",{focused:false}).catch(fail);}));
   root.addEventListener("keydown",event=>{event.stopPropagation();if(event.key==="Escape"&&!event.defaultPrevented&&!composing&&!event.isComposing&&event.keyCode!==229){event.preventDefault();draft.blur();void action("chat.hidePanel");}});
+  find("fold").onclick=()=>{menu.close();draft.blur();void action("chat.fold",{folded:!state.folded});};
   send.onclick=()=>void(state.busy?action("chat.stop"):submit());
-  find("sidebar").onclick=()=>{const pane=root.querySelector(".hp-chat-sidebar");pane.hidden=!pane.hidden;find("sidebar").setAttribute("aria-expanded",String(!pane.hidden));if(!state.expanded)void action("chat.expand",{expanded:true});};
+  find("sidebar").onclick=()=>{const pane=root.querySelector(".hp-chat-sidebar");pane.hidden=!pane.hidden;find("sidebar").setAttribute("aria-expanded",String(!pane.hidden));if(state.folded)void action("chat.fold",{folded:false});if(!state.expanded)void action("chat.expand",{expanded:true});};
   async function switchThread(method,params){if(state.busy||switching)return;switching=true;try{await request("chat.draft",{text:draft.value});await action(method,params);draft.value=state.draft||"";}catch{fail();}finally{switching=false;controls();}}
   create.onclick=()=>void switchThread("chat.new");login.onclick=()=>void action("chat.login");find("voice").onclick=()=>toggleVoice?.();find("mute").onclick=()=>toggleMute?.();
   recover.onclick=()=>void action("settings.open");
@@ -72,7 +74,10 @@ export function createInlineChat({ container, request, on, toggleVoice, toggleMu
   function render(next){
     if(!next)return;const previous=state;state=next;
     if(!initialized||previous.draftVersion!==next.draftVersion||(!root.contains(document.activeElement)&&!composing)||(previous.busy&&!next.busy&&!draft.value))draft.value=next.draft||"";initialized=true;
-    root.dataset.expanded=String(state.expanded);root.dataset.busy=String(Boolean(state.busy));document.documentElement.style.setProperty("--hp-chat-height",`${state.expanded?300:126}px`);root.querySelector(".hp-chat-body").hidden=!state.expanded;
+    root.dataset.folded=String(Boolean(state.folded));
+    const fold=find("fold");fold.innerHTML=chatIcon(state.folded?"expand":"collapse");fold.setAttribute("aria-expanded",String(!state.folded));title(fold,text(state.folded?"チャットを展開":"チャットを折りたたむ",state.folded?"Expand chat":"Collapse chat"));
+    if(state.folded)menu.close();
+    root.dataset.expanded=String(state.expanded);root.dataset.busy=String(Boolean(state.busy));document.documentElement.style.setProperty("--hp-chat-height",`${state.folded?42:state.expanded?300:126}px`);root.querySelector(".hp-chat-body").hidden=state.folded||!state.expanded;
     title(find("sidebar"),text("チャット履歴","Chat history"));title(create,text("新規チャット","New chat"));title(messages,text("返信（選択してコピーできます）","Messages — select text to copy"));title(draft,text("メッセージを入力","Message"));draft.placeholder=text("メッセージを入力…","Write a message…");draft.title=text("Enterで送信 · Shift+Enterで改行","Enter to send · Shift+Enter for a new line");
     const atBottom=messages.scrollHeight-messages.scrollTop-messages.clientHeight<36,ids=new Set(state.messages.map(message=>message.id));
     for(const[id,element]of views)if(!ids.has(id)){element.remove();views.delete(id);}

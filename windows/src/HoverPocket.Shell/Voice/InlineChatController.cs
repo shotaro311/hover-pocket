@@ -25,6 +25,7 @@ internal sealed class InlineChatController : IAsyncDisposable
     internal event Action? Changed;
     internal event Action? LayoutChanged;
     internal bool Expanded { get; private set; }
+    internal bool Folded { get; private set; }
     internal bool Focused { get; set; }
     internal bool Busy => _pending || _chat.Snapshot.Busy;
     internal bool MenuOpen { get; set; }
@@ -43,7 +44,7 @@ internal sealed class InlineChatController : IAsyncDisposable
         try { history = _chat.History; }
         catch (IOException) { history = []; _error = "chat_history_failed"; }
         return new { threadId = snapshot.ThreadId, busy = Busy, errorCode = _error ?? snapshot.ErrorCode,
-            draft = Draft, draftVersion = _draftVersion, expanded = Expanded, phase = snapshot.Phase, model = _chat.Model, effort = _chat.Effort, models = _chat.Models, messages = snapshot.Messages, history };
+            draft = Draft, draftVersion = _draftVersion, expanded = Expanded, folded = Folded, phase = snapshot.Phase, model = _chat.Model, effort = _chat.Effort, models = _chat.Models, messages = snapshot.Messages, history };
     }
     internal void SetDraft(string text)
     {
@@ -54,6 +55,13 @@ internal sealed class InlineChatController : IAsyncDisposable
     {
         if (Expanded == expanded) return;
         Expanded = expanded; LayoutChanged?.Invoke(); Changed?.Invoke();
+    }
+    internal void SetFolded(bool folded)
+    {
+        if (Folded == folded) return;
+        Folded = folded;
+        if (folded) { Focused = false; MenuOpen = false; }
+        LayoutChanged?.Invoke(); Changed?.Invoke();
     }
     internal void Send(string text)
     {
@@ -73,7 +81,7 @@ internal sealed class InlineChatController : IAsyncDisposable
     internal void Select(string? id)
     {
         if (Busy || _disposed) throw new InvalidOperationException("chat_busy");
-        SetExpanded(true);
+        SetFolded(false); SetExpanded(true);
         Run(async token =>
         {
             await _chat.SelectAsync(id, token);

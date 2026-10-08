@@ -1894,6 +1894,9 @@ voiceLaneEl.prepend(chatSplitter);
 let splitDrag = null;
 function updateChatSplit(ratio = currentState?.settings?.chatSplitRatio) {
   if (!currentState) return;
+  const folded = document.querySelector(".hp-chat-lane")?.dataset.folded === "true";
+  chatSplitter.hidden = folded;
+  if (folded) { document.documentElement.style.setProperty("--hp-chat-height", "42px"); return; }
   const total = document.documentElement.clientHeight - currentState.panel.headerHeight;
   const min = 126, max = Math.max(min, total - 160 - (currentState.panel.voiceLaneHeight ?? 0));
   const height = Number.isFinite(ratio) ? Math.min(max, Math.max(min, total * ratio)) : currentState.panel.chatHeight;
@@ -1915,6 +1918,7 @@ async function saveChatSplit(ratio) {
     if (status) status.textContent = currentState.settings.language === "en" ? "Could not save the panel boundary. Try again." : "境界の位置を保存できませんでした。もう一度操作してください。";
   }
 }
+on("chat.stateChanged", () => queueMicrotask(() => updateChatSplit()));
 new ResizeObserver(() => updateChatSplit()).observe(document.documentElement);
 chatSplitter.addEventListener("pointerdown", event => {
   if (event.button !== 0 || chatSplitter.getClientRects().length === 0) return;

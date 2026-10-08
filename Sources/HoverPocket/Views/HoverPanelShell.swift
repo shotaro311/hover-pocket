@@ -31,7 +31,7 @@ struct HoverPanelShell: View {
             height: max(200, $0.height - CGFloat(voiceHeight) - store.attachmentMetrics.contentTop)) } ?? normal
 
         let contentHeight = baseline.height + CGFloat(voiceHeight)
-        let chatHeight = assets.fullscreen ? 0 : min(max(CodexChatPanelLayout.composerHeight, contentHeight * CGFloat(splitRatio ?? settings.chatSplitRatio ?? Double(CGFloat(voiceHeight) / max(1, contentHeight)))), max(CodexChatPanelLayout.composerHeight, contentHeight - 180))
+        let chatHeight = assets.fullscreen ? 0 : chat.panelFolded ? CodexChatPanelLayout.headerHeight : min(max(CodexChatPanelLayout.composerHeight, contentHeight * CGFloat(splitRatio ?? settings.chatSplitRatio ?? Double(CGFloat(voiceHeight) / max(1, contentHeight)))), max(CodexChatPanelLayout.composerHeight, contentHeight - 180))
         Group {
             VStack(spacing: 0) {
                 ZStack {
@@ -79,6 +79,7 @@ struct HoverPanelShell: View {
                 if !assets.fullscreen {
                     VoiceLaneHostView(runtime: voiceRuntime, settings: settings, height: chatHeight, onOpenSettings: onOpenSettings)
                         .overlay(alignment: .top) {
+                            if !chat.panelFolded {
                             RoundedRectangle(cornerRadius: 2).fill(Color.secondary.opacity(0.6))
                                 .frame(width: 40, height: 2).frame(maxWidth: .infinity).frame(height: 8)
                                 .contentShape(Rectangle()).offset(y: -4)
@@ -98,6 +99,7 @@ struct HoverPanelShell: View {
                                         if let splitRatio { settings.chatSplitRatio = splitRatio }
                                         splitStart = nil; splitRatio = nil; settings.panelResizing = false
                                     })
+                            }
                         }
                 }
             }

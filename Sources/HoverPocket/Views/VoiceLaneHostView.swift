@@ -13,7 +13,7 @@ struct VoiceLaneHostView: View {
     var body: some View {
         VStack(spacing: 0) {
             historyHeader
-            if chat.panelHeight > CodexChatPanelLayout.composerHeight {
+            if !chat.panelFolded && chat.panelHeight > CodexChatPanelLayout.composerHeight {
                 HStack(spacing: 0) {
                     if showsSidebar { conversationSidebar }
                     if showsVoiceHistory && runtime.snapshot.providerID != .off {
@@ -23,7 +23,7 @@ struct VoiceLaneHostView: View {
                     }
                 }
             }
-            composer
+            if !chat.panelFolded { composer }
         }
         .frame(height: height ?? chat.panelHeight)
         .background(Color.white.opacity(0.025))
@@ -107,7 +107,7 @@ struct VoiceLaneHostView: View {
     private var historyHeader: some View {
         HStack(spacing: 10) {
             Button {
-                showsSidebar.toggle(); if showsSidebar { chat.panelExpanded = true }
+                showsSidebar.toggle(); if showsSidebar { chat.setPanelFolded(false); chat.panelExpanded = true }
             } label: { Image(systemName: "sidebar.left") }
                 .help(localized(japanese: "チャット履歴", english: "Chat history"))
                 .accessibilityLabel(localized(japanese: "チャット履歴", english: "Chat history"))
@@ -117,6 +117,11 @@ struct VoiceLaneHostView: View {
                 .accessibilityLabel(localized(japanese: "新規チャット", english: "New chat"))
             Text(chat.status).lineLimit(1).foregroundStyle(.secondary).help(chat.status)
             Spacer(minLength: 0)
+            if chat.panelFolded && chat.busy {
+                ProgressView().controlSize(.mini)
+                Text(localized(japanese: chat.phase == "responding" ? "返答中…" : "考え中…", english: chat.phase == "responding" ? "Responding…" : "Thinking…"))
+                    .foregroundStyle(.secondary).lineLimit(1)
+            }
             if !chat.status.isEmpty && chat.status != "停止しました。" && !chat.busy {
                 Button(localized(japanese: "設定を開く", english: "Settings"), action: onOpenSettings)
                     .help(localized(japanese: "AIの接続設定を確認", english: "Check AI connection settings"))
@@ -124,9 +129,17 @@ struct VoiceLaneHostView: View {
             }
             if runtime.snapshot.connection != .disconnected {
                 Button(localized(japanese: showsVoiceHistory ? "チャット" : "音声会話", english: showsVoiceHistory ? "Chat" : "Voice")) {
-                    showsVoiceHistory.toggle(); chat.panelExpanded = true
+                    showsVoiceHistory.toggle(); chat.setPanelFolded(false); chat.panelExpanded = true
                 }
             }
+            Button { chat.setPanelFolded(!chat.panelFolded) } label: {
+                Image(systemName: chat.panelFolded ? "chevron.down" : "chevron.up")
+                    .frame(width: 26, height: 26).contentShape(Rectangle())
+            }
+            .help(localized(japanese: chat.panelFolded ? "チャットを展開" : "チャットを折りたたむ", english: chat.panelFolded ? "Expand chat" : "Collapse chat"))
+            .accessibilityLabel(localized(japanese: chat.panelFolded ? "チャットを展開" : "チャットを折りたたむ", english: chat.panelFolded ? "Expand chat" : "Collapse chat"))
+            .accessibilityValue(chat.panelFolded ? "Collapsed" : "Expanded")
+            .accessibilityIdentifier("chat-fold-toggle")
         }.buttonStyle(.plain).font(.system(size: 11))
             .padding(.horizontal, 14).frame(height: 28)
     }
