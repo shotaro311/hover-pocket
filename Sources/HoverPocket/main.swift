@@ -41,6 +41,18 @@ if CommandLine.arguments.contains("--verify-library-sync") {
     app.run(); exit(1)
 }
 
+if CommandLine.arguments.contains("--check-chat-model-catalog") {
+    let app = NSApplication.shared
+    Task { @MainActor in
+        do {
+            let root = FileManager.default.temporaryDirectory.appendingPathComponent("HoverPocket-ChatCatalog-" + UUID().uuidString)
+            try await CodexChatController.verifyModelCatalog(at: root)
+            exit(0)
+        } catch { print("chat_catalog_verification=failed \(error)"); exit(1) }
+    }
+    app.run(); exit(1)
+}
+
 if CommandLine.arguments.contains("--verify-chat") {
     let app = NSApplication.shared
     Task { @MainActor in

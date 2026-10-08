@@ -181,7 +181,7 @@ enum LiquidPanelGeometry {
                              width: expandedNeck, height: max(0, bodyTop - drawTop)),
             screenTop: panelRect.minY + drawTop,
             upperRadius: upperRadius,
-            joinRadius: min(6 * (1 - blend) * connectionReveal, spread / 2,
+            joinRadius: min((attachment.contentTop - attachment.preservedNeckTop) * (1 - blend) * connectionReveal, spread / 2,
                             max(0, bodyTop - drawTop - upperRadius)),
             topRadius: min(max(0, height - bottomRadius), spread / 2,
                            18 * (1 - blend) * smoothstep(0.10, 0.55, p)),

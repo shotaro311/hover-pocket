@@ -60,5 +60,56 @@ enum CodexChatPanelVerification {
         editor.keyDown(with: escape)
         try check(hides == 1 && editor.string == draft, "Escape requests hiding without losing the draft")
         try check(ChatEffortPresentation.title("medium", language: .japanese) == "推論: 標準" && ChatEffortPresentation.title("high", language: .english) == "Reasoning: High", "reasoning names are readable in both languages")
+        try verifyChoiceMenu(settings: settings, defaults: defaults)
+    }
+
+    private static func verifyChoiceMenu(settings: AppSettings, defaults: EphemeralAppSettingsDefaults) throws {
+        NSApp.setActivationPolicy(.accessory)
+        let menu = ChatChoiceMenu(choices: [.init(id: "first", title: "First"), .init(id: "second", title: "Second")],
+            selectedID: "first", placeholder: "Loading", enabled: true, onChoose: { settings.chatModel = $0 })
+        let coordinator = menu.makeCoordinator()
+        let button = menu.makeButton(coordinator: coordinator)
+        button.frame = NSRect(x: 10, y: 10, width: 160, height: 24)
+        let panel = NSPanel(contentRect: NSRect(x: 300, y: 300, width: 200, height: 48),
+            styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
+        panel.isReleasedWhenClosed = false
+        panel.contentView = NSView(frame: NSRect(x: 0, y: 0, width: 200, height: 48))
+        panel.contentView?.addSubview(button)
+        panel.orderFrontRegardless()
+        defer { panel.orderOut(nil); panel.close() }
+        for select in [true, false] {
+            let before = settings.chatModel
+            coordinator.tracked = false
+            let observer = NotificationCenter.default.addObserver(forName: NSMenu.didBeginTrackingNotification,
+                object: button.menu, queue: .main) { _ in MainActor.assumeIsolated { coordinator.tracked = true } }
+            let timer = Timer(timeInterval: 0.15, repeats: false) { _ in
+                MainActor.assumeIsolated {
+                    if select { button.menu?.performActionForItem(at: 1) }
+                    button.menu?.cancelTracking()
+                }
+            }
+            RunLoop.main.add(timer, forMode: .eventTracking)
+            RunLoop.main.add(timer, forMode: .common)
+            button.performClick(nil)
+            timer.invalidate()
+            NotificationCenter.default.removeObserver(observer)
+            guard coordinator.tracked, select ? settings.chatModel == "second" : settings.chatModel == before else {
+                throw LibraryError.message("Native model popup selection/cancellation failed")
+            }
+            print("PASS chat panel: native model popup \(select ? "selection saves" : "cancellation preserves") settings")
+        }
+        let selected = ChatChoiceMenu(choices: menu.choices, selectedID: "second", placeholder: "Loading", enabled: true, onChoose: menu.onChoose)
+        selected.apply(to: button, coordinator: coordinator)
+        guard button.selectedItem?.representedObject as? String == "second",
+              AppSettings(defaults: defaults).chatModel == "second" else {
+            throw LibraryError.message("Native model title readback failed")
+        }
+        print("PASS chat panel: native model title reflects saved selection")
+        let missing = ChatChoiceMenu(choices: menu.choices, selectedID: "unavailable", placeholder: "Unavailable", enabled: true, onChoose: menu.onChoose)
+        missing.apply(to: button, coordinator: coordinator)
+        guard button.title == "Unavailable", button.selectedItem?.isEnabled == false else {
+            throw LibraryError.message("Unavailable model silently replaced by another choice")
+        }
+        print("PASS chat panel: unavailable saved model stays explicit without silent substitution")
     }
 }

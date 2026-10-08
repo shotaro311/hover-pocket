@@ -121,7 +121,8 @@ enum LiquidScreenEdgeVerification {
         let expectedTop = style == .preserveMenu ? Int(ceil(attachment.preservedNeckTop * scale)) : 0
         let joinBase = Int(attachment.contentTop * scale)
         let hasMeniscus = style == .preserveMenu && attachment.notchWidth > 0
-        let allowedJoinHalfWidth = Int(ceil((attachment.notchWidth / 2 + attachment.pixelOverlap + 6) * scale))
+        let allowedJoinHalfWidth = Int(ceil((attachment.notchWidth / 2 + attachment.pixelOverlap
+            + attachment.contentTop - attachment.preservedNeckTop) * scale))
         let expectedOriginWidth = Int((attachment.notchWidth > 0
             ? attachment.notchWidth + attachment.pixelOverlap * 2 : PanelLayout.miniBarExpandedWidth) * scale)
         let expectedOriginDepth = Int(attachment.headerHeight * scale)
