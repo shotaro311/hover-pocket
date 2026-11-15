@@ -5,6 +5,17 @@ updated_by: claude
 status: production-macos-0.2.17; production-windows-0.2.15
 ---
 
+## 2026-11-16 Windows版の点検と不具合の修正
+
+- 診断ログ・イベントログ・自動起動の登録・全検証から問題を探し、4件を直した。(1) サイズ変更のつまみを左上へ速く引くと落ちる（10月6日に実際に終了した記録あり。修正前のコードで同じ例外を再現）、(2) 幅の狭いモニターでパネルを開くと丸め誤差で落ちうる（150通り中13通り）、(3) Windowsと一緒に起動しない（登録が存在しない開発版を指し、10月以降の再起動4回で未起動）、(4) 起動時に1つのキーが重なると全部のショートカットが無効になる。
+- ビルドは警告0、`--verify` 18種類のうち17種類と、UIの個別検証（ショートカット・サイズ変更）が合格。`release-config` はDebugでは仕様どおり失敗。UI検証全体は2回中1回合格し、残る1回はインストール版と重なった実クリックの不安定さが原因の候補（未確認）。Windows側のスタートアップ設定はオフの可能性が高く、触れていない。未コミット・未配信。[点検と修正の記録](2026-11/2026-11-16_hover-pocket-windows-hardening.md)。
+
+## 2026-11-15 Windowsのディスプレイ明るさ欄とサブモニターの明るさ変更
+
+- Controlsのディスプレイ欄で2台目が隠れていた問題を直し、全モニターを表示するようにした。同じ名前のときだけ「メイン」「サブ」を添え、表示名はEDIDの製品名（LG ULTRAGEAR+、U16ZT）を使う。
+- サブモニターの明るさが効かない原因の候補として、2分ごとの全台の再検出が能力の問い合わせで約3.5秒ロックを持ち、その間の変更が2.5秒で失敗扱いになっていた点と、HMONITOR由来の識別子が構成の変化で変わる点を直した。モニターごとの直列化、固定ID、失敗時の再接続と再試行、読み戻しの再試行、診断ログへの記録を加えた。
+- ビルド、`--verify controls`・`capabilities`・`ui` はすべてexit 0。実機のサブモニターで変更と復元の読み戻しが成功した。ブランチ `claude/windows-brightness-20261115` に未コミット。Codexによるレビュー、実パネルでの操作確認、配信は未実施。[実装と検証の記録](2026-11/2026-11-15_hover-pocket-windows-brightness.md)。
+
 ## 2026-11-15 Windows端末の手元整理
 
 - このPCの `main` が `origin/main` より607コミット遅れていたため、最新へ合わせた。手元にしかなかった資料（Windows安定化の[要件](../docs/requirement/windows-stabilization-20260928.md)と[結果](2026-09/2026-09-28_hover-pocket-windows-stabilization.md)、[タイマー修正](2026-08/2026-08-10_hover-pocket-windows-timer-crash.md)、[同期の要件案](../docs/requirement/asset-library-sync.md)、[音声レーンの計画](../docs/plan/20260806-codex-voice-lane-plan.md)、[10月19日の整理](2026-10/2026-10-19_hover-pocket-folder-cleanup.md)）と[PROJECT.md](../PROJECT.md)を取り込んだ。

@@ -53,6 +53,17 @@ internal sealed class CaptureHotkeys : IDisposable
         _bindings = new(bindings);
         return "ショートカットは有効です。";
     }
+    // At startup there is no earlier working set to roll back to, so a single key taken by another app
+    // must not disable every shortcut. Keeps the keys that registered and returns the conflicting ones.
+    internal IReadOnlyList<string> ApplyBindingsBestEffort(Dictionary<string, string> bindings)
+    {
+        ValidateBindings(bindings);
+        var conflicts = RegisterBindings(bindings);
+        _bindings = bindings
+            .Where(pair => string.IsNullOrWhiteSpace(pair.Value) || !conflicts.Contains(pair.Value))
+            .ToDictionary(pair => pair.Key, pair => pair.Value);
+        return conflicts;
+    }
     private List<string> RegisterBindings(Dictionary<string, string> bindings)
     {
         foreach (var id in _registered) UnregisterHotKey(_source.Handle, id);

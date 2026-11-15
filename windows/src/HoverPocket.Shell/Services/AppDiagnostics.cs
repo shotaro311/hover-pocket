@@ -4,6 +4,7 @@ using System.Text.Json;
 namespace HoverPocket.Shell.Services;
 
 // Record code locations, never exception messages, document names or credentials.
+// detail carries short fixed reason codes and hardware model codes only.
 internal static class AppDiagnostics
 {
     private static readonly object Sync = new();
@@ -15,14 +16,14 @@ internal static class AppDiagnostics
         AppDomain.CurrentDomain.UnhandledException += (_, args) => Record("process.unhandled", args.ExceptionObject as Exception);
         AppDomain.CurrentDomain.ProcessExit += (_, _) => Record("process.exit");
     }
-    public static void Record(string action, Exception? exception = null)
+    public static void Record(string action, Exception? exception = null, string? detail = null)
     {
         if (_path is null) return;
         try
         {
             var entry = JsonSerializer.Serialize(new
             {
-                utc = DateTimeOffset.UtcNow, pid = Environment.ProcessId, action,
+                utc = DateTimeOffset.UtcNow, pid = Environment.ProcessId, action, detail,
                 version = System.Reflection.CustomAttributeExtensions.GetCustomAttribute<System.Reflection.AssemblyInformationalVersionAttribute>(typeof(AppDiagnostics).Assembly)?.InformationalVersion,
                 exception = exception?.GetType().FullName, hresult = exception?.HResult,
                 frames = exception is null ? null : new StackTrace(exception, false).GetFrames().Take(16)

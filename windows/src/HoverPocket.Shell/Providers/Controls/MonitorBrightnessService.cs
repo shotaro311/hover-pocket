@@ -1,32 +1,90 @@
+using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Management;
 using System.Runtime.InteropServices;
-using Microsoft.Win32.SafeHandles;
+using Microsoft.Win32;
 using HoverPocket.Shell.Display;
+using HoverPocket.Shell.Services;
 
 namespace HoverPocket.Shell.Providers.Controls;
 
+internal sealed record BrightnessTiming(
+    TimeSpan CommandSpacing,
+    TimeSpan ReadbackDelay,
+    TimeSpan ReadbackRetryDelay,
+    int ReadbackRetries,
+    TimeSpan TransientRetryDelay,
+    TimeSpan WriteTimeout,
+    TimeSpan MonitorGateTimeout)
+{
+    // Measured on the development PC: a VCP 0x10 read takes about 63ms and a write is readable after 125-140ms.
+    public static BrightnessTiming Default { get; } = new(
+        TimeSpan.FromMilliseconds(60),
+        TimeSpan.FromMilliseconds(100),
+        TimeSpan.FromMilliseconds(150),
+        2,
+        TimeSpan.FromMilliseconds(55),
+        TimeSpan.FromSeconds(4),
+        TimeSpan.FromSeconds(3));
+}
+
+// DDC/CI work is serialized per physical monitor, never across monitors, so a slow or absent monitor
+// cannot delay brightness changes on another one. Capability strings are not queried: they took
+// 1.5-1.9s per monitor and are unnecessary for VCP 0x10.
 internal sealed class MonitorBrightnessService : IMonitorBrightnessService, IDisposable
 {
-    private const uint MonitorCapabilityBrightness = 0x00000002;
-    private const byte VcpLuminance = 0x10;
+    internal const int ReadbackTolerance = 3;
+    private const string DetectingError = "Brightness detection is still running.";
     private const uint ErrorGraphicsI2CTransmittingData = 0xC0262582;
+    private const uint ErrorGraphicsI2CReceivingData = 0xC0262583;
     private const uint ErrorGraphicsDdcInvalidMessageCommand = 0xC0262589;
     private const uint ErrorGraphicsDdcInvalidMessageLength = 0xC026258A;
     private const uint ErrorGraphicsDdcInvalidMessageChecksum = 0xC026258B;
     private static readonly TimeSpan CacheLifetime = TimeSpan.FromSeconds(15);
-    private static readonly TimeSpan DiscoveryLifetime = TimeSpan.FromMinutes(2);
-    private static readonly TimeSpan DdcCommandSpacing = TimeSpan.FromMilliseconds(100);
-    private static readonly TimeSpan DdcRetryDelay = TimeSpan.FromMilliseconds(55);
+    private static readonly TimeSpan InitialReadWait = TimeSpan.FromMilliseconds(180);
+    private static readonly TimeSpan WmiWriteTimeout = TimeSpan.FromMilliseconds(2500);
+    private readonly IDdcPlatform _platform;
+    private readonly bool _includeWmi;
+    private readonly BrightnessTiming _timing;
     private readonly DisplayLayoutService _displays = new();
     private readonly object _readSync = new();
-    private readonly object _ddcSync = new();
-    private readonly SemaphoreSlim _writeGate = new(1, 1);
+    private readonly object _registrySync = new();
+    private readonly SemaphoreSlim _discoveryGate = new(1, 1);
+    private readonly SemaphoreSlim _wmiWriteGate = new(1, 1);
+    private readonly ConcurrentDictionary<string, MonitorGate> _gates = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, long> _writeSequences = new(StringComparer.OrdinalIgnoreCase);
     private Task<IReadOnlyList<DisplayBrightnessState>>? _activeRead;
     private IReadOnlyList<DisplayBrightnessState>? _lastSnapshot;
     private DateTimeOffset _lastSnapshotAt;
-    private DdcDiscovery? _ddcDiscovery;
+    private DdcRegistry? _registry;
     private int _readGeneration;
+    private int _activeWrites;
+    private volatile bool _topologyDirty;
+    private volatile bool _skipPrimary;
+    private readonly bool _listening;
     private bool _disposed;
+
+    public MonitorBrightnessService()
+        : this(new NativeDdcPlatform(), includeWmi: true, BrightnessTiming.Default, listenForSystemEvents: true)
+    {
+    }
+
+    internal MonitorBrightnessService(
+        IDdcPlatform platform,
+        bool includeWmi,
+        BrightnessTiming timing,
+        bool listenForSystemEvents)
+    {
+        _platform = platform;
+        _includeWmi = includeWmi;
+        _timing = timing;
+        if (listenForSystemEvents)
+        {
+            SystemEvents.DisplaySettingsChanged += OnDisplaySettingsChanged;
+            SystemEvents.PowerModeChanged += OnPowerModeChanged;
+            _listening = true;
+        }
+    }
 
     public event EventHandler<IReadOnlyList<DisplayBrightnessState>>? StateChanged;
 
@@ -36,7 +94,7 @@ internal sealed class MonitorBrightnessService : IMonitorBrightnessService, IDis
         Task<IReadOnlyList<DisplayBrightnessState>> readTask;
         lock (_readSync)
         {
-            if (_writeGate.CurrentCount == 0 && _lastSnapshot is not null)
+            if (Volatile.Read(ref _activeWrites) > 0 && _lastSnapshot is not null)
             {
                 return _lastSnapshot;
             }
@@ -57,13 +115,13 @@ internal sealed class MonitorBrightnessService : IMonitorBrightnessService, IDis
 
         try
         {
-            var snapshot = await readTask.WaitAsync(TimeSpan.FromMilliseconds(180), cancellationToken);
+            var snapshot = await readTask.WaitAsync(InitialReadWait, cancellationToken);
             StoreSnapshot(snapshot);
             return snapshot;
         }
         catch (TimeoutException)
         {
-            return LastSnapshot() ?? FallbackStates("Brightness detection is still running.");
+            return LastSnapshot() ?? FallbackStates(DetectingError);
         }
         catch (Exception ex) when (ex is ManagementException or COMException)
         {
@@ -77,44 +135,56 @@ internal sealed class MonitorBrightnessService : IMonitorBrightnessService, IDis
         CancellationToken cancellationToken)
     {
         ThrowIfDisposed();
-        await _writeGate.WaitAsync(cancellationToken);
+        var normalized = Math.Clamp(value, 0, 100);
+        if (displayId.StartsWith("wmi:", StringComparison.OrdinalIgnoreCase))
+        {
+            return await SetWmiAsync(displayId, normalized, cancellationToken);
+        }
+
+        if (!displayId.StartsWith("ddc:", StringComparison.OrdinalIgnoreCase))
+        {
+            var rejected = Annotate(displayId, normalized, WriteResult.Failed("unknown-id", "unknown"));
+            RecordFailure("unknown-id", "unknown");
+            StoreSnapshot(rejected);
+            return rejected;
+        }
+
+        var sequence = _writeSequences.AddOrUpdate(displayId, 1, (_, previous) => previous + 1);
+        var operation = Task.Run(() => WriteDdc(displayId, normalized), CancellationToken.None);
+        WriteResult result;
         try
         {
-            var normalized = Math.Clamp(value, 0, 100);
-            var writeTask = Task.Run(() => displayId.StartsWith("wmi:", StringComparison.OrdinalIgnoreCase)
-                ? SetWmiBrightness(displayId, normalized)
-                : displayId.StartsWith("ddc:", StringComparison.OrdinalIgnoreCase)
-                    && SetDdcBrightness(displayId, normalized), CancellationToken.None);
-            var commandAccepted = false;
-            try
-            {
-                commandAccepted = await writeTask.WaitAsync(TimeSpan.FromMilliseconds(2500), cancellationToken);
-            }
-            catch (TimeoutException)
-            {
-            }
-
-            DisplayBrightnessState? fresh = null;
-            if (commandAccepted)
-            {
-                await Task.Delay(DdcCommandSpacing, cancellationToken);
-                try
-                {
-                    fresh = await ReadTargetFreshAsync(displayId, cancellationToken);
-                }
-                catch (Exception ex) when (ex is TimeoutException or ManagementException or COMException)
-                {
-                }
-            }
-
-            var annotated = AnnotateWrite(displayId, normalized, commandAccepted, fresh);
-            StoreSnapshot(annotated);
-            return annotated;
+            result = await operation.WaitAsync(_timing.WriteTimeout, cancellationToken);
         }
-        finally
+        catch (TimeoutException)
         {
-            _writeGate.Release();
+            var model = FindEndpoint(displayId)?.Model ?? "unknown";
+            RecordFailure("timeout", model);
+            result = WriteResult.TimedOut(model);
+            // The command keeps its monitor gate until it really finishes, so the next write cannot race
+            // with it. Publish the late result so the panel does not keep showing the timeout.
+            _ = operation.ContinueWith(
+                completed =>
+                {
+                    if (_disposed
+                        || !_writeSequences.TryGetValue(displayId, out var latest)
+                        || latest != sequence)
+                    {
+                        return;
+                    }
+
+                    var late = Annotate(displayId, normalized, completed.Result);
+                    StoreSnapshot(late);
+                    StateChanged?.Invoke(this, late);
+                },
+                CancellationToken.None,
+                TaskContinuationOptions.OnlyOnRanToCompletion,
+                TaskScheduler.Default);
         }
+
+        var annotated = Annotate(displayId, normalized, result);
+        StoreSnapshot(annotated);
+        return annotated;
     }
 
     internal async Task<DisplayBrightnessState?> ReadTargetFreshAsync(
@@ -126,10 +196,36 @@ internal sealed class MonitorBrightnessService : IMonitorBrightnessService, IDis
         {
             if (displayId.StartsWith("ddc:", StringComparison.OrdinalIgnoreCase))
             {
-                lock (_ddcSync)
+                var endpoint = FindEndpoint(displayId);
+                if (endpoint is null)
                 {
-                    return _ddcDiscovery?.Endpoints.FirstOrDefault(endpoint =>
-                        string.Equals(endpoint.Id, displayId, StringComparison.OrdinalIgnoreCase))?.ReadState(refreshValue: true);
+                    return null;
+                }
+
+                var gate = Gate(displayId);
+                if (!gate.Semaphore.Wait(_timing.MonitorGateTimeout))
+                {
+                    return null;
+                }
+
+                try
+                {
+                    if (endpoint.Retired)
+                    {
+                        endpoint = FindEndpoint(displayId);
+                        if (endpoint is null || endpoint.Retired)
+                        {
+                            return null;
+                        }
+                    }
+
+                    return TryReadBrightness(endpoint, gate, endpoint.UseHighLevel)
+                        ? endpoint.State()
+                        : endpoint.State("DDC/CI brightness read failed.");
+                }
+                finally
+                {
+                    gate.Semaphore.Release();
                 }
             }
 
@@ -145,10 +241,16 @@ internal sealed class MonitorBrightnessService : IMonitorBrightnessService, IDis
                 string.Equals(display.Id, displayId, StringComparison.OrdinalIgnoreCase));
             return target is null
                 ? null
-                : new DisplayBrightnessState(displayId, previous?.Name ?? "Built-in display", true, target.Value);
+                : new DisplayBrightnessState(displayId, previous?.Name ?? "Built-in display", true, target.Value, IsPrimary: previous?.IsPrimary);
         }, CancellationToken.None);
-        return await readTask.WaitAsync(TimeSpan.FromMilliseconds(2500), cancellationToken);
+        return await readTask.WaitAsync(_timing.WriteTimeout, cancellationToken);
     }
+
+    internal static bool WriteMatches(bool accepted, DisplayBrightnessState? fresh, int requested) =>
+        accepted
+        && fresh is { Supported: true, Value: int observed }
+        && string.IsNullOrWhiteSpace(fresh.Error)
+        && Math.Abs(observed - requested) <= ReadbackTolerance;
 
     public void Dispose()
     {
@@ -158,21 +260,48 @@ internal sealed class MonitorBrightnessService : IMonitorBrightnessService, IDis
         }
 
         _disposed = true;
-        lock (_ddcSync)
+        if (_listening)
         {
-            _ddcDiscovery?.Dispose();
-            _ddcDiscovery = null;
+            SystemEvents.DisplaySettingsChanged -= OnDisplaySettingsChanged;
+            SystemEvents.PowerModeChanged -= OnPowerModeChanged;
         }
 
-        _writeGate.Dispose();
+        DdcRegistry? registry;
+        lock (_registrySync)
+        {
+            registry = _registry;
+            _registry = null;
+        }
+
+        if (registry is not null)
+        {
+            Retire(registry);
+        }
+    }
+
+    private void OnDisplaySettingsChanged(object? sender, EventArgs e) => InvalidateTopology();
+
+    private void OnPowerModeChanged(object? sender, PowerModeChangedEventArgs e)
+    {
+        if (e.Mode == PowerModes.Resume)
+        {
+            InvalidateTopology();
+        }
+    }
+
+    internal void InvalidateTopology()
+    {
+        _topologyDirty = true;
+        lock (_readSync)
+        {
+            _lastSnapshotAt = DateTimeOffset.MinValue;
+        }
     }
 
     private Task<IReadOnlyList<DisplayBrightnessState>> StartRead()
     {
         var generation = ++_readGeneration;
-        var task = Task.Run<IReadOnlyList<DisplayBrightnessState>>(
-            () => Read(CancellationToken.None),
-            CancellationToken.None);
+        var task = Task.Run<IReadOnlyList<DisplayBrightnessState>>(Read, CancellationToken.None);
         _ = task.ContinueWith(
             completed =>
             {
@@ -193,15 +322,509 @@ internal sealed class MonitorBrightnessService : IMonitorBrightnessService, IDis
         return task;
     }
 
-    private IReadOnlyList<DisplayBrightnessState> AnnotateWrite(
-        string displayId,
-        int value,
-        bool accepted,
-        DisplayBrightnessState? fresh)
+    private IReadOnlyList<DisplayBrightnessState> Read()
     {
-        var current = LastSnapshot() ?? FallbackStates("Brightness state is still loading.");
+        var result = new List<DisplayBrightnessState>();
+        if (_includeWmi)
+        {
+            var displayLayout = _displays.EnumerateMonitors();
+            var wmi = ReadWmiBrightness();
+            foreach (var monitor in wmi)
+            {
+                result.Add(new DisplayBrightnessState(
+                    $"wmi:{monitor.Index}",
+                    monitor.Index < displayLayout.Count
+                        ? $"Built-in display ({displayLayout[monitor.Index].Name})"
+                        : monitor.Index == 0 ? "Built-in display" : $"Built-in display {monitor.Index + 1}",
+                    true,
+                    monitor.Value,
+                    IsPrimary: monitor.Index < displayLayout.Count ? displayLayout[monitor.Index].IsPrimary : monitor.Index == 0));
+            }
+
+            _skipPrimary = wmi.Count > 0;
+        }
+
+        var registry = EnsureRegistry();
+        result.AddRange(registry.States());
+        return result.Count == 0
+            ? [new DisplayBrightnessState("display:none", "Display", false, null, "Display brightness is unavailable.")]
+            : result;
+    }
+
+    private DdcRegistry EnsureRegistry()
+    {
+        var current = CurrentRegistry();
+        if (current is not null && !_topologyDirty)
+        {
+            var key = TopologyKey(FilterMonitors(_platform.EnumerateMonitors()));
+            if (string.Equals(current.TopologyKey, key, StringComparison.Ordinal))
+            {
+                RefreshValues(current);
+                return current;
+            }
+        }
+
+        return Rebuild(current);
+    }
+
+    // observed is the registry the caller found stale. If another caller replaced it while this one
+    // waited, and the topology still matches, the newer registry is reused instead of probing again.
+    private DdcRegistry Rebuild(DdcRegistry? observed)
+    {
+        _discoveryGate.Wait();
+        try
+        {
+            var monitors = FilterMonitors(_platform.EnumerateMonitors());
+            var key = TopologyKey(monitors);
+            var current = CurrentRegistry();
+            if (current is not null
+                && !ReferenceEquals(current, observed)
+                && string.Equals(current.TopologyKey, key, StringComparison.Ordinal))
+            {
+                return current;
+            }
+
+            _topologyDirty = false;
+
+            var slots = new List<DdcSlot>();
+            foreach (var monitor in monitors)
+            {
+                var physical = _platform.OpenPhysicalMonitors(monitor.Handle);
+                if (physical.Count == 0)
+                {
+                    var device = monitor.Devices.FirstOrDefault();
+                    slots.Add(new DdcSlot(null, new DisplayBrightnessState(
+                        UnavailableId(monitor, device),
+                        DisplayName(monitor, device, null, 0),
+                        false,
+                        null,
+                        "DDC/CI is not available.",
+                        IsPrimary: monitor.IsPrimary)));
+                    continue;
+                }
+
+                for (var index = 0; index < physical.Count; index++)
+                {
+                    var device = index < monitor.Devices.Count ? monitor.Devices[index] : null;
+                    var endpoint = new DdcEndpoint(
+                        DdcId(monitor, device, index),
+                        DisplayName(monitor, device, physical[index].Description, index),
+                        device?.Model ?? "unknown",
+                        device?.StableKey,
+                        monitor.DeviceName,
+                        index,
+                        monitor.IsPrimary,
+                        physical[index]);
+                    var gate = Gate(endpoint.Id);
+                    if (!gate.Semaphore.Wait(_timing.MonitorGateTimeout))
+                    {
+                        endpoint.Dispose();
+                        _topologyDirty = true;
+                        slots.Add(new DdcSlot(null, new DisplayBrightnessState(
+                            endpoint.Id, endpoint.Name, false, null, DetectingError, IsPrimary: monitor.IsPrimary)));
+                        continue;
+                    }
+
+                    bool readable;
+                    try
+                    {
+                        readable = TryReadBrightness(endpoint, gate, preferHighLevel: false);
+                    }
+                    finally
+                    {
+                        gate.Semaphore.Release();
+                    }
+
+                    if (readable)
+                    {
+                        slots.Add(new DdcSlot(endpoint, null));
+                    }
+                    else
+                    {
+                        endpoint.Dispose();
+                        slots.Add(new DdcSlot(null, new DisplayBrightnessState(
+                            endpoint.Id,
+                            endpoint.Name,
+                            false,
+                            null,
+                            "DDC/CI brightness is not supported.",
+                            IsPrimary: monitor.IsPrimary)));
+                    }
+                }
+            }
+
+            var replacement = new DdcRegistry(key, slots);
+            DdcRegistry? previous;
+            lock (_registrySync)
+            {
+                if (_disposed)
+                {
+                    previous = replacement;
+                }
+                else
+                {
+                    previous = _registry;
+                    _registry = replacement;
+                }
+            }
+
+            if (previous is not null)
+            {
+                Retire(previous);
+            }
+
+            return replacement;
+        }
+        finally
+        {
+            _discoveryGate.Release();
+        }
+    }
+
+    private void RefreshValues(DdcRegistry registry)
+    {
+        foreach (var endpoint in registry.Endpoints)
+        {
+            var gate = Gate(endpoint.Id);
+            // A write in progress already owns the freshest value; never queue a read behind it.
+            if (!gate.Semaphore.Wait(0))
+            {
+                continue;
+            }
+
+            try
+            {
+                if (endpoint.Retired)
+                {
+                    continue;
+                }
+
+                if (TryReadBrightness(endpoint, gate, endpoint.UseHighLevel))
+                {
+                    endpoint.LastError = null;
+                }
+                else
+                {
+                    endpoint.LastError = "DDC/CI brightness read failed.";
+                    endpoint.NeedsReopen = true;
+                }
+            }
+            finally
+            {
+                gate.Semaphore.Release();
+            }
+        }
+    }
+
+    private WriteResult WriteDdc(string displayId, int normalized)
+    {
+        Interlocked.Increment(ref _activeWrites);
+        try
+        {
+            var endpoint = FindEndpoint(displayId);
+            if (endpoint is null)
+            {
+                // The panel may still hold an ID from before a topology change. Rediscover once.
+                _ = Rebuild(CurrentRegistry());
+                endpoint = FindEndpoint(displayId);
+            }
+
+            if (endpoint is null)
+            {
+                var model = ModelFromId(displayId);
+                RecordFailure("unknown-id", model);
+                return WriteResult.Failed("unknown-id", model);
+            }
+
+            var gate = Gate(displayId);
+            if (!gate.Semaphore.Wait(_timing.MonitorGateTimeout))
+            {
+                RecordFailure("busy", endpoint.Model);
+                return WriteResult.Failed("busy", endpoint.Model);
+            }
+
+            try
+            {
+                if (endpoint.Retired)
+                {
+                    // A rediscovery dropped this monitor; its handle may already be released.
+                    var replacement = FindEndpoint(displayId);
+                    if (replacement is null || replacement.Retired)
+                    {
+                        RecordFailure("unknown-id", endpoint.Model);
+                        return WriteResult.Failed("unknown-id", endpoint.Model);
+                    }
+
+                    endpoint = replacement;
+                }
+
+                if (endpoint.NeedsReopen)
+                {
+                    _ = Reopen(endpoint, gate);
+                }
+
+                var accepted = TrySetBrightness(endpoint, gate, normalized);
+                if (!accepted && Reopen(endpoint, gate))
+                {
+                    accepted = TrySetBrightness(endpoint, gate, normalized);
+                }
+
+                if (!accepted)
+                {
+                    endpoint.NeedsReopen = true;
+                    _topologyDirty = true;
+                    RecordFailure("set-failed", endpoint.Model);
+                    return WriteResult.Failed("set-failed", endpoint.Model, endpoint.State());
+                }
+
+                endpoint.NeedsReopen = false;
+                endpoint.Value = normalized;
+                endpoint.LastError = null;
+                Thread.Sleep(_timing.ReadbackDelay);
+                DisplayBrightnessState? fresh = null;
+                var verified = false;
+                for (var attempt = 0; attempt <= _timing.ReadbackRetries; attempt++)
+                {
+                    if (attempt > 0)
+                    {
+                        Thread.Sleep(_timing.ReadbackRetryDelay);
+                    }
+
+                    if (!TryReadBrightness(endpoint, gate, endpoint.UseHighLevel))
+                    {
+                        continue;
+                    }
+
+                    fresh = endpoint.State();
+                    if (Math.Abs(endpoint.Value - normalized) <= ReadbackTolerance)
+                    {
+                        verified = true;
+                        break;
+                    }
+                }
+
+                if (!verified)
+                {
+                    RecordFailure("readback-mismatch", endpoint.Model);
+                }
+
+                return new WriteResult(true, fresh, verified, false, endpoint.Model, verified ? null : "readback-mismatch");
+            }
+            finally
+            {
+                gate.Semaphore.Release();
+            }
+        }
+        finally
+        {
+            Interlocked.Decrement(ref _activeWrites);
+        }
+    }
+
+    // Called with the monitor gate held. Reopens the physical handle for the same stable monitor,
+    // following it to a new HMONITOR when Windows recreated the logical monitor.
+    private bool Reopen(DdcEndpoint endpoint, MonitorGate gate)
+    {
+        foreach (var monitor in FilterMonitors(_platform.EnumerateMonitors()))
+        {
+            var index = endpoint.StableKey is null
+                ? string.Equals(monitor.DeviceName, endpoint.DeviceName, StringComparison.OrdinalIgnoreCase) ? endpoint.PhysicalIndex : -1
+                : IndexOfDevice(monitor, endpoint.StableKey);
+            if (index < 0)
+            {
+                continue;
+            }
+
+            var physical = _platform.OpenPhysicalMonitors(monitor.Handle);
+            if (index >= physical.Count)
+            {
+                foreach (var item in physical)
+                {
+                    item.Dispose();
+                }
+
+                return false;
+            }
+
+            for (var other = 0; other < physical.Count; other++)
+            {
+                if (other != index)
+                {
+                    physical[other].Dispose();
+                }
+            }
+
+            endpoint.SwapMonitor(physical[index]).Dispose();
+            _topologyDirty = true;
+            var readable = TryReadBrightness(endpoint, gate, preferHighLevel: false);
+            endpoint.NeedsReopen = !readable;
+            return readable;
+        }
+
+        return false;
+    }
+
+    private static int IndexOfDevice(DdcLogicalMonitor monitor, string stableKey)
+    {
+        for (var index = 0; index < monitor.Devices.Count; index++)
+        {
+            if (string.Equals(monitor.Devices[index].StableKey, stableKey, StringComparison.OrdinalIgnoreCase))
+            {
+                return index;
+            }
+        }
+
+        return -1;
+    }
+
+    private bool TryReadBrightness(DdcEndpoint endpoint, MonitorGate gate, bool preferHighLevel)
+    {
+        if (preferHighLevel && TryReadHighLevel(endpoint, gate))
+        {
+            return true;
+        }
+
+        for (var attempt = 0; attempt < 2; attempt++)
+        {
+            WaitForSpacing(gate);
+            var ok = endpoint.Monitor.TryReadVcpBrightness(out var current, out var maximum, out var error);
+            gate.Touch();
+            if (ok && IsValidRange(0, current, maximum))
+            {
+                endpoint.UseHighLevel = false;
+                endpoint.Minimum = 0;
+                endpoint.Maximum = maximum;
+                endpoint.Value = ToPercentage(0, current, maximum);
+                return true;
+            }
+
+            if (ok || !IsTransientDdcError(error))
+            {
+                break;
+            }
+
+            Thread.Sleep(_timing.TransientRetryDelay);
+        }
+
+        return !preferHighLevel && TryReadHighLevel(endpoint, gate);
+    }
+
+    private bool TryReadHighLevel(DdcEndpoint endpoint, MonitorGate gate)
+    {
+        WaitForSpacing(gate);
+        var ok = endpoint.Monitor.TryReadHighLevelBrightness(out var minimum, out var current, out var maximum, out _);
+        gate.Touch();
+        if (!ok || !IsValidRange(minimum, current, maximum))
+        {
+            return false;
+        }
+
+        endpoint.UseHighLevel = true;
+        endpoint.Minimum = minimum;
+        endpoint.Maximum = maximum;
+        endpoint.Value = ToPercentage(minimum, current, maximum);
+        return true;
+    }
+
+    private bool TrySetBrightness(DdcEndpoint endpoint, MonitorGate gate, int normalized)
+    {
+        var target = endpoint.Minimum + (uint)Math.Round(
+            (endpoint.Maximum - endpoint.Minimum) * normalized / 100d,
+            MidpointRounding.AwayFromZero);
+        for (var attempt = 0; attempt < 2; attempt++)
+        {
+            if (attempt > 0)
+            {
+                Thread.Sleep(_timing.TransientRetryDelay);
+            }
+
+            WaitForSpacing(gate);
+            var ok = endpoint.UseHighLevel
+                ? endpoint.Monitor.TryWriteHighLevelBrightness(target, out _)
+                : endpoint.Monitor.TryWriteVcpBrightness(target, out _);
+            gate.Touch();
+            if (ok)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private void WaitForSpacing(MonitorGate gate)
+    {
+        var remaining = _timing.CommandSpacing - gate.SinceLastCommand();
+        if (remaining > TimeSpan.Zero)
+        {
+            Thread.Sleep(remaining);
+        }
+    }
+
+    private async Task<IReadOnlyList<DisplayBrightnessState>> SetWmiAsync(
+        string displayId,
+        int normalized,
+        CancellationToken cancellationToken)
+    {
+        await _wmiWriteGate.WaitAsync(cancellationToken);
+        Interlocked.Increment(ref _activeWrites);
+        try
+        {
+            var writeTask = Task.Run(() => SetWmiBrightness(displayId, normalized), CancellationToken.None);
+            var accepted = false;
+            try
+            {
+                accepted = await writeTask.WaitAsync(WmiWriteTimeout, cancellationToken);
+            }
+            catch (TimeoutException)
+            {
+            }
+
+            DisplayBrightnessState? fresh = null;
+            if (accepted)
+            {
+                await Task.Delay(_timing.ReadbackDelay, cancellationToken);
+                try
+                {
+                    fresh = await ReadTargetFreshAsync(displayId, cancellationToken);
+                }
+                catch (Exception ex) when (ex is TimeoutException or ManagementException or COMException)
+                {
+                }
+            }
+
+            var verified = WriteMatches(accepted, fresh, normalized);
+            if (!verified)
+            {
+                RecordFailure(accepted ? "readback-mismatch" : "set-failed", "wmi");
+            }
+
+            var annotated = Annotate(
+                displayId,
+                normalized,
+                new WriteResult(accepted, fresh, verified, false, "wmi", null));
+            StoreSnapshot(annotated);
+            return annotated;
+        }
+        finally
+        {
+            Interlocked.Decrement(ref _activeWrites);
+            _wmiWriteGate.Release();
+        }
+    }
+
+    private IReadOnlyList<DisplayBrightnessState> Annotate(string displayId, int value, WriteResult result)
+    {
+        var current = ComposeCached();
         var matched = false;
-        var result = current.Select(display =>
+        var error = result.Verified
+            ? null
+            : result.TimedOutCommand
+                ? "Brightness command timed out."
+                : result.Accepted
+                    ? $"Brightness readback did not match {value}%."
+                    : $"Brightness command failed for {value}%.";
+        var annotated = current.Select(display =>
         {
             if (!string.Equals(display.Id, displayId, StringComparison.OrdinalIgnoreCase))
             {
@@ -209,40 +832,84 @@ internal sealed class MonitorBrightnessService : IMonitorBrightnessService, IDis
             }
 
             matched = true;
-            var observed = fresh ?? display;
-            var verified = WriteMatches(accepted, fresh, value);
+            var observed = result.Fresh ?? display;
             return observed with
             {
                 Name = string.IsNullOrWhiteSpace(observed.Name) ? display.Name : observed.Name,
-                Error = verified
-                    ? null
-                    : accepted
-                        ? $"Brightness readback did not match {value}%."
-                        : $"Brightness command failed for {value}%.",
-                WriteVerified = verified
+                IsPrimary = observed.IsPrimary ?? display.IsPrimary,
+                Error = error,
+                WriteVerified = result.Verified
             };
         }).ToList();
         if (!matched)
         {
-            var verified = WriteMatches(accepted, fresh, value);
-            result.Add((fresh ?? new DisplayBrightnessState(displayId, "Display", false, null)) with
+            annotated.Add((result.Fresh ?? new DisplayBrightnessState(displayId, "Display", false, null)) with
             {
-                Error = verified
-                    ? null
-                    : accepted
-                        ? $"Brightness readback did not match {value}%."
-                        : $"Brightness command failed for {value}%.",
-                WriteVerified = verified
+                Error = error,
+                WriteVerified = result.Verified
             });
         }
-        return result;
+
+        return annotated;
     }
 
-    internal static bool WriteMatches(bool accepted, DisplayBrightnessState? fresh, int requested) =>
-        accepted
-        && fresh is { Supported: true, Value: int observed }
-        && string.IsNullOrWhiteSpace(fresh.Error)
-        && Math.Abs(observed - requested) <= 3;
+    // Combines the last WMI states with the cached DDC registry without touching the hardware.
+    private IReadOnlyList<DisplayBrightnessState> ComposeCached()
+    {
+        var last = LastSnapshot();
+        var registry = CurrentRegistry();
+        if (registry is null)
+        {
+            return last ?? FallbackStates("Brightness state is still loading.");
+        }
+
+        var combined = (last ?? [])
+            .Where(display => display.Id.StartsWith("wmi:", StringComparison.OrdinalIgnoreCase))
+            .Concat(registry.States())
+            .ToList();
+        return combined.Count == 0 ? last ?? FallbackStates("Brightness state is still loading.") : combined;
+    }
+
+    private IReadOnlyList<DdcLogicalMonitor> FilterMonitors(IReadOnlyList<DdcLogicalMonitor> monitors) =>
+        _skipPrimary ? monitors.Where(monitor => !monitor.IsPrimary).ToArray() : monitors;
+
+    private DdcEndpoint? FindEndpoint(string displayId)
+    {
+        var registry = CurrentRegistry();
+        return registry?.Endpoints.FirstOrDefault(endpoint =>
+            string.Equals(endpoint.Id, displayId, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private DdcRegistry? CurrentRegistry()
+    {
+        lock (_registrySync)
+        {
+            return _registry;
+        }
+    }
+
+    private MonitorGate Gate(string displayId) => _gates.GetOrAdd(displayId, _ => new MonitorGate());
+
+    private void Retire(DdcRegistry registry)
+    {
+        foreach (var endpoint in registry.Endpoints)
+        {
+            endpoint.Retired = true;
+            var gate = Gate(endpoint.Id);
+            _ = Task.Run(() =>
+            {
+                gate.Semaphore.Wait();
+                try
+                {
+                    endpoint.Dispose();
+                }
+                finally
+                {
+                    gate.Semaphore.Release();
+                }
+            });
+        }
+    }
 
     private IReadOnlyList<DisplayBrightnessState>? LastSnapshot()
     {
@@ -261,115 +928,69 @@ internal sealed class MonitorBrightnessService : IMonitorBrightnessService, IDis
         }
     }
 
-    private IReadOnlyList<DisplayBrightnessState> Read(CancellationToken cancellationToken)
+    private IReadOnlyList<DisplayBrightnessState> FallbackStates(string error)
     {
-        var result = new List<DisplayBrightnessState>();
-        var displayLayout = _displays.EnumerateMonitors();
-        var wmi = ReadWmiBrightness();
-        foreach (var monitor in wmi)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            result.Add(new DisplayBrightnessState(
-                $"wmi:{monitor.Index}",
-                monitor.Index < displayLayout.Count
-                    ? $"Built-in display ({displayLayout[monitor.Index].Name})"
-                    : monitor.Index == 0 ? "Built-in display" : $"Built-in display {monitor.Index + 1}",
-                true,
-                monitor.Value));
-        }
-
-        var externalDisplays = displayLayout
-            .Where(display => !(display.IsPrimary && wmi.Count > 0))
-            .ToArray();
-        result.AddRange(ReadExternalDisplays(externalDisplays, cancellationToken));
-
-        return result.Count == 0
-            ? [new DisplayBrightnessState("display:none", "Display", false, null, "Display brightness is unavailable.")]
-            : result;
+        var displays = _displays.EnumerateMonitors();
+        return displays.Count == 0
+            ? [new DisplayBrightnessState("display:none", "Display", false, null, error)]
+            : displays.Select(display => new DisplayBrightnessState(
+                $"display:{display.NativeHandle.ToInt64():X}",
+                display.Name,
+                false,
+                null,
+                error,
+                IsPrimary: display.IsPrimary)).ToArray();
     }
 
-    private IReadOnlyList<DisplayBrightnessState> ReadExternalDisplays(
-        IReadOnlyList<DisplayMonitor> displays,
-        CancellationToken cancellationToken)
-    {
-        lock (_ddcSync)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            var topologyKey = TopologyKey(displays);
-            var rebuild = _ddcDiscovery is null
-                || !string.Equals(_ddcDiscovery.TopologyKey, topologyKey, StringComparison.Ordinal)
-                || DateTimeOffset.UtcNow - _ddcDiscovery.DiscoveredAt > DiscoveryLifetime;
-            if (rebuild)
-            {
-                var replacement = DiscoverDdcMonitors(displays, topologyKey, cancellationToken);
-                _ddcDiscovery?.Dispose();
-                _ddcDiscovery = replacement;
-            }
+    private static void RecordFailure(string reason, string model) =>
+        AppDiagnostics.Record("brightness.write.failed", detail: $"reason={reason};model={model}");
 
-            return _ddcDiscovery!.ReadStates(refreshValues: !rebuild, cancellationToken);
-        }
+    private static string ModelFromId(string displayId)
+    {
+        var key = displayId.StartsWith("ddc:", StringComparison.OrdinalIgnoreCase) ? displayId[4..] : displayId;
+        var dash = key.IndexOf('-');
+        return dash > 0 ? key[..dash] : "unknown";
     }
 
-    private static DdcDiscovery DiscoverDdcMonitors(
-        IReadOnlyList<DisplayMonitor> displays,
-        string topologyKey,
-        CancellationToken cancellationToken)
+    internal static string DdcId(DdcLogicalMonitor monitor, DdcMonitorDevice? device, int physicalIndex) =>
+        device is null
+            ? $"ddc:{NativeDdcPlatform.SanitizeKey(monitor.DeviceName)}-{physicalIndex}"
+            : $"ddc:{device.StableKey}-{physicalIndex}";
+
+    private static string UnavailableId(DdcLogicalMonitor monitor, DdcMonitorDevice? device) =>
+        device is null
+            ? $"display:{NativeDdcPlatform.SanitizeKey(monitor.DeviceName)}"
+            : $"display:{device.StableKey}";
+
+    private static string DisplayName(DdcLogicalMonitor monitor, DdcMonitorDevice? device, string? description, int physicalIndex)
     {
-        var endpoints = new List<DdcMonitorEndpoint>();
-        var unavailable = new List<DisplayBrightnessState>();
-        foreach (var display in displays)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            if (display.NativeHandle == IntPtr.Zero)
-            {
-                unavailable.Add(Unsupported(display, "Display brightness is unavailable."));
-                continue;
-            }
-
-            var physicalMonitors = GetPhysicalMonitors(display.NativeHandle);
-            if (physicalMonitors.Length == 0)
-            {
-                unavailable.Add(Unsupported(display, "DDC/CI is not available."));
-                continue;
-            }
-
-            for (var index = 0; index < physicalMonitors.Length; index++)
-            {
-                var physical = physicalMonitors[index];
-                var handle = new SafePhysicalMonitorHandle(physical.Handle);
-                var name = string.IsNullOrWhiteSpace(physical.Description)
-                    ? DisplayName(display, index)
-                    : physical.Description.Trim();
-                var highLevel = GetMonitorCapabilities(handle, out var capabilities, out _)
-                    && (capabilities & MonitorCapabilityBrightness) != 0;
-                if (TryReadBrightness(handle, highLevel, out var minimum, out var current, out var maximum, out var usedHighLevel))
-                {
-                    endpoints.Add(new DdcMonitorEndpoint(
-                        DdcId(display.NativeHandle, index),
-                        name,
-                        display.NativeHandle,
-                        index,
-                        handle,
-                        usedHighLevel,
-                        minimum,
-                        current,
-                        maximum));
-                }
-                else
-                {
-                    handle.Dispose();
-                    unavailable.Add(new DisplayBrightnessState(
-                        DdcId(display.NativeHandle, index),
-                        name,
-                        false,
-                        null,
-                        "DDC/CI brightness is not supported."));
-                }
-            }
-        }
-
-        return new DdcDiscovery(topologyKey, endpoints, unavailable);
+        var name = !string.IsNullOrWhiteSpace(device?.FriendlyName)
+            ? device.FriendlyName!
+            : !string.IsNullOrWhiteSpace(description)
+                ? description!
+                : monitor.DeviceName;
+        return physicalIndex == 0 ? name : $"{name} {physicalIndex + 1}";
     }
+
+    private static string TopologyKey(IReadOnlyList<DdcLogicalMonitor> monitors) => string.Join(
+        '|',
+        monitors.Select(monitor =>
+            $"{monitor.Handle.ToInt64():X}:{monitor.DeviceName}:{monitor.IsPrimary}:{string.Join(',', monitor.Devices.Select(device => device.StableKey))}"));
+
+    private static bool IsValidRange(uint minimum, uint current, uint maximum) =>
+        minimum < maximum && current >= minimum && current <= maximum;
+
+    private static int ToPercentage(uint minimum, uint current, uint maximum) =>
+        Math.Clamp((int)Math.Round(
+            (current - minimum) * 100d / (maximum - minimum),
+            MidpointRounding.AwayFromZero), 0, 100);
+
+    private static bool IsTransientDdcError(int error) => unchecked((uint)error) is
+        ErrorGraphicsI2CTransmittingData
+        or ErrorGraphicsI2CReceivingData
+        or ErrorGraphicsDdcInvalidMessageCommand
+        or ErrorGraphicsDdcInvalidMessageLength
+        or ErrorGraphicsDdcInvalidMessageChecksum;
 
     private static IReadOnlyList<WmiBrightness> ReadWmiBrightness()
     {
@@ -431,429 +1052,103 @@ internal sealed class MonitorBrightnessService : IMonitorBrightnessService, IDis
         return false;
     }
 
-    private bool SetDdcBrightness(string displayId, int value)
-    {
-        lock (_ddcSync)
-        {
-            var endpoint = _ddcDiscovery?.Endpoints.FirstOrDefault(candidate =>
-                string.Equals(candidate.Id, displayId, StringComparison.OrdinalIgnoreCase));
-            if (endpoint is null || !endpoint.SetBrightness(value))
-            {
-                if (_ddcDiscovery is not null)
-                {
-                    _ddcDiscovery.DiscoveredAt = DateTimeOffset.MinValue;
-                }
-
-                return false;
-            }
-
-            return true;
-        }
-    }
-
-    private static bool TryReadBrightness(
-        SafePhysicalMonitorHandle handle,
-        bool preferHighLevel,
-        out uint minimum,
-        out uint current,
-        out uint maximum,
-        out bool usedHighLevel)
-    {
-        if (preferHighLevel
-            && GetMonitorBrightness(handle, out minimum, out current, out maximum)
-            && IsValidRange(minimum, current, maximum))
-        {
-            usedHighLevel = true;
-            return true;
-        }
-
-        for (var attempt = 0; attempt < 2; attempt++)
-        {
-            if (GetVCPFeatureAndVCPFeatureReply(
-                    handle,
-                    VcpLuminance,
-                    out _,
-                    out current,
-                    out maximum)
-                && IsValidRange(0, current, maximum))
-            {
-                minimum = 0;
-                usedHighLevel = false;
-                return true;
-            }
-
-            if (attempt > 0 || !IsTransientDdcError(Marshal.GetLastWin32Error()))
-            {
-                break;
-            }
-
-            Thread.Sleep(DdcRetryDelay);
-        }
-
-        minimum = 0;
-        current = 0;
-        maximum = 0;
-        usedHighLevel = false;
-        return false;
-    }
-
-    private static bool TrySetBrightness(DdcMonitorEndpoint endpoint, uint value)
-    {
-        if (endpoint.UseHighLevel && SetMonitorBrightness(endpoint.Handle, value))
-        {
-            return true;
-        }
-
-        if (endpoint.UseHighLevel)
-        {
-            Thread.Sleep(DdcRetryDelay);
-        }
-
-        for (var attempt = 0; attempt < 2; attempt++)
-        {
-            if (SetVCPFeature(endpoint.Handle, VcpLuminance, value))
-            {
-                endpoint.UseHighLevel = false;
-                return true;
-            }
-
-            if (attempt > 0)
-            {
-                break;
-            }
-
-            Thread.Sleep(DdcRetryDelay);
-        }
-
-        return false;
-    }
-
-    private static bool IsValidRange(uint minimum, uint current, uint maximum) =>
-        minimum < maximum && current >= minimum && current <= maximum;
-
-    private static bool IsTransientDdcError(int error) => unchecked((uint)error) is
-        ErrorGraphicsI2CTransmittingData
-        or ErrorGraphicsDdcInvalidMessageCommand
-        or ErrorGraphicsDdcInvalidMessageLength
-        or ErrorGraphicsDdcInvalidMessageChecksum;
-
-    private static PhysicalMonitor[] GetPhysicalMonitors(IntPtr monitor)
-    {
-        if (!GetNumberOfPhysicalMonitorsFromHMONITOR(monitor, out var count) || count == 0)
-        {
-            return [];
-        }
-
-        var result = new PhysicalMonitor[count];
-        if (GetPhysicalMonitorsFromHMONITOR(monitor, count, result))
-        {
-            return result;
-        }
-
-        foreach (var physical in result)
-        {
-            if (physical.Handle != IntPtr.Zero)
-            {
-                _ = DestroyPhysicalMonitor(physical.Handle);
-            }
-        }
-
-        return [];
-    }
-
-    private static DisplayBrightnessState Unsupported(DisplayMonitor display, string error)
-    {
-        return new DisplayBrightnessState(
-            $"display:{display.NativeHandle.ToInt64():X}",
-            DisplayName(display, 0),
-            false,
-            null,
-            error);
-    }
-
-    private static string DisplayName(DisplayMonitor display, int physicalIndex)
-    {
-        var prefix = display.Name;
-        return physicalIndex == 0 ? prefix : $"{prefix} {physicalIndex + 1}";
-    }
-
-    private IReadOnlyList<DisplayBrightnessState> FallbackStates(string error)
-    {
-        var displays = _displays.EnumerateMonitors();
-        return displays.Count == 0
-            ? [new DisplayBrightnessState("display:none", "Display", false, null, error)]
-            : displays.Select(display => new DisplayBrightnessState(
-                $"display:{display.NativeHandle.ToInt64():X}",
-                display.Name,
-                false,
-                null,
-                error)).ToArray();
-    }
-
-    private static string TopologyKey(IReadOnlyList<DisplayMonitor> displays) => string.Join(
-        '|',
-        displays.Select(display => $"{display.NativeHandle.ToInt64():X}:{display.Name}:{display.IsPrimary}"));
-
-    private static string DdcId(IntPtr handle, int index) => $"ddc:{handle.ToInt64():X}:{index}";
-
     private void ThrowIfDisposed()
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
     }
 
-    [DllImport("dxva2.dll", SetLastError = true)]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool GetNumberOfPhysicalMonitorsFromHMONITOR(IntPtr monitor, out uint count);
-
-    [DllImport("dxva2.dll", CharSet = CharSet.Unicode, SetLastError = true)]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool GetPhysicalMonitorsFromHMONITOR(
-        IntPtr monitor,
-        uint count,
-        [Out] PhysicalMonitor[] physicalMonitorArray);
-
-    [DllImport("dxva2.dll", SetLastError = true)]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool DestroyPhysicalMonitor(IntPtr monitor);
-
-    [DllImport("dxva2.dll", SetLastError = true)]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool GetMonitorCapabilities(
-        SafePhysicalMonitorHandle monitor,
-        out uint capabilities,
-        out uint colorTemperatures);
-
-    [DllImport("dxva2.dll", SetLastError = true)]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool GetMonitorBrightness(
-        SafePhysicalMonitorHandle monitor,
-        out uint minimum,
-        out uint current,
-        out uint maximum);
-
-    [DllImport("dxva2.dll", SetLastError = true)]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool SetMonitorBrightness(SafePhysicalMonitorHandle monitor, uint brightness);
-
-    [DllImport("dxva2.dll", SetLastError = true)]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool GetVCPFeatureAndVCPFeatureReply(
-        SafePhysicalMonitorHandle monitor,
-        byte vcpCode,
-        out VcpCodeType codeType,
-        out uint currentValue,
-        out uint maximumValue);
-
-    [DllImport("dxva2.dll", SetLastError = true)]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool SetVCPFeature(
-        SafePhysicalMonitorHandle monitor,
-        byte vcpCode,
-        uint newValue);
-
-    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
-    private struct PhysicalMonitor
+    private sealed record WriteResult(
+        bool Accepted,
+        DisplayBrightnessState? Fresh,
+        bool Verified,
+        bool TimedOutCommand,
+        string Model,
+        string? FailureReason)
     {
-        public IntPtr Handle;
+        public static WriteResult Failed(string reason, string model, DisplayBrightnessState? state = null) =>
+            new(false, state, false, false, model, reason);
 
-        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 128)]
-        public string Description;
+        public static WriteResult TimedOut(string model) => new(false, null, false, true, model, "timeout");
     }
 
-    private enum VcpCodeType
+    private sealed class MonitorGate
     {
-        Momentary,
-        SetParameter
-    }
+        private long _lastCommandTimestamp;
 
-    private sealed class SafePhysicalMonitorHandle : SafeHandleZeroOrMinusOneIsInvalid
-    {
-        public SafePhysicalMonitorHandle(IntPtr handle)
-            : base(ownsHandle: true)
+        public SemaphoreSlim Semaphore { get; } = new(1, 1);
+
+        public TimeSpan SinceLastCommand()
         {
-            SetHandle(handle);
+            var last = Volatile.Read(ref _lastCommandTimestamp);
+            return last == 0 ? TimeSpan.MaxValue : Stopwatch.GetElapsedTime(last);
         }
 
-        protected override bool ReleaseHandle() => DestroyPhysicalMonitor(handle);
+        public void Touch() => Volatile.Write(ref _lastCommandTimestamp, Stopwatch.GetTimestamp());
     }
 
-    private sealed class DdcMonitorEndpoint(
+    private sealed class DdcEndpoint(
         string id,
         string name,
-        IntPtr logicalMonitorHandle,
-        int physicalMonitorIndex,
-        SafePhysicalMonitorHandle handle,
-        bool useHighLevel,
-        uint minimum,
-        uint current,
-        uint maximum) : IDisposable
+        string model,
+        string? stableKey,
+        string deviceName,
+        int physicalIndex,
+        bool isPrimary,
+        IDdcPhysicalMonitor monitor) : IDisposable
     {
         public string Id { get; } = id;
 
         public string Name { get; } = name;
 
-        public SafePhysicalMonitorHandle Handle { get; private set; } = handle;
+        public string Model { get; } = model;
 
-        public bool UseHighLevel { get; set; } = useHighLevel;
+        public string? StableKey { get; } = stableKey;
 
-        public uint Minimum { get; private set; } = minimum;
+        public string DeviceName { get; } = deviceName;
 
-        public uint Maximum { get; private set; } = maximum;
+        public int PhysicalIndex { get; } = physicalIndex;
 
-        public int Value { get; private set; } = ToPercentage(minimum, current, maximum);
+        public bool IsPrimary { get; } = isPrimary;
 
-        private DateTimeOffset _lastCommandStartedAt = DateTimeOffset.MinValue;
+        public IDdcPhysicalMonitor Monitor { get; private set; } = monitor;
 
-        public DisplayBrightnessState ReadState(bool refreshValue)
+        public bool UseHighLevel { get; set; }
+
+        public uint Minimum { get; set; }
+
+        public uint Maximum { get; set; } = 100;
+
+        public int Value { get; set; }
+
+        public string? LastError { get; set; }
+
+        public bool NeedsReopen { get; set; }
+
+        public volatile bool Retired;
+
+        public IDdcPhysicalMonitor SwapMonitor(IDdcPhysicalMonitor next)
         {
-            if (!refreshValue)
-            {
-                return State();
-            }
-
-            if (!TryReadBrightness(Handle, UseHighLevel, out var minimum, out var current, out var maximum, out var usedHighLevel))
-            {
-                return State("DDC/CI brightness read failed.");
-            }
-
-            UseHighLevel = usedHighLevel;
-            Minimum = minimum;
-            Maximum = maximum;
-            Value = ToPercentage(minimum, current, maximum);
-            return State();
+            var previous = Monitor;
+            Monitor = next;
+            return previous;
         }
 
-        public bool SetBrightness(int value)
-        {
-            var normalized = Math.Clamp(value, 0, 100);
-            WaitForCommandSpacing();
-            if (!TrySetNormalizedBrightness(normalized))
-            {
-                if (!Reconnect())
-                {
-                    return false;
-                }
+        public DisplayBrightnessState State(string? error = null) =>
+            new(Id, Name, true, Value, error ?? LastError, IsPrimary: IsPrimary);
 
-                WaitForCommandSpacing();
-                if (!TrySetNormalizedBrightness(normalized))
-                {
-                    return false;
-                }
-            }
-
-            Value = normalized;
-            return true;
-        }
-
-        public void Dispose() => Handle.Dispose();
-
-        private DisplayBrightnessState State(string? error = null) =>
-            new(Id, Name, true, Value, error);
-
-        private bool TrySetNormalizedBrightness(int normalized)
-        {
-            _lastCommandStartedAt = DateTimeOffset.UtcNow;
-            var target = Minimum + (uint)Math.Round(
-                (Maximum - Minimum) * normalized / 100d,
-                MidpointRounding.AwayFromZero);
-            return TrySetBrightness(this, target);
-        }
-
-        private void WaitForCommandSpacing()
-        {
-            var remaining = DdcCommandSpacing - (DateTimeOffset.UtcNow - _lastCommandStartedAt);
-            if (remaining > TimeSpan.Zero)
-            {
-                Thread.Sleep(remaining);
-            }
-        }
-
-        private bool Reconnect()
-        {
-            var monitors = GetPhysicalMonitors(logicalMonitorHandle);
-            if (physicalMonitorIndex < 0 || physicalMonitorIndex >= monitors.Length)
-            {
-                DestroyUnusedMonitors(monitors, -1);
-                return false;
-            }
-
-            var replacement = new SafePhysicalMonitorHandle(monitors[physicalMonitorIndex].Handle);
-            DestroyUnusedMonitors(monitors, physicalMonitorIndex);
-            if (!TryReadBrightness(
-                    replacement,
-                    UseHighLevel,
-                    out var nextMinimum,
-                    out var nextCurrent,
-                    out var nextMaximum,
-                    out var nextUseHighLevel))
-            {
-                replacement.Dispose();
-                return false;
-            }
-
-            var previous = Handle;
-            Handle = replacement;
-            UseHighLevel = nextUseHighLevel;
-            Minimum = nextMinimum;
-            Maximum = nextMaximum;
-            Value = ToPercentage(nextMinimum, nextCurrent, nextMaximum);
-            previous.Dispose();
-            _lastCommandStartedAt = DateTimeOffset.UtcNow;
-            return true;
-        }
-
-        private static void DestroyUnusedMonitors(IReadOnlyList<PhysicalMonitor> monitors, int retainedIndex)
-        {
-            for (var index = 0; index < monitors.Count; index++)
-            {
-                if (index != retainedIndex && monitors[index].Handle != IntPtr.Zero)
-                {
-                    _ = DestroyPhysicalMonitor(monitors[index].Handle);
-                }
-            }
-        }
-
-        private static int ToPercentage(uint minimum, uint current, uint maximum) =>
-            Math.Clamp((int)Math.Round(
-                (current - minimum) * 100d / (maximum - minimum),
-                MidpointRounding.AwayFromZero), 0, 100);
+        public void Dispose() => Monitor.Dispose();
     }
 
-    private sealed class DdcDiscovery(
-        string topologyKey,
-        IReadOnlyList<DdcMonitorEndpoint> endpoints,
-        IReadOnlyList<DisplayBrightnessState> unavailable) : IDisposable
+    private sealed record DdcSlot(DdcEndpoint? Endpoint, DisplayBrightnessState? Unavailable)
     {
-        public string TopologyKey { get; } = topologyKey;
+        public DisplayBrightnessState State() => Endpoint?.State() ?? Unavailable!;
+    }
 
-        public IReadOnlyList<DdcMonitorEndpoint> Endpoints { get; } = endpoints;
+    private sealed record DdcRegistry(string TopologyKey, IReadOnlyList<DdcSlot> Slots)
+    {
+        public IEnumerable<DdcEndpoint> Endpoints => Slots.Select(slot => slot.Endpoint).OfType<DdcEndpoint>();
 
-        public IReadOnlyList<DisplayBrightnessState> Unavailable { get; } = unavailable;
-
-        public DateTimeOffset DiscoveredAt { get; set; } = DateTimeOffset.UtcNow;
-
-        public IReadOnlyList<DisplayBrightnessState> ReadStates(
-            bool refreshValues,
-            CancellationToken cancellationToken)
-        {
-            var states = new List<DisplayBrightnessState>(Endpoints.Count + Unavailable.Count);
-            states.AddRange(Unavailable);
-            foreach (var endpoint in Endpoints)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                states.Add(endpoint.ReadState(refreshValues));
-            }
-
-            return states;
-        }
-
-        public void Dispose()
-        {
-            foreach (var endpoint in Endpoints)
-            {
-                endpoint.Dispose();
-            }
-        }
+        public IEnumerable<DisplayBrightnessState> States() => Slots.Select(slot => slot.State());
     }
 
     private sealed record WmiBrightness(int Index, int Value);

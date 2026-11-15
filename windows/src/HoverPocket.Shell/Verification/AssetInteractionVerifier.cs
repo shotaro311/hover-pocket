@@ -298,6 +298,11 @@ internal static class AssetInteractionVerifier
         try
         {
             SetCursorPos((int)position.X, (int)position.Y); await Task.Delay(80);
+            // Hover-revealed controls such as the favorite star ignore pointer events until :hover applies.
+            // Clicking before that hits the card underneath, so wait until the target is under the cursor.
+            var hitScript = $"(()=>{{const t=document.querySelector({JsonSerializer.Serialize(selector)}),e=document.elementFromPoint({(bounds.X + bounds.Width / 2).ToString(System.Globalization.CultureInfo.InvariantCulture)},{(bounds.Y + bounds.Height / 2).ToString(System.Globalization.CultureInfo.InvariantCulture)});return !!t&&!!e&&(t===e||t.contains(e));}})()";
+            var hitDeadline = DateTime.UtcNow.AddMilliseconds(1500);
+            while (await web.ExecuteScriptAsync(hitScript) != "true" && DateTime.UtcNow < hitDeadline) await Task.Delay(30);
             MouseEvent(rightButton ? 0x0008u : 0x0002u, 0, 0, 0, 0); await Task.Delay(40);
             MouseEvent(rightButton ? 0x0010u : 0x0004u, 0, 0, 0, 0); await Task.Delay(80);
         }

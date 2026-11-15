@@ -329,6 +329,77 @@ export function renderControlsProvider(context) {
     await refresh();
     return canvas === root.querySelector("canvas[data-live-preview]");
   };
+  // Swaps in synthetic display rows under several container sizes and checks that no row is clipped.
+  root.__verifyDisplayLayout = async () => {
+    const original = root.querySelector(":scope > .hp-controls-section");
+    if (!original) {
+      return { ok: false, failures: ["display section missing"] };
+    }
+    const fake = (id, name, isPrimary, value) => ({ id, name, supported: true, value, isPrimary });
+    const cases = [
+      [fake("ddc:A-0", "Generic PnP Monitor", true, 54), fake("ddc:B-0", "Generic PnP Monitor", false, 73)],
+      [
+        fake("ddc:A-0", "LG ULTRAGEAR+", true, 54),
+        fake("ddc:B-0", "U16ZT", false, 73),
+        { id: "display:C", name: "U16ZT", supported: false, value: null, isPrimary: false, error: "DDC/CI is not available." },
+      ],
+    ];
+    const sizes = [["", ""], ["440px", ""], ["", "220px"], ["440px", "220px"]];
+    const failures = [];
+    const previousWidth = root.style.width;
+    const previousHeight = root.style.height;
+    try {
+      for (const displays of cases) {
+        const replacement = displaySection(displays, context.state, () => {});
+        original.replaceWith(replacement);
+        const expected = displayLabels(displays, context.state);
+        try {
+          const strongs = [...replacement.querySelectorAll(".hp-control-row strong")].map((item) => item.textContent);
+          if (JSON.stringify(strongs) !== JSON.stringify(expected)) {
+            failures.push(`labels ${JSON.stringify(strongs)}`);
+          }
+          if (displays.length === 2 && !(expected[0].includes("メイン") || expected[0].includes("Main"))) {
+            failures.push("duplicate primary label missing");
+          }
+          for (const [width, height] of sizes) {
+            root.style.width = width;
+            root.style.height = height;
+            await new Promise((resolve) => requestAnimationFrame(() => resolve()));
+            const list = replacement.querySelector(".hp-controls-list");
+            const sectionBounds = replacement.getBoundingClientRect();
+            const rootBounds = root.getBoundingClientRect();
+            const contentBottom = rootBounds.top - root.scrollTop + root.scrollHeight;
+            const rows = [...replacement.querySelectorAll(".hp-control-row")];
+            const label = `${displays.length} displays at ${width || "auto"}x${height || "auto"}`;
+            if (rows.length !== displays.length) {
+              failures.push(`${label}: rendered ${rows.length} rows`);
+            }
+            if (list.scrollHeight > list.clientHeight + 1) {
+              failures.push(`${label}: display list scrolls internally`);
+            }
+            if (sectionBounds.bottom > contentBottom + 1 || sectionBounds.right > rootBounds.right + 1) {
+              failures.push(`${label}: display section outside the Controls content`);
+            }
+            for (const row of rows) {
+              for (const element of [row, ...row.querySelectorAll("strong, span, input, p")]) {
+                const bounds = element.getBoundingClientRect();
+                if (bounds.top < sectionBounds.top - 1 || bounds.bottom > sectionBounds.bottom + 1
+                  || bounds.left < sectionBounds.left - 1 || bounds.right > sectionBounds.right + 1) {
+                  failures.push(`${label}: ${element.tagName.toLowerCase()} of ${row.dataset.displayId} clipped`);
+                }
+              }
+            }
+          }
+        } finally {
+          replacement.replaceWith(original);
+        }
+      }
+    } finally {
+      root.style.width = previousWidth;
+      root.style.height = previousHeight;
+    }
+    return { ok: failures.length === 0, failures };
+  };
   return {
     refresh,
     dispose() {
@@ -359,18 +430,21 @@ export function renderControlsProvider(context) {
 function displaySection(displays, appState, queueBrightness) {
   const body = document.createElement("div");
   body.className = "hp-controls-list";
-  for (const display of displays) {
+  const names = displayLabels(displays, appState);
+  displays.forEach((display, index) => {
     const row = document.createElement("div");
     const detecting = display.error === "Brightness detection is still running.";
     row.className = `hp-control-row${display.supported ? "" : detecting ? " is-detecting" : " is-unsupported"}`;
+    row.dataset.displayId = display.id ?? "";
     const title = label(
-      localizedDisplayName(display.name, appState),
+      names[index],
       display.supported && display.value != null
         ? `${display.value}%`
         : detecting
           ? text(appState, "検出中…", "Detecting…")
           : text(appState, "非対応", "Unsupported"),
     );
+    title.querySelector("strong").title = names[index];
     if (display.supported && display.value != null) {
       const slider = range(display.value, 0, 100);
       const valueLabel = title.querySelector("span");
@@ -397,8 +471,41 @@ function displaySection(displays, appState, queueBrightness) {
       );
     }
     body.append(row);
-  }
+  });
   return section(text(appState, "ディスプレイ", "Displays"), body);
+}
+
+// Adds Main / Sub only when two rows would otherwise show the same name.
+function displayLabels(displays, appState) {
+  const names = displays.map((display) => localizedDisplayName(display.name, appState));
+  const counts = new Map();
+  for (const name of names) {
+    counts.set(name, (counts.get(name) ?? 0) + 1);
+  }
+  const subCounts = new Map();
+  const subTotals = new Map();
+  displays.forEach((display, index) => {
+    if (!display.isPrimary) {
+      subTotals.set(names[index], (subTotals.get(names[index]) ?? 0) + 1);
+    }
+  });
+  const english = appState?.settings?.language === "en";
+  return displays.map((display, index) => {
+    const name = names[index];
+    if ((counts.get(name) ?? 0) < 2) {
+      return name;
+    }
+    let role;
+    if (display.isPrimary) {
+      role = english ? "Main" : "メイン";
+    } else {
+      const order = (subCounts.get(name) ?? 0) + 1;
+      subCounts.set(name, order);
+      const base = english ? "Sub" : "サブ";
+      role = (subTotals.get(name) ?? 0) > 1 ? `${base} ${order}` : base;
+    }
+    return english ? `${name} (${role})` : `${name}（${role}）`;
+  });
 }
 
 function volumeSection(volume, appState, update) {

@@ -87,6 +87,17 @@ internal static class CaptureVerifier
                 SendMessage(named.HandleForVerify, 0x0312, 1, 0);
                 if (namedActions.Count != 2) failures.Add("shortcut conflict lost prior registration");
             }
+            var startupActions = new List<string>();
+            using (var occupied = new CaptureHotkeys(_ => { }))
+            using (var startup = new CaptureHotkeys(startupActions.Add, true))
+            {
+                occupied.Apply("Ctrl+Alt+F23", "");
+                var conflicts = startup.ApplyBindingsBestEffort(new() { ["chat"] = "Ctrl+Alt+F23", ["panel"] = "Ctrl+Alt+F24" });
+                // Hotkey IDs follow binding order: chat=1 (taken by another owner), panel=2.
+                SendMessage(startup.HandleForVerify, 0x0312, 2, 0);
+                if (!conflicts.SequenceEqual(new[] { "Ctrl+Alt+F23" }) || !startupActions.SequenceEqual(new[] { "panel" }))
+                    failures.Add("startup shortcut conflict disabled the remaining shortcuts");
+            }
             VerifyConsole.WriteLine("PASS configurable shortcuts: named dispatch, capture suspension, conflict rollback");
             using (var secondKeys = new CaptureHotkeys(_ => { })) if (secondKeys.Apply("Ctrl+Alt+F21", "Ctrl+Alt+F22").Contains("使用中")) failures.Add("hotkeys not unregistered");
             using (var configuration = new CaptureController(store, root, () => Task.CompletedTask, () => { }, () => { }))

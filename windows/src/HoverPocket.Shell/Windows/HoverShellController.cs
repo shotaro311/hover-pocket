@@ -614,7 +614,7 @@ internal sealed partial class HoverShellController : IDisposable
             var bounded = ResizeLimits(layout).Clamp(customBounds);
             var width = Math.Min(bounded.Width, monitor.WorkArea.Width / monitor.ScaleX);
             var height = Math.Min(bounded.Height, monitor.WorkArea.Bottom / monitor.ScaleY - top);
-            var left = Math.Clamp(layout.PanelTarget.DipRect.Left + (layout.PanelTarget.DipRect.Width - width) / 2, monitor.WorkArea.Left / monitor.ScaleX, monitor.WorkArea.Right / monitor.ScaleX - width);
+            var left = ClampLeft(layout.PanelTarget.DipRect.Left + (layout.PanelTarget.DipRect.Width - width) / 2, monitor, width);
             return new WindowPlacement(new Rect(left, top, width, height), new PhysicalRect((int)Math.Round(left * monitor.ScaleX), layout.PanelTarget.PhysicalRect.Top, (int)Math.Round(width * monitor.ScaleX), (int)Math.Round(height * monitor.ScaleY)));
         }
         if (_panel.AssetLayout is { Active: true } asset && (!asset.PinOnly || asset.Width > 0 && asset.Height > 0 || asset.Fullscreen || asset.Organizer))
@@ -633,7 +633,7 @@ internal sealed partial class HoverShellController : IDisposable
             var scale = Math.Min(1, Math.Min((maxWidth - 32) / Math.Max(1, naturalWidth), (maxHeight - 120) / Math.Max(1, naturalHeight)));
             var width = Math.Min(maxWidth, Math.Max(normal.Width, naturalWidth * scale + 32));
             var height = Math.Min(maxHeight, Math.Max(normal.Height, naturalHeight * scale + 120));
-            var left = Math.Clamp(normal.Left + (normal.Width - width) / 2, monitor.WorkArea.Left / monitor.ScaleX, monitor.WorkArea.Right / monitor.ScaleX - width);
+            var left = ClampLeft(normal.Left + (normal.Width - width) / 2, monitor, width);
             return new WindowPlacement(new System.Windows.Rect(left, normal.Top, width, height), new PhysicalRect((int)Math.Round(left * monitor.ScaleX), layout.PanelTarget.PhysicalRect.Top, (int)Math.Round(width * monitor.ScaleX), (int)Math.Round(height * monitor.ScaleY)));
         }
         var baseTarget = layout.PanelTarget;
@@ -652,6 +652,15 @@ internal sealed partial class HoverShellController : IDisposable
         if (target.PhysicalRect.Height <= availableHeight) return target;
         return new WindowPlacement(new Rect(target.DipRect.Left, target.DipRect.Top, target.DipRect.Width, availableHeight / layout.Monitor.ScaleY),
             new PhysicalRect(target.PhysicalRect.Left, target.PhysicalRect.Top, target.PhysicalRect.Width, availableHeight));
+    }
+
+    // When the panel is as wide as the work area, Right/scale - width can land a rounding error below
+    // Left/scale and Math.Clamp would throw; the upper bound never goes below the lower bound here.
+    internal static double ClampLeft(double preferred, DisplayMonitor monitor, double width)
+    {
+        var minimum = monitor.WorkArea.Left / monitor.ScaleX;
+        var maximum = Math.Max(minimum, monitor.WorkArea.Right / monitor.ScaleX - width);
+        return Math.Clamp(preferred, minimum, maximum);
     }
 
     private static bool IsInsideInflatedPlacement(

@@ -268,7 +268,13 @@ public partial class App : System.Windows.Application
             shellController.PanelBridgeController.AssetCaptureRequested = _captureController.FromLibraryAsync;
             shellController.PanelBridgeController.VoiceCapture = _captureController;
             _captureController.ShortcutInvoked += shellController.RunShortcut;
-            try { _captureController.ApplyShortcuts(shellController.PanelBridgeController.CurrentSettings.Shortcuts); } catch (ArgumentException ex) { Services.AppDiagnostics.Record("shortcuts.registration.failed", ex); }
+            try
+            {
+                var conflicts = _captureController.ApplyShortcutsAtStartup(shellController.PanelBridgeController.CurrentSettings.Shortcuts);
+                if (conflicts.Count > 0) Services.AppDiagnostics.Record("shortcuts.registration.partial", detail: $"conflicts={conflicts.Count}");
+            }
+            catch (ArgumentException ex) { Services.AppDiagnostics.Record("shortcuts.registration.failed", ex); }
+            shellController.PanelBridgeController.RepairStartupRegistration();
             shellController.PanelBridgeController.VoiceLibraryRequested = shellController.OpenAssetLibraryForVoiceAsync;
             updaterService.BeforeRestart = _captureController.StopRecordingAsync;
             _trayIconService = new TrayIconService(shellController, updaterService, _captureController);

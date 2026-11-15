@@ -35,6 +35,12 @@ internal sealed partial class CaptureController : IDisposable
     internal event Action<string>? ShortcutInvoked;
     internal void SuspendShortcuts(bool suspended) => _hotkeys.Suspend(suspended);
     internal void ApplyShortcuts(Dictionary<string, string> additional) { var all = new Dictionary<string, string>(additional) { ["screenshot"] = _preferences.ScreenshotKey, ["recording"] = _preferences.RecordingKey }; _hotkeys.ApplyBindings(all); _additionalShortcuts = new(additional); }
+    internal IReadOnlyList<string> ApplyShortcutsAtStartup(Dictionary<string, string> additional)
+    {
+        var conflicts = _hotkeys.ApplyBindingsBestEffort(new Dictionary<string, string>(additional) { ["screenshot"] = _preferences.ScreenshotKey, ["recording"] = _preferences.RecordingKey });
+        _additionalShortcuts = new(additional);
+        return conflicts;
+    }
     private CaptureWindow? _window;
     private ScreenshotToastWindow? _toast;
     internal ScreenshotToastWindow? ToastForVerify => _toast;

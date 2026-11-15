@@ -2909,6 +2909,34 @@ internal sealed partial class PanelBridgeController : IDisposable
         };
     }
 
+    // Called once at normal startup. The Run entry may point at another build's folder that no longer exists,
+    // so it is re-registered whenever the setting is on and the entry differs from the expected command.
+    internal bool RepairStartupRegistration()
+    {
+        if (!_externalIntegrationsEnabled || !CurrentSettings.StartWithWindows)
+        {
+            return false;
+        }
+
+        try
+        {
+            if (_startupRegistration.IsRegistered())
+            {
+                return false;
+            }
+
+            _startupRegistration.SetRegistered(true);
+            Services.AppDiagnostics.Record("startup.registration.repaired");
+            return true;
+        }
+        catch (Exception ex) when (ex is UnauthorizedAccessException or InvalidOperationException or IOException
+            or System.Security.SecurityException)
+        {
+            Services.AppDiagnostics.Record("startup.registration.repair.failed", ex);
+            return false;
+        }
+    }
+
     private bool IsStartupRegistered()
     {
         try

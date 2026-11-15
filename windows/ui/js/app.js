@@ -1452,6 +1452,8 @@ window.__hoverPocketVerify = {
     let controlsStableRefreshOk = false;
     let controlsBrightnessResolvedOk = false;
     let controlsMediaActionsOk = false;
+    let controlsDisplayRowsOk = false;
+    let controlsDisplayRowFailures = [];
     if (controlsProvider) {
       window.__hoverPocketVerifyStep = "select-controls";
       await request("provider.select", { id: controlsProvider.id });
@@ -1498,6 +1500,10 @@ window.__hoverPocketVerify = {
           && controlsRoot.querySelector("canvas[data-live-preview]"),
         ) || Boolean(controlsRoot.querySelector(".hp-media.is-empty"));
         controlsStableRefreshOk = Boolean(await controlsRoot.__verifyStableRefresh?.());
+        window.__hoverPocketVerifyStep = "verify-controls-display-rows";
+        const displayRows = await controlsRoot.__verifyDisplayLayout?.();
+        controlsDisplayRowsOk = Boolean(displayRows?.ok);
+        controlsDisplayRowFailures = displayRows?.failures ?? ["verification hook missing"];
       }
     }
     const clipboardProvider = state.providers.find((provider) => provider.id === "clipboard");
@@ -1815,6 +1821,8 @@ window.__hoverPocketVerify = {
       controlsStableRefreshOk,
       controlsBrightnessResolvedOk,
       controlsMediaActionsOk,
+      controlsDisplayRowsOk,
+      controlsDisplayRowFailures,
       clipboardStableProviderOk,
       clipboardStableRefreshOk,
       clipboardSplitViewOk,

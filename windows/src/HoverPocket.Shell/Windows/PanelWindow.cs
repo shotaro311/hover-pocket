@@ -1175,6 +1175,8 @@ internal sealed record UiWebVerifyResult(
     bool ControlsStableRefreshOk,
     bool ControlsBrightnessResolvedOk,
     bool ControlsMediaActionsOk,
+    bool ControlsDisplayRowsOk,
+    string[]? ControlsDisplayRowFailures,
     bool ClipboardStableProviderOk,
     bool ClipboardStableRefreshOk,
     bool ClipboardSplitViewOk,

@@ -5,7 +5,7 @@ using HoverPocket.Shell.Verification;
 
 namespace HoverPocket.Shell.Providers.Controls;
 
-internal sealed class ControlsVerifier
+internal sealed partial class ControlsVerifier
 {
     private readonly bool _changeBrightness;
     private readonly bool _togglePlayback;
@@ -56,6 +56,7 @@ internal sealed class ControlsVerifier
         VerifyBrightnessReadbackErrorIsRejected();
         await VerifyDeterministicFlowAsync();
         await VerifyBrightnessDetectionRaceAsync();
+        await VerifyBrightnessServiceReliabilityAsync();
         using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         await VerifyLiveVolumeAsync(cancellation.Token);
         await VerifyLiveDisplaysAsync(cancellation.Token);
@@ -316,12 +317,20 @@ internal sealed class ControlsVerifier
             return;
         }
 
-        var target = displays.FirstOrDefault(display => display.Supported && display.Value is not null);
+        // HOVERPOCKET_BRIGHTNESS_VERIFY_TARGET limits the live write test to one display (ID or name substring).
+        var targetFilter = Environment.GetEnvironmentVariable("HOVERPOCKET_BRIGHTNESS_VERIFY_TARGET");
+        var target = displays.FirstOrDefault(display => display.Supported
+            && display.Value is not null
+            && (string.IsNullOrWhiteSpace(targetFilter)
+                || display.Id.Contains(targetFilter, StringComparison.OrdinalIgnoreCase)
+                || display.Name.Contains(targetFilter, StringComparison.OrdinalIgnoreCase)));
         if (target?.Value is not { } original)
         {
             VerifyConsole.WriteLine("brightness_change=unsupported");
             return;
         }
+
+        VerifyConsole.WriteLine($"brightness_change_target={target.Id}");
 
         var firstRequested = original >= 8 ? original - 8 : original + 8;
         var requested = original >= 16 ? original - 16 : original + 16;

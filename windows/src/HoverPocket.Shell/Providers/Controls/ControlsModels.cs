@@ -8,7 +8,8 @@ internal sealed record DisplayBrightnessState(
     bool Supported,
     int? Value,
     string? Error = null,
-    bool? WriteVerified = null);
+    bool? WriteVerified = null,
+    bool? IsPrimary = null);
 
 internal sealed record VolumeState(
     bool Available,

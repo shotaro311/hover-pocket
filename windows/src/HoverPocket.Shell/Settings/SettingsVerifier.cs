@@ -25,6 +25,7 @@ internal sealed class SettingsVerifier
             await VerifyAsync();
             await VerifyVoiceSettingsUiAsync();
             await VerifyToolSettingsAsync();
+            VerifyStartupRegistrationRepair();
         }
         catch (Exception ex)
         {
@@ -1272,6 +1273,43 @@ internal sealed class SettingsVerifier
                 != decoded.Artifacts.Count)
         {
             _failures.Add("Codex sandbox setup request was not bound to pinned source handles");
+        }
+    }
+
+    // Startup repair re-registers auto-start only when the setting is on and external integrations run.
+    private void VerifyStartupRegistrationRepair()
+    {
+        var registry = ProviderRegistry.CreateDefault();
+        foreach (var (enabled, external, alreadyRegistered, expectRepair) in new[]
+                 {
+                     (true, true, false, true),
+                     (true, true, true, false),
+                     (false, true, false, false),
+                     (true, false, false, false)
+                 })
+        {
+            var store = UserSettingsStore.CreateTemporary("StartupRepairVerify");
+            var settings = store.Load(registry.ProviderIds);
+            settings.StartWithWindows = enabled;
+            store.Save(settings);
+            var startup = new InMemoryStartupRegistrationService();
+            if (alreadyRegistered)
+            {
+                startup.SetRegistered(true);
+            }
+
+            using var controller = new PanelBridgeController(
+                registry,
+                store,
+                store.Load(registry.ProviderIds),
+                startup,
+                externalIntegrationsEnabled: external);
+            var repaired = controller.RepairStartupRegistration();
+            var label = $"enabled={enabled},external={external},registered={alreadyRegistered}";
+            if (repaired != expectRepair || startup.Registered != (expectRepair || alreadyRegistered))
+            {
+                _failures.Add($"startup repair {label}: repaired={repaired} registered={startup.Registered}");
+            }
         }
     }
 

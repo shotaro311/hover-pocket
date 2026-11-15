@@ -41,14 +41,11 @@
   text-transform: uppercase;
 }
 
+/* Every display row stays visible; when the panel is short the whole Controls view scrolls instead. */
 .hp-controls-list {
   display: grid;
   min-width: 0;
-  max-height: 82px;
   gap: 6px;
-  overflow-x: hidden;
-  overflow-y: auto;
-  scrollbar-width: thin;
 }
 
 .hp-control-row {
@@ -302,10 +299,6 @@
 
   .hp-controls-section {
     padding: 7px 8px;
-  }
-
-  .hp-controls-list {
-    max-height: 70px;
   }
 
   .hp-media {

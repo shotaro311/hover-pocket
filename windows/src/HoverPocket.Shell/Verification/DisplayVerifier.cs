@@ -110,6 +110,35 @@ internal sealed class DisplayVerifier
             }
         }
         VerifyConsole.WriteLine("display synthetic geometry: sizes=4, dpi=96/120/144/192, negative_origins=true");
+        VerifyFullWidthPanelClamp();
+    }
+
+    // A panel exactly as wide as the work area must not make the horizontal clamp throw from rounding.
+    private void VerifyFullWidthPanelClamp()
+    {
+        var checkedCases = 0;
+        foreach (var dpi in new uint[] { 96, 120, 144, 168, 192 })
+        foreach (var left in new[] { 0, 3413, 5120, 5121, -1097, -2731 })
+        foreach (var width in new[] { 864, 1097, 1646, 1653, 2160 })
+        {
+            var monitor = new DisplayMonitor($"clamp-{dpi}-{left}-{width}", "Synthetic", IntPtr.Zero,
+                new PhysicalRect(left, 0, width, 1755), new PhysicalRect(left, 0, width, 1715), false, dpi, dpi);
+            var fullWidth = monitor.WorkArea.Width / monitor.ScaleX;
+            try
+            {
+                var placed = HoverShellController.ClampLeft(left / monitor.ScaleX + 50, monitor, fullWidth);
+                if (Math.Abs(placed - monitor.WorkArea.Left / monitor.ScaleX) > 0.001)
+                    _failures.Add($"{monitor.Id}: full-width panel was not aligned to the work area");
+            }
+            catch (ArgumentException ex)
+            {
+                _failures.Add($"{monitor.Id}: full-width panel clamp threw {ex.GetType().Name}");
+            }
+
+            checkedCases++;
+        }
+
+        VerifyConsole.WriteLine($"display full-width clamp: cases={checkedCases}");
     }
 
     private void VerifyPlacement(IReadOnlyList<DisplayMonitor> monitors, DisplayPlacement placement)

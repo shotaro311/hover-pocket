@@ -57,7 +57,12 @@ internal sealed class UiVerifier
                 return await ClipboardLoadVerifier.RunAsync(_controller);
             if (ready && Environment.GetEnvironmentVariable("HOVERPOCKET_PREVIEW_MOTION_VERIFY_ONLY") == "1")
                 return await PreviewMotionVerifier.RunAsync(_controller);
-            if (ready) _failures.AddRange(await AssetLibraryUiVerifier.RunAsync(_controller));
+            if (ready)
+            {
+                // A stuck asset interaction is reported as a failure without hiding the remaining checks.
+                try { _failures.AddRange(await AssetLibraryUiVerifier.RunAsync(_controller)); }
+                catch (TimeoutException ex) { _failures.Add($"assets: {ex.Message}"); }
+            }
             if (Environment.GetEnvironmentVariable("HOVERPOCKET_ASSET_VERIFY_ONLY") == "1")
             {
                 foreach (var failure in _failures) VerifyConsole.WriteLine("FAIL " + failure);
@@ -134,6 +139,14 @@ internal sealed class UiVerifier
                 if (!result.ControlsMediaActionsOk)
                 {
                     _failures.Add("controls: media source activation or playback rate actions did not render");
+                }
+
+                if (!result.ControlsDisplayRowsOk)
+                {
+                    var details = result.ControlsDisplayRowFailures is { Length: > 0 } rowFailures
+                        ? string.Join("; ", rowFailures.Take(6))
+                        : "no result";
+                    _failures.Add($"controls: display rows were clipped, scrolled inside the list or mislabeled ({details})");
                 }
 
                 if (!result.ClipboardStableProviderOk)

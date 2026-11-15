@@ -25,7 +25,8 @@ internal static class PanelResizeVerifier
                 grip.RaiseEvent(new DragDeltaEventArgs((width - panel.Width) / 2, height - panel.Height) { RoutedEvent = Thumb.DragDeltaEvent });
                 grip.RaiseEvent(new DragCompletedEventArgs(0, 0, false) { RoutedEvent = Thumb.DragCompletedEvent });
             }
-            var cases = new[] { ("minimum", 1d, 1d), ("wide-short", limits.MaxWidth, limits.MinHeight),
+            // past-top-left drags beyond the origin so the raw size becomes negative before clamping.
+            var cases = new[] { ("minimum", 1d, 1d), ("past-top-left", -2000d, -2000d), ("wide-short", limits.MaxWidth, limits.MinHeight),
                 ("narrow-tall", limits.MinWidth, limits.MaxHeight), ("middle", 640d, (limits.MinHeight + limits.MaxHeight) / 2), ("maximum", 90000d, 90000d) };
             var providers = new Dictionary<string, string> { ["calendar"] = ".hp-calendar", ["controls"] = ".hp-controls", ["calculator"] = ".hp-calc", ["clipboard"] = ".clipboard-root,.clipboard-loading", ["sticky"] = ".sticky-root", ["timer"] = ".hp-timer", ["assets"] = ".assets-root" };
             var evidence = Path.GetDirectoryName(Path.GetFullPath(Environment.GetEnvironmentVariable("HOVERPOCKET_VERIFY_LOG")!))!;
@@ -35,7 +36,7 @@ internal static class PanelResizeVerifier
             {
                 Drag(width, height);
                 await Task.Delay(120, token);
-                var expected = limits.Clamp(new(width, height));
+                var expected = limits.Clamp(new(Math.Max(0, width), Math.Max(0, height)));
                 expected.Width = Math.Min(expected.Width, layout.Monitor.WorkArea.Width / layout.Monitor.ScaleX);
                 expected.Height = Math.Min(expected.Height, layout.Monitor.WorkArea.Bottom / layout.Monitor.ScaleY - panel.Top);
                 if (Math.Abs(panel.Width - expected.Width) > 1 || Math.Abs(panel.Height - expected.Height) > 1)

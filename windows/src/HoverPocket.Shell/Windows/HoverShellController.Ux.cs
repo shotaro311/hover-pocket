@@ -19,7 +19,14 @@ internal sealed partial class HoverShellController
         }
         if (_interactivePanelSize is { } size)
         {
-            _interactivePanelSize = ResizeLimits(layout).Clamp(new(size.Width + dx * 2, size.Height + dy));
+            // A fast drag toward the top-left can make the raw size negative, and System.Windows.Size throws
+            // on negative values, so clamp before constructing it.
+            var width = size.Width + dx * 2;
+            var height = size.Height + dy;
+            if (double.IsFinite(width) && double.IsFinite(height))
+            {
+                _interactivePanelSize = ResizeLimits(layout).Clamp(new(Math.Max(0, width), Math.Max(0, height)));
+            }
             var target = EffectivePanelTarget(layout);
             _interactivePanelSize = target.DipRect.Size;
             _panel.ResizeLive(target);
