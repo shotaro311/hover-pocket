@@ -17,6 +17,12 @@ internal sealed record BrightnessTiming(
     TimeSpan WriteTimeout,
     TimeSpan MonitorGateTimeout)
 {
+    // How long a monitor that failed detection stays unsupported before the next read probes it again.
+    public TimeSpan UnavailableRetry { get; init; } = TimeSpan.FromSeconds(30);
+
+    // How long ReadAsync serves the last snapshot without touching the hardware.
+    public TimeSpan CacheLifetime { get; init; } = TimeSpan.FromSeconds(15);
+
     // Measured on the development PC: a VCP 0x10 read takes about 63ms and a write is readable after 125-140ms.
     public static BrightnessTiming Default { get; } = new(
         TimeSpan.FromMilliseconds(60),
@@ -40,7 +46,6 @@ internal sealed class MonitorBrightnessService : IMonitorBrightnessService, IDis
     private const uint ErrorGraphicsDdcInvalidMessageCommand = 0xC0262589;
     private const uint ErrorGraphicsDdcInvalidMessageLength = 0xC026258A;
     private const uint ErrorGraphicsDdcInvalidMessageChecksum = 0xC026258B;
-    private static readonly TimeSpan CacheLifetime = TimeSpan.FromSeconds(15);
     private static readonly TimeSpan InitialReadWait = TimeSpan.FromMilliseconds(180);
     private static readonly TimeSpan WmiWriteTimeout = TimeSpan.FromMilliseconds(2500);
     private readonly IDdcPlatform _platform;
@@ -88,6 +93,9 @@ internal sealed class MonitorBrightnessService : IMonitorBrightnessService, IDis
 
     public event EventHandler<IReadOnlyList<DisplayBrightnessState>>? StateChanged;
 
+    // Verification only: runs on the rebuild thread after probing and before the registry swap.
+    internal Action? BeforeRegistrySwapForVerify { get; set; }
+
     public async Task<IReadOnlyList<DisplayBrightnessState>> ReadAsync(CancellationToken cancellationToken)
     {
         ThrowIfDisposed();
@@ -100,7 +108,7 @@ internal sealed class MonitorBrightnessService : IMonitorBrightnessService, IDis
             }
 
             if (_lastSnapshot is not null
-                && DateTimeOffset.UtcNow - _lastSnapshotAt <= CacheLifetime)
+                && DateTimeOffset.UtcNow - _lastSnapshotAt <= _timing.CacheLifetime)
             {
                 return _lastSnapshot;
             }
@@ -354,7 +362,9 @@ internal sealed class MonitorBrightnessService : IMonitorBrightnessService, IDis
     private DdcRegistry EnsureRegistry()
     {
         var current = CurrentRegistry();
-        if (current is not null && !_topologyDirty)
+        // A monitor that did not answer (asleep, just woken, briefly busy) is shown as unsupported. Probe
+        // again after a while instead of keeping it unsupported until the display topology changes.
+        if (current is not null && !_topologyDirty && !current.ShouldRetryUnavailable(_timing.UnavailableRetry))
         {
             var key = TopologyKey(FilterMonitors(_platform.EnumerateMonitors()));
             if (string.Equals(current.TopologyKey, key, StringComparison.Ordinal))
@@ -374,6 +384,9 @@ internal sealed class MonitorBrightnessService : IMonitorBrightnessService, IDis
         _discoveryGate.Wait();
         try
         {
+            // Cleared before enumerating so a display change that arrives during the rebuild is not lost.
+            var wasDirty = _topologyDirty;
+            _topologyDirty = false;
             var monitors = FilterMonitors(_platform.EnumerateMonitors());
             var key = TopologyKey(monitors);
             var current = CurrentRegistry();
@@ -381,10 +394,14 @@ internal sealed class MonitorBrightnessService : IMonitorBrightnessService, IDis
                 && !ReferenceEquals(current, observed)
                 && string.Equals(current.TopologyKey, key, StringComparison.Ordinal))
             {
+                // Reusing another caller's rebuild: keep a pending change notice for the next read.
+                if (wasDirty)
+                {
+                    _topologyDirty = true;
+                }
+
                 return current;
             }
-
-            _topologyDirty = false;
 
             var slots = new List<DdcSlot>();
             foreach (var monitor in monitors)
@@ -453,7 +470,8 @@ internal sealed class MonitorBrightnessService : IMonitorBrightnessService, IDis
                 }
             }
 
-            var replacement = new DdcRegistry(key, slots);
+            var replacement = new DdcRegistry(key, slots, Stopwatch.GetTimestamp());
+            BeforeRegistrySwapForVerify?.Invoke();
             DdcRegistry? previous;
             lock (_registrySync)
             {
@@ -470,7 +488,42 @@ internal sealed class MonitorBrightnessService : IMonitorBrightnessService, IDis
 
             if (previous is not null)
             {
+                // Marks the old endpoints Retired first, so a writer that gets a gate from now on follows the
+                // new endpoint.
                 Retire(previous);
+            }
+
+            // A write that ran on an old endpoint while probing hands its newer value over. Gates are taken
+            // one at a time so a slow monitor never makes a write to another monitor wait.
+            if (!ReferenceEquals(previous, replacement))
+            {
+                foreach (var endpoint in replacement.Endpoints)
+                {
+                    var older = previous?.Endpoints.FirstOrDefault(candidate =>
+                        string.Equals(candidate.Id, endpoint.Id, StringComparison.OrdinalIgnoreCase));
+                    if (older is null)
+                    {
+                        continue;
+                    }
+
+                    var gate = Gate(endpoint.Id);
+                    if (!gate.Semaphore.Wait(_timing.MonitorGateTimeout))
+                    {
+                        continue;
+                    }
+
+                    try
+                    {
+                        if (older.ValueTimestamp > endpoint.ValueTimestamp)
+                        {
+                            endpoint.Value = older.Value;
+                        }
+                    }
+                    finally
+                    {
+                        gate.Semaphore.Release();
+                    }
+                }
             }
 
             return replacement;
@@ -499,7 +552,7 @@ internal sealed class MonitorBrightnessService : IMonitorBrightnessService, IDis
                     continue;
                 }
 
-                if (TryReadBrightness(endpoint, gate, endpoint.UseHighLevel))
+                if (TryReadBrightness(endpoint, gate, endpoint.UseHighLevel) || Reopen(endpoint, gate))
                 {
                     endpoint.LastError = null;
                 }
@@ -949,7 +1002,9 @@ internal sealed class MonitorBrightnessService : IMonitorBrightnessService, IDis
     {
         var key = displayId.StartsWith("ddc:", StringComparison.OrdinalIgnoreCase) ? displayId[4..] : displayId;
         var dash = key.IndexOf('-');
-        return dash > 0 ? key[..dash] : "unknown";
+        var model = dash > 0 ? key[..dash] : string.Empty;
+        // The ID can come from a caller, so only a short alphanumeric model code reaches the diagnostics log.
+        return model.Length is > 0 and <= 16 && model.All(char.IsAsciiLetterOrDigit) ? model : "unknown";
     }
 
     internal static string DdcId(DdcLogicalMonitor monitor, DdcMonitorDevice? device, int physicalIndex) =>
@@ -1118,7 +1173,20 @@ internal sealed class MonitorBrightnessService : IMonitorBrightnessService, IDis
 
         public uint Maximum { get; set; } = 100;
 
-        public int Value { get; set; }
+        private int _value;
+
+        // When Value was last read from or written to the monitor; a rebuild keeps the newer of two values.
+        public long ValueTimestamp { get; private set; }
+
+        public int Value
+        {
+            get => _value;
+            set
+            {
+                _value = value;
+                ValueTimestamp = Stopwatch.GetTimestamp();
+            }
+        }
 
         public string? LastError { get; set; }
 
@@ -1144,9 +1212,12 @@ internal sealed class MonitorBrightnessService : IMonitorBrightnessService, IDis
         public DisplayBrightnessState State() => Endpoint?.State() ?? Unavailable!;
     }
 
-    private sealed record DdcRegistry(string TopologyKey, IReadOnlyList<DdcSlot> Slots)
+    private sealed record DdcRegistry(string TopologyKey, IReadOnlyList<DdcSlot> Slots, long BuiltTimestamp)
     {
         public IEnumerable<DdcEndpoint> Endpoints => Slots.Select(slot => slot.Endpoint).OfType<DdcEndpoint>();
+
+        public bool ShouldRetryUnavailable(TimeSpan retryAfter) =>
+            Slots.Any(slot => slot.Endpoint is null) && Stopwatch.GetElapsedTime(BuiltTimestamp) >= retryAfter;
 
         public IEnumerable<DisplayBrightnessState> States() => Slots.Select(slot => slot.State());
     }

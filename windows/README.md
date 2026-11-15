@@ -122,7 +122,7 @@ dotnet run --project .\windows\src\HoverPocket.Shell\HoverPocket.Shell.csproj --
 
 `--verify controls` は音量・ミュート・輝度・メディア操作・再生元ウィンドウ解決の決定的テストと、実機の読み取り専用 probe を実行します。外部ディスプレイの輝度は DDC/CI 非対応や応答遅延を許容し、パネル全体を停止させずに非対応表示へフォールバックします。
 
-外部ディスプレイの輝度は VCP 0x10 をモニターごとに順番に読み書きし、別のモニターの検出や読み取りを待ちません。識別子はモニターの接続先の機器パスから作るため、スリープ復帰や電源の入れ直しで変わりません。表示名はモニターのEDIDの製品名を使い、同じ名前が並ぶときだけ「メイン」「サブ」を添えます。書き込みの失敗は理由とモニターの型番だけを診断ログ（`%APPDATA%\HoverPocket\diagnostics`）へ `brightness.write.failed` として残します。偽のDDC層で、遅いモニターによる待ち、画面ハンドルの変化、読み戻しの遅れ、時間切れ後の命令の重なりを検査します。`--change-brightness` を付けると実機で明るさを変えて元に戻す試験を行い、`HOVERPOCKET_BRIGHTNESS_VERIFY_TARGET` に識別子か名前の一部を入れると対象を1台に絞れます。
+外部ディスプレイの輝度は VCP 0x10 をモニターごとに順番に読み書きし、別のモニターの検出や読み取りを待ちません。検出に応答しなかったモニター（省電力中や復帰直後など）は、30秒後の読み取りで再検出します。識別子はモニターの接続先の機器パスから作るため、スリープ復帰や電源の入れ直しで変わりません。表示名はモニターのEDIDの製品名を使い、同じ名前が並ぶときだけ「メイン」「サブ」を添えます。書き込みの失敗は理由とモニターの型番だけを診断ログ（`%APPDATA%\HoverPocket\diagnostics`）へ `brightness.write.failed` として残します。偽のDDC層で、遅いモニターによる待ち、画面ハンドルの変化、読み戻しの遅れ、時間切れ後の命令の重なりを検査します。`--change-brightness` を付けると実機で明るさを変えて元に戻す試験を行い、`HOVERPOCKET_BRIGHTNESS_VERIFY_TARGET` に識別子か名前の一部を入れると対象を1台に絞れます。
 
 `--verify ui` はWebView2とbridgeに加え、Controlsの実描画・領域内収まり・サムネイル/倍速操作、Timerの3種類の追加カード・複数ストップウォッチ・領域内収まり、Clipboardの同一provider再描画抑止、通常/お気に入りタブ、中央split view、全体プレビュー、個別削除UI、Calculator履歴サイドバーを検査します。
 
@@ -192,6 +192,8 @@ production resolverは、固定先のexact binaryと準備済みcontrol-planeが
 
 ## Windows updates and release packaging
 
+`0.2.17`は、0.2.16のレビューで見つかった不具合を直します。検出に応答しなかったモニターを30秒後に再検出し、起動時にショートカットが重なっても撮影設定の保存と画面収録の開始ができ、再検出中に書いた明るさが古い値に戻りません。自動起動の修復はインストール版だけで行います。[レビューと修正の記録](../progress/2026-11/2026-11-16_hover-pocket-windows-review.md)。
+
 `0.2.16`は、Controlsのディスプレイ欄で全モニターを表示し（EDIDの製品名、同名ならメイン/サブ）、外部モニターの明るさ操作をモニターごとの直列化・固定ID・再接続で安定させます。あわせて、サイズ変更のつまみと幅の狭いモニターでの強制終了、自動起動の登録先、起動時のショートカット登録を修正しました。[明るさの記録](../progress/2026-11/2026-11-15_hover-pocket-windows-brightness.md) / [点検と修正の記録](../progress/2026-11/2026-11-16_hover-pocket-windows-hardening.md)。
 
 `0.2.10`は、素材の複数選択・名前変更・右クリック操作、プレビュー内編集、クリップボードの読み込み改善、スクショのその場での装飾と画像付き通知からのドラッグを含みます。通知の表示時間は撮影・収録の設定から変更できます。[配信記録](../progress/2026-10/2026-10-04_hover-pocket-windows-0210-release.md)。
@@ -201,9 +203,9 @@ production resolverは、固定先のexact binaryと準備済みcontrol-planeが
 Windows 版の更新確認は Velopack と GitHub Releases (`shotaro311/hover-pocket`) を使います。トレイと Settings の `Check for Updates` は Windows channel `win` の feed (`releases.win.json`) へ接続し、更新が見つかった場合はダウンロード前と適用/再起動前に確認します。起動時の自動チェックは既定オンで、失敗しても起動を止めません。
 更新後の通常起動では、実インストールのrootと既存ARP entryの`InstallLocation`が一致する場合だけ、HKCUの`HoverPocketWin` entryにある`DisplayVersion`を現在versionへ補正します。portable、verify、second-instance probe、path不一致、keyなしでは変更しません。
 
-「Windows起動時に開く」の登録（HKCUの`Run`の`HoverPocket`）は、インストールがあればスタートメニューのショートカットと同じ`%LOCALAPPDATA%\HoverPocketWin\current\HoverPocket.Shell.exe`を指します。開発版から設定を変えても、開発用フォルダーは登録しません。通常起動のたびに、設定がオンなのに登録が違う場合は登録し直し、`startup.registration.repaired`を診断ログへ残します。Windowsの「設定 → アプリ → スタートアップ」でオフにされた状態（`StartupApproved`）は変更しないため、そちらがオフなら自動起動しません。
+「Windows起動時に開く」の登録（HKCUの`Run`の`HoverPocket`）は、インストールがあればスタートメニューのショートカットと同じ`%LOCALAPPDATA%\HoverPocketWin\current\HoverPocket.Shell.exe`を指します。開発版から設定を変えても、インストールがあれば開発用フォルダーは登録しません。インストールがある環境の通常起動のたびに、設定がオンなのに登録が違う場合は登録し直し、`startup.registration.repaired`を診断ログへ残します（インストールのない開発用PCでは登録し直しません）。Windowsの「設定 → アプリ → スタートアップ」でオフにされた状態（`StartupApproved`）は変更しないため、そちらがオフなら自動起動しません。
 
-起動時のショートカット登録は、他のアプリと重なったキーだけを外し、残りを有効にします（重なった数を`shortcuts.registration.partial`として記録）。設定画面から変更した場合は、全部を登録できたときだけ反映し、できなければ以前の設定へ戻します。
+起動時のショートカット登録は、他のアプリと重なったキーだけを外し、残りを有効にします（重なった数を`shortcuts.registration.partial`として記録）。外したキーは撮影設定の保存時にも再登録しないため、保存は失敗しません。設定画面から変更した場合は、全部を登録できたときだけ反映し、できなければ以前の設定へ戻します。
 
 Windows は macOS Sparkle の `https://github.com/shotaro311/hover-pocket/releases/download/macos-latest/appcast.xml` を使いません。Windows release は `win-v0.2.8` のような Windows 専用 tag / asset を使い、GitHub Release を作る場合は `--latest=false` を付けてmacOSのLatest / appcastを動かさないでください。
 

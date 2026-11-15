@@ -24,6 +24,132 @@ internal sealed partial class ControlsVerifier
         await VerifyDelayedReadbackIsAcceptedAsync();
         await VerifyTimedOutWriteDoesNotOverlapAsync();
         await VerifyDisplayOrderAndNamesAsync();
+        await VerifyUnavailableMonitorIsRetriedAsync();
+        await VerifyRebuildKeepsNewerWrittenValueAsync();
+        await VerifyRebuildSwapDoesNotBlockOtherMonitorAsync();
+    }
+
+    // While a rebuild hands values over, a slow write on the sub monitor must not delay a write to the main one.
+    private async Task VerifyRebuildSwapDoesNotBlockOtherMonitorAsync()
+    {
+        var platform = FakeDdcPlatform.TwoMonitors();
+        using var service = new MonitorBrightnessService(platform, includeWmi: false, FastTiming, listenForSystemEvents: false);
+        var displays = await ReadSettledAsync(service, 2);
+        var main = displays.First(display => display.IsPrimary == true);
+        var sub = displays.First(display => display.IsPrimary == false);
+        Task? subWrite = null;
+        platform.Sub.WriteDelay = TimeSpan.FromMilliseconds(1500);
+        // Runs after probing and before the swap: start a slow sub write and wait until it owns the sub gate
+        // (the fake monitor is busy), so the swap happens while that gate is held.
+        service.BeforeRegistrySwapForVerify = () =>
+        {
+            service.BeforeRegistrySwapForVerify = null;
+            subWrite = Task.Run(() => service.SetBrightnessAsync(sub.Id, 40, CancellationToken.None));
+            var busyDeadline = DateTimeOffset.UtcNow + TimeSpan.FromSeconds(1);
+            while (!platform.Sub.Busy && DateTimeOffset.UtcNow < busyDeadline)
+            {
+                Thread.Sleep(5);
+            }
+        };
+        service.InvalidateTopology();
+        _ = service.ReadAsync(CancellationToken.None);
+        var deadline = DateTimeOffset.UtcNow + TimeSpan.FromSeconds(3);
+        while (subWrite is null && DateTimeOffset.UtcNow < deadline)
+        {
+            await Task.Delay(10);
+        }
+
+        await Task.Delay(100);
+        var timer = Stopwatch.StartNew();
+        var written = await service.SetBrightnessAsync(main.Id, 30, CancellationToken.None);
+        timer.Stop();
+        if (subWrite is not null)
+        {
+            await subWrite;
+        }
+
+        platform.Sub.WriteDelay = TimeSpan.Zero;
+        VerifyConsole.WriteLine($"brightness_swap_main_write_ms={timer.Elapsed.TotalMilliseconds:F0}");
+        if (subWrite is null)
+        {
+            _failures.Add("brightness swap: the sub write did not start during the rebuild");
+        }
+        else if (timer.Elapsed > TimeSpan.FromMilliseconds(700)
+                 || written.FirstOrDefault(display => display.Id == main.Id)?.WriteVerified != true)
+        {
+            _failures.Add($"brightness swap: main write waited {timer.Elapsed.TotalMilliseconds:F0}ms behind the sub monitor");
+        }
+    }
+
+    // A monitor that does not answer during detection (asleep, just woken) must come back without a
+    // display topology change.
+    private async Task VerifyUnavailableMonitorIsRetriedAsync()
+    {
+        var platform = FakeDdcPlatform.TwoMonitors();
+        platform.Sub.Unresponsive = true;
+        var timing = FastTiming with { UnavailableRetry = TimeSpan.FromMilliseconds(200), CacheLifetime = TimeSpan.FromMilliseconds(50) };
+        using var service = new MonitorBrightnessService(platform, includeWmi: false, timing, listenForSystemEvents: false);
+        var deadline = DateTimeOffset.UtcNow + TimeSpan.FromSeconds(4);
+        IReadOnlyList<DisplayBrightnessState> displays = [];
+        while (DateTimeOffset.UtcNow < deadline)
+        {
+            displays = await service.ReadAsync(CancellationToken.None);
+            if (displays.Any(display => display.IsPrimary == false && display.Id.StartsWith("ddc:", StringComparison.Ordinal) && !display.Supported))
+            {
+                break;
+            }
+
+            await Task.Delay(30);
+        }
+
+        if (!displays.Any(display => display.IsPrimary == false && !display.Supported))
+        {
+            _failures.Add("brightness retry: unresponsive sub monitor was not reported as unsupported first");
+            return;
+        }
+
+        platform.Sub.Unresponsive = false;
+        deadline = DateTimeOffset.UtcNow + TimeSpan.FromSeconds(4);
+        while (DateTimeOffset.UtcNow < deadline)
+        {
+            displays = await service.ReadAsync(CancellationToken.None);
+            if (displays.Any(display => display.IsPrimary == false && display.Supported && display.Value == 73))
+            {
+                return;
+            }
+
+            await Task.Delay(50);
+        }
+
+        _failures.Add("brightness retry: sub monitor stayed unsupported after it started answering");
+    }
+
+    // A rebuild that probes a slow monitor must not replace a value written meanwhile to another monitor.
+    private async Task VerifyRebuildKeepsNewerWrittenValueAsync()
+    {
+        var platform = FakeDdcPlatform.TwoMonitors();
+        using var service = new MonitorBrightnessService(platform, includeWmi: false, FastTiming, listenForSystemEvents: false);
+        var displays = await ReadSettledAsync(service, 2);
+        var main = displays.First(display => display.IsPrimary == true);
+        platform.Sub.ReadDelay = TimeSpan.FromMilliseconds(600);
+        var published = new System.Collections.Concurrent.ConcurrentQueue<int?>();
+        service.InvalidateTopology();
+        _ = service.ReadAsync(CancellationToken.None);
+        await Task.Delay(150);
+        var written = await service.SetBrightnessAsync(main.Id, 20, CancellationToken.None);
+        service.StateChanged += (_, states) =>
+            published.Enqueue(states.FirstOrDefault(display => display.Id == main.Id)?.Value);
+        await Task.Delay(1200);
+        platform.Sub.ReadDelay = TimeSpan.Zero;
+        if (written.FirstOrDefault(display => display.Id == main.Id)?.WriteVerified != true)
+        {
+            _failures.Add("brightness rebuild: write during rebuild was not verified");
+        }
+
+        if (published.IsEmpty || published.Any(value => value != 20))
+        {
+            _failures.Add($"brightness rebuild: published main values after the write were {string.Join(",", published)} instead of 20");
+        }
     }
 
     private async Task VerifySlowMonitorDoesNotBlockOtherMonitorAsync()
@@ -120,6 +246,9 @@ internal sealed partial class ControlsVerifier
         using var service = new MonitorBrightnessService(platform, includeWmi: false, timing, listenForSystemEvents: false);
         var displays = await ReadSettledAsync(service, 2);
         var sub = displays.First(display => display.IsPrimary == false);
+        var published = new System.Collections.Concurrent.ConcurrentQueue<int?>();
+        service.StateChanged += (_, states) =>
+            published.Enqueue(states.FirstOrDefault(display => display.Id == sub.Id)?.Value);
         platform.Sub.WriteDelay = TimeSpan.FromMilliseconds(700);
         var first = await service.SetBrightnessAsync(sub.Id, 30, CancellationToken.None);
         var firstState = first.FirstOrDefault(display => display.Id == sub.Id);
@@ -145,6 +274,12 @@ internal sealed partial class ControlsVerifier
             _failures.Add(
                 $"brightness timeout: queued write did not settle hardware={platform.Sub.Value} "
                 + $"published={settledState?.Value} verified={settledState?.WriteVerified}");
+        }
+
+        // A superseded write's late result must never be published, not even briefly.
+        if (published.Contains(30))
+        {
+            _failures.Add($"brightness timeout: the superseded 30% result was published ({string.Join(",", published)})");
         }
     }
 
@@ -245,6 +380,11 @@ internal sealed partial class ControlsVerifier
 
         public TimeSpan ReadDelay { get; set; }
 
+        // Simulates a monitor that is asleep or not answering DDC/CI.
+        public bool Unresponsive { get; set; }
+
+        public bool Busy => Volatile.Read(ref _inFlight) > 0;
+
         public TimeSpan WriteDelay { get; set; }
 
         public TimeSpan ReadbackLag { get; set; }
@@ -272,7 +412,7 @@ internal sealed partial class ControlsVerifier
                 current = (uint)(applied ? _target : _previous);
             }
 
-            return generation == Generation;
+            return generation == Generation && !Unresponsive;
         }
 
         public bool Write(int generation, uint value)

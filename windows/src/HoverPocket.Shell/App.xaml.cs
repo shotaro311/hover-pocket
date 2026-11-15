@@ -274,7 +274,10 @@ public partial class App : System.Windows.Application
                 if (conflicts.Count > 0) Services.AppDiagnostics.Record("shortcuts.registration.partial", detail: $"conflicts={conflicts.Count}");
             }
             catch (ArgumentException ex) { Services.AppDiagnostics.Record("shortcuts.registration.failed", ex); }
-            shellController.PanelBridgeController.RepairStartupRegistration();
+            // Only an installed app repairs auto-start; a development build without an installation would
+            // otherwise register its own bin folder on every launch.
+            if (RunKeyStartupRegistrationService.InstalledLauncherPath() is not null)
+                shellController.PanelBridgeController.RepairStartupRegistration();
             shellController.PanelBridgeController.VoiceLibraryRequested = shellController.OpenAssetLibraryForVoiceAsync;
             updaterService.BeforeRestart = _captureController.StopRecordingAsync;
             _trayIconService = new TrayIconService(shellController, updaterService, _captureController);

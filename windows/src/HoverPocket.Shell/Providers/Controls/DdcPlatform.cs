@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Management;
 using System.Runtime.InteropServices;
 using System.Text;
@@ -45,6 +46,8 @@ internal sealed class NativeDdcPlatform : IDdcPlatform
     private readonly DisplayLayoutService _displays = new();
     private readonly object _friendlyNameSync = new();
     private Dictionary<string, string>? _friendlyNames;
+    private static readonly TimeSpan MissingNameRetry = TimeSpan.FromMinutes(1);
+    private readonly Dictionary<string, long> _missingFriendlyNames = new(StringComparer.OrdinalIgnoreCase);
 
     public IReadOnlyList<DdcLogicalMonitor> EnumerateMonitors()
     {
@@ -167,9 +170,19 @@ internal sealed class NativeDdcPlatform : IDdcPlatform
     {
         lock (_friendlyNameSync)
         {
-            if (_friendlyNames is null || !_friendlyNames.ContainsKey(instance))
+            // Query WMI again only for an instance not seen recently. Monitors WMI does not list are remembered
+            // for a minute, so enumeration (which also runs while a monitor gate is held) does not query on
+            // every read, yet a monitor whose WMI entry appears late after hot-plug still gets its name.
+            if (_friendlyNames is null
+                || (!_friendlyNames.ContainsKey(instance)
+                    && (!_missingFriendlyNames.TryGetValue(instance, out var missingSince)
+                        || Stopwatch.GetElapsedTime(missingSince) > MissingNameRetry)))
             {
                 _friendlyNames = ReadFriendlyNames();
+                if (!_friendlyNames.ContainsKey(instance))
+                {
+                    _missingFriendlyNames[instance] = Stopwatch.GetTimestamp();
+                }
             }
 
             return _friendlyNames.TryGetValue(instance, out var name) && name.Length > 0 ? name : null;

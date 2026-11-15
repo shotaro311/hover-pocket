@@ -38,7 +38,11 @@ internal sealed partial class CaptureController : IDisposable
     internal IReadOnlyList<string> ApplyShortcutsAtStartup(Dictionary<string, string> additional)
     {
         var conflicts = _hotkeys.ApplyBindingsBestEffort(new Dictionary<string, string>(additional) { ["screenshot"] = _preferences.ScreenshotKey, ["recording"] = _preferences.RecordingKey });
-        _additionalShortcuts = new(additional);
+        // Keep only the shortcuts that registered. SavePreferences re-applies this set, and a key held by
+        // another app would make saving capture settings (and starting a recording) fail every time.
+        _additionalShortcuts = additional
+            .Where(pair => string.IsNullOrWhiteSpace(pair.Value) || !conflicts.Contains(pair.Value))
+            .ToDictionary(pair => pair.Key, pair => pair.Value);
         return conflicts;
     }
     private CaptureWindow? _window;

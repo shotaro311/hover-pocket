@@ -368,7 +368,6 @@ export function renderControlsProvider(context) {
             const list = replacement.querySelector(".hp-controls-list");
             const sectionBounds = replacement.getBoundingClientRect();
             const rootBounds = root.getBoundingClientRect();
-            const contentBottom = rootBounds.top - root.scrollTop + root.scrollHeight;
             const rows = [...replacement.querySelectorAll(".hp-control-row")];
             const label = `${displays.length} displays at ${width || "auto"}x${height || "auto"}`;
             if (rows.length !== displays.length) {
@@ -377,8 +376,13 @@ export function renderControlsProvider(context) {
             if (list.scrollHeight > list.clientHeight + 1) {
               failures.push(`${label}: display list scrolls internally`);
             }
-            if (sectionBounds.bottom > contentBottom + 1 || sectionBounds.right > rootBounds.right + 1) {
-              failures.push(`${label}: display section outside the Controls content`);
+            if (sectionBounds.left < rootBounds.left - 1 || sectionBounds.right > rootBounds.right + 1) {
+              failures.push(`${label}: display section wider than the Controls view`);
+            }
+            // Rows taller than the view are fine only if the Controls view itself can scroll to them.
+            if (root.scrollHeight > root.clientHeight + 1
+              && !["auto", "scroll"].includes(getComputedStyle(root).overflowY)) {
+              failures.push(`${label}: Controls view cannot scroll to every row`);
             }
             for (const row of rows) {
               for (const element of [row, ...row.querySelectorAll("strong, span, input, p")]) {

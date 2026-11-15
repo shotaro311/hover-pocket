@@ -106,6 +106,15 @@ internal static class CaptureVerifier
                 var savedPreferences = System.Text.Json.JsonSerializer.Deserialize<CapturePreferences>(File.ReadAllText(Path.Combine(root, "capture-settings.json")))!;
                 if (savedPreferences.FolderId != folder || savedPreferences.SystemAudio || !savedPreferences.Microphone || savedPreferences.OpenEditorAfterScreenshot || savedPreferences.ScreenshotToastSeconds != 7) failures.Add("capture settings persistence");
                 try { configuration.SavePreferences(savedPreferences with { ScreenshotToastSeconds = 31 }); failures.Add("invalid toast duration accepted"); } catch (ArgumentOutOfRangeException) { }
+                // A shortcut held by another app at startup must not make later capture-setting saves fail.
+                using (var taken = new CaptureHotkeys(_ => { }))
+                {
+                    taken.Apply("Ctrl+Alt+F19", "");
+                    var startupConflicts = configuration.ApplyShortcutsAtStartup(new() { ["chat"] = "Ctrl+Alt+F19", ["panel"] = "Ctrl+Alt+F20" });
+                    try { configuration.SavePreferences(savedPreferences); }
+                    catch (ArgumentException ex) { failures.Add("capture settings save failed after a startup shortcut conflict: " + ex.Message); }
+                    if (!startupConflicts.SequenceEqual(new[] { "Ctrl+Alt+F19" })) failures.Add("startup shortcut conflict was not reported");
+                }
                 await configuration.ScreenshotAsync(() => Task.FromResult<BitmapSource?>(null));
                 if (configuration.Busy || configuration.WindowPreferencesForVerify is not null || configuration.ToastForVerify is not null) failures.Add("screenshot cancellation opened settings/toast");
                 await configuration.ScreenshotAsync(() => Task.FromException<BitmapSource?>(new InvalidOperationException("fixture failure")));
