@@ -2,8 +2,13 @@
 project_slug: hover-menu-preview
 updated: 2026-11-15
 updated_by: claude
-status: production-macos-0.2.17; production-windows-0.2.16
+status: production-macos-0.2.17; production-windows-0.2.17
 ---
+
+## 2026-11-16 Windows 0.2.17 本番配信
+
+- 0.2.16のレビューの指摘を直した `5d5a3f2` をmainへpushし、Windows CIが成功。レビュー役の最終確認（重大・要修正なし）のあと、[Windows 0.2.17](https://github.com/shotaro311/hover-pocket/releases/tag/win-v0.2.17) を `--latest=false` で公開した。8配布物の一致と公開物の検証に合格し、macOSは不変。
+- データと0.2.16一式を退避してからこのPCへ適用した。PID 38092 が0.2.17で応答中。データは更新前後で一致し、実機のサブモニターで書き込みと復帰を確認した。[配信記録](2026-11/2026-11-16_hover-pocket-windows-0217-release.md)。
 
 ## 2026-11-16 Windows 0.2.16 のレビューと指摘の修正
 
