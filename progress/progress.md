@@ -1,9 +1,14 @@
 ---
 project_slug: hover-menu-preview
-updated: 2026-10-08
-updated_by: codex
+updated: 2026-11-15
+updated_by: claude
 status: production-macos-0.2.17; production-windows-0.2.15
 ---
+
+## 2026-11-15 Windows端末の手元整理
+
+- このPCの `main` が `origin/main` より607コミット遅れていたため、最新へ合わせた。手元にしかなかった資料（Windows安定化の[要件](../docs/requirement/windows-stabilization-20260928.md)と[結果](2026-09/2026-09-28_hover-pocket-windows-stabilization.md)、[タイマー修正](2026-08/2026-08-10_hover-pocket-windows-timer-crash.md)、[同期の要件案](../docs/requirement/asset-library-sync.md)、[音声レーンの計画](../docs/plan/20260806-codex-voice-lane-plan.md)、[10月19日の整理](2026-10/2026-10-19_hover-pocket-folder-cleanup.md)）と[PROJECT.md](../PROJECT.md)を取り込んだ。
+- 取り込み済みの作業フォルダー5つ（本番更新前バックアップを含む）をゴミ箱へ移し、ローカルブランチ23本とstashを削除。GitHubの取り込み済みPR 20件を閉じた。作業フォルダーは1つ、ブランチは `main` だけ、開いているPRは #15・#13・#6。[整理の記録](2026-11/2026-11-15_hover-pocket-local-cleanup.md)。
 
 ## 2026-10-08 チャット欄の折りたたみ
 
