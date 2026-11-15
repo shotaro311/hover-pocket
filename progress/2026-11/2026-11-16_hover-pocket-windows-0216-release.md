@@ -23,6 +23,7 @@
 
 - `verify_release_readback.py --windows-tag win-v0.2.16 --windows-signing-gate beta --json` は99項目で合格した（Windows 7、macOS 8のグループ）。OpenSSLはGit同梱のものを使った。
 - macOSの `macos-latest/appcast.xml` のSHA-256は公開前後で一致した。GitHub Latestは `v0.2.17-683` のまま。
+- [更新・ロールバックCI](https://github.com/shotaro311/hover-pocket/actions/runs/43731765211) を win-v0.2.15→win-v0.2.16（未署名beta許可）で実行し、Windowsのインストール・更新・旧版への復帰・再インストールが成功した。macOSの実行と署名済みMSIの段階は、前回と同じく省略した。
 
 ## このPCへの適用
 
@@ -32,6 +33,8 @@
 - 診断ログは `process.start`、`shell.ready`、`startup.registration.repaired` の3件で、例外はない。新しい自動起動の修復が働き、HKCUのRunは `%LOCALAPPDATA%\HoverPocketWin\current\HoverPocket.Shell.exe` に直った。ショートカット登録の失敗の記録もない。
 - 更新前後のデータの比較では違いがなかった。明るさはメイン54%・サブ73%のまま。
 - インストール済み0.2.16の `--verify controls`（読み取りだけ）はexit 0で、2台が「LG ULTRAGEAR+」「U16ZT」として固定IDで認識された。
+- インストール済み0.2.16の `--verify controls --change-brightness`（対象 HSJ1600）もexit 0。サブモニターで73→65→57%の書き込み2回（計530ms）が読み戻しまで成功し、73%へ戻したことを別の経路でも確認した。
+- トップのREADMEのWindows版ダウンロードリンクが、0.2.11〜0.2.15の配信でも更新されず0.2.10を指していたため、0.2.16へ直した。Windows版はGitHubのLatestにしないため、このリンクが実際のダウンロード先になる。
 
 ## 残り
 
