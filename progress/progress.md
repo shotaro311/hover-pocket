@@ -2,8 +2,14 @@
 project_slug: hover-menu-preview
 updated: 2026-11-15
 updated_by: claude
-status: production-macos-0.2.17; production-windows-0.2.15
+status: production-macos-0.2.17; production-windows-0.2.16
 ---
+
+## 2026-11-16 Windows 0.2.16 本番配信
+
+- 明るさ欄の修正と点検で直した4件を `82947e8` としてmainへpushし、Windows CIが成功。[Windows 0.2.16](https://github.com/shotaro311/hover-pocket/releases/tag/win-v0.2.16) を `--latest=false` で公開し、8配布物のSHA-256一致と公開物の99項目検査に合格した。macOSのappcastとLatestは不変。
+- データと0.2.15一式を退避してからこのPCへ適用した。PID 95180 が0.2.16で応答中。データは更新前後で一致し、自動起動の登録は新版の修復でインストール版へ直った。
+- FFmpegの取得元（BtbNの自動ビルド）が404で消えており、キャッシュから照合済みのアーカイブを使って配布物を作った。恒久対策、Codexのレビュー、Windows側のスタートアップ設定の確認が残る。[配信記録](2026-11/2026-11-16_hover-pocket-windows-0216-release.md)。
 
 ## 2026-11-16 Windows版の点検と不具合の修正
 
