@@ -39,6 +39,13 @@ internal sealed partial class PanelBridgeController
         return category;
     }
 
+    /// <summary>Remembers loaded Settings pages so the panel can switch them to the AI category.</summary>
+    private object MarkSurfaceReady(BridgeDispatcher dispatcher, BridgeSurface surface)
+    {
+        if (surface is BridgeSurface.Settings) _readySettingsDispatchers.Add(dispatcher);
+        return new { ok = true };
+    }
+
     private void RegisterAiUsage(
         Action<string, Func<JsonElement?, CancellationToken, Task<object?>>> register,
         BridgeSurface surface,

@@ -421,11 +421,7 @@ internal sealed partial class PanelBridgeController : IDisposable
             (_, _) => Task.FromResult<object?>(BuildState(surface, includeOpenCategory: surface == BridgeSurface.Settings)));
         RegisterUx(Register, surface);
         RegisterAiUsage(Register, surface, approvalOwner);
-        Register("app.ready", (_, _) =>
-        {
-            if (surface == BridgeSurface.Settings) _readySettingsDispatchers.Add(dispatcher);
-            return Task.FromResult<object?>(new { ok = true });
-        });
+        Register("app.ready", (_, _) => Task.FromResult<object?>(MarkSurfaceReady(dispatcher, surface)));
         Register("diagnostics.echo", (parameters, _) => Task.FromResult<object?>(DeserializeObject(parameters)));
         Register("settings.setPanelSize", SetPanelSizeAsync);
         Register("settings.setDisplayPlacement", SetDisplayPlacementAsync);
