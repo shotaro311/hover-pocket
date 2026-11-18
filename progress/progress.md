@@ -1,9 +1,13 @@
 ---
 project_slug: hover-menu-preview
-updated: 2026-11-18
-updated_by: codex
+updated: 2026-11-19
+updated_by: claude
 status: production-macos-0.2.18; production-windows-0.2.19
 ---
+
+## 2026-11-19 Pocket ContractsのCI
+
+- GitHub Actionsの `macos-14` が提供対象外になり、Pocket ContractsのmacOSジョブが `0934780` 以降すべて実行前に取り消され、3OSの比較もスキップされていた。`656017c` でmacOS CIと同じ `macos-15` へ移し、[3OSと比較の全ジョブが成功](https://github.com/shotaro311/hover-pocket/actions/runs/44328532652)。macOS 0.2.18の記録にあった未解決事項はこれで解消。
 
 ## 2026-11-18 macOS 0.2.18 本番配信
 
