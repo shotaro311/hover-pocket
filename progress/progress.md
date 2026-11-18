@@ -2,13 +2,18 @@
 project_slug: hover-menu-preview
 updated: 2026-11-18
 updated_by: claude
-status: production-macos-0.2.17; production-windows-0.2.18
+status: production-macos-0.2.17; production-windows-0.2.19
 ---
+
+## 2026-11-18 Windows 0.2.19 本番配信
+
+- AI Usageの残高（Claude ConsoleのAPIクレジット、Codexのクレジット、Colab）とチャットのログイン表示の修正を含む `1816925` をmainへpushし、Windows CIが成功。[Windows 0.2.19](https://github.com/shotaro311/hover-pocket/releases/tag/win-v0.2.19) を `--latest=false` で公開し、8配布物の一致と公開物の99項目検査に合格。macOSは不変。
+- データと0.2.18一式を退避してからこのPCへ適用した。PID 54740 が0.2.19で応答中で、データは更新前後で一致（クリップボードの文字1件の時刻だけが再起動で更新）。Claude APIの実データは、ユーザーの判断で確かめずに配信した。Codexのレビューは2回で「未完了」のまま、3回目は不要との判断。[配信記録](2026-11/2026-11-18_hover-pocket-windows-0219-release.md)。
 
 ## 2026-11-18 AI Usageの残高追加とチャットのログイン表示（次の版、未配信）
 
 - AI UsageにClaude Console のAPIクレジット（プラン特典と購入分）、Codexのクレジット、Colabのコンピューティング ユニットを追加し、6サービスにした。Claude APIは別のサインイン、ColabはGeminiのGoogleのサインインを使う。チャットはどこでChatGPTにログインしても「ログインが必要です」がすぐ消えるように直した。
-- Codex（Astra / high）のレビューを2回行い指摘をすべて直した（共通ルール上は「レビュー未完了」、2回目のあとの修正は未確認）。`--verify ai-usage` 136項目とチャットの検証が合格。OpenAIのAPIクレジットは試験の結果（隠れたWebView2ではログイン画面に戻り、開くだけで計測用の送信が起きる）で対象外とした。Codexのレビューと配信は未実施、未コミット。[作業記録](2026-11/2026-11-18_hover-pocket-ai-usage-balances.md)。
+- Codex（Astra / high）のレビューを2回行い指摘をすべて直した（共通ルール上は「レビュー未完了」、2回目のあとの修正は未確認）。`--verify ai-usage` 136項目とチャットの検証が合格。OpenAIのAPIクレジットは試験の結果（隠れたWebView2ではログイン画面に戻り、開くだけで計測用の送信が起きる）で対象外とした。0.2.19として配信済み。[作業記録](2026-11/2026-11-18_hover-pocket-ai-usage-balances.md)。
 
 ## 2026-11-18 Windows 0.2.18 本番配信
 
