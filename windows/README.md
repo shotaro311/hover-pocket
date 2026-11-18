@@ -192,6 +192,8 @@ production resolverは、固定先のexact binaryと準備済みcontrol-planeが
 
 ## Windows updates and release packaging
 
+`0.2.19`は、AI Usageに残高を加えます。Claude ConsoleのAPIクレジット（プラン特典と購入分、期限）、Codexのクレジット、Colabのコンピューティング ユニットを表示します。あわせて、チャット・音声・AI Usageで共通のChatGPTログインを、どこでログインしてもチャットの「ログインが必要です」がすぐ消えるようにしました。[作業記録](../progress/2026-11/2026-11-18_hover-pocket-ai-usage-balances.md)。
+
 `0.2.18`は、Codex・Claude・Gemini・Museの使用状況を並べるツール「AI Usage」を追加します。5時間枠・1週間枠・モデル別の枠（ClaudeのFableなど）を表示し、サインインは設定の「AI」で行います。[実装・レビュー・検証の記録](../progress/2026-11/2026-11-18_hover-pocket-ai-usage-panel.md)。
 
 `0.2.17`は、0.2.16のレビューで見つかった不具合を直します。検出に応答しなかったモニターを30秒後に再検出し、起動時にショートカットが重なっても撮影設定の保存と画面収録の開始ができ、再検出中に書いた明るさが古い値に戻りません。自動起動の修復はインストール版だけで行います。[レビューと修正の記録](../progress/2026-11/2026-11-16_hover-pocket-windows-review.md)。
@@ -264,7 +266,7 @@ python3 script/verify_release_readback.py --windows-tag auto --windows-signing-g
 
 ## AI使用状況（AI Usage）
 
-パネルの「AI Usage」に、Codex・Claude・Gemini・Museの5時間枠・1週間枠・モデル別の枠（ClaudeのFableなど）を表示します。サインインは設定の「AI」→「AI使用状況」で行います。Codexはチャットと同じChatGPTログインを使います。Claude・Gemini・Museは［サインイン］で開く窓で本人がサインインし、ログイン状態は `%APPDATA%\HoverPocket\AiUsageWebView2` の中にサービスごとのプロファイルとして残り、サインアウトはそのサービスのプロファイルだけを消去します。サインイン窓には実際の接続先を常に表示し、通常のサインイン先以外では警告します。HoverPocketはパスワードを受け取らず、使用状況を読むために各サービスのページを画面に出さずに開き、パネルには使用率・リセット時刻・プラン名・枠の名前だけを表示します。取得はツールや設定のAI欄を表示したとき（2分以内の値は再利用、未サインインは30分ごとに再確認）、更新ボタン、サインイン・サインアウトの直後、表示をオンにした直後だけです。各サイトの非公開の仕組みを使うため、サイト側の変更で読めなくなることがあり、その場合は理由を表示して0%とは表示しません。取得方法は[CodexBar](https://github.com/steipete/CodexBar)（MIT、`ThirdParty/CodexBar-LICENSE.txt`）を参考にしました。
+パネルの「AI Usage」に、Codex・Claude・Gemini・Museの5時間枠・1週間枠・モデル別の枠（ClaudeのFableなど）と、Claude ConsoleのAPIクレジット・Codexのクレジット・Colabのコンピューティング ユニットの残高を表示します。Claude Consoleは別にサインインし、ColabはGeminiと同じGoogleのサインインを使います。サインインは設定の「AI」→「AI使用状況」で行います。Codexはチャットと同じChatGPTログインを使います。Claude・Gemini・Museは［サインイン］で開く窓で本人がサインインし、ログイン状態は `%APPDATA%\HoverPocket\AiUsageWebView2` の中にサービスごとのプロファイルとして残り、サインアウトはそのサービスのプロファイルだけを消去します。サインイン窓には実際の接続先を常に表示し、通常のサインイン先以外では警告します。HoverPocketはパスワードを受け取らず、使用状況を読むために各サービスのページを画面に出さずに開き、パネルには使用率・リセット時刻・プラン名・枠の名前だけを表示します。取得はツールや設定のAI欄を表示したとき（2分以内の値は再利用、未サインインは30分ごとに再確認）、更新ボタン、サインイン・サインアウトの直後、表示をオンにした直後だけです。各サイトの非公開の仕組みを使うため、サイト側の変更で読めなくなることがあり、その場合は理由を表示して0%とは表示しません。取得方法は[CodexBar](https://github.com/steipete/CodexBar)（MIT、`ThirdParty/CodexBar-LICENSE.txt`）を参考にしました。
 
 検証は `--verify ai-usage`（ネットワークを使わない。応答の解析、取得の規則、ブリッジ、隠しWebView2での読み取り、パネルと設定画面の実描画）です。Debugビルドの `--verify ai-usage-live` は実サイトを1回読み、`HOVERPOCKET_AI_USAGE_SIGNIN=claude,gemini,muse`（1つでも可）でサインイン窓を順に開き、`HOVERPOCKET_AI_USAGE_SIGNIN_SMOKE=1` で各サインイン窓の到達先を確かめます。保存場所は一時フォルダーの `HoverPocket\AiUsageLive` です。
 

@@ -4,20 +4,34 @@ internal static class AiUsageServiceIds
 {
     public const string Codex = "codex";
     public const string Claude = "claude";
+    public const string ClaudeApi = "claude-api";
     public const string Gemini = "gemini";
+    public const string Colab = "colab";
     public const string Muse = "muse";
 
-    public static IReadOnlyList<string> All { get; } = [Codex, Claude, Gemini, Muse];
+    public static IReadOnlyList<string> All { get; } = [Codex, Claude, ClaudeApi, Gemini, Colab, Muse];
 
-    public static IReadOnlyList<string> Web { get; } = [Claude, Gemini, Muse];
+    /// <summary>Services read through a hidden WebView2 (everything except Codex).</summary>
+    public static IReadOnlyList<string> Web { get; } = [Claude, ClaudeApi, Gemini, Colab, Muse];
+
+    /// <summary>Services with their own sign-in window. Colab uses Gemini's Google sign-in.</summary>
+    public static IReadOnlyList<string> SignIn { get; } = [Claude, ClaudeApi, Gemini, Muse];
 
     public static bool IsKnown(string? id) => id is not null && All.Contains(id, StringComparer.Ordinal);
+
+    /// <summary>The WebView2 profile holding the service's sign-in.</summary>
+    public static string Profile(string id) => id == Colab ? Gemini : id;
+
+    /// <summary>Services whose readings belong to the same sign-in and must be reset together.</summary>
+    public static IReadOnlyList<string> SharingSignIn(string id) => Profile(id) == Gemini ? [Gemini, Colab] : [id];
 
     public static string DisplayName(string id) => id switch
     {
         Codex => "Codex",
         Claude => "Claude",
+        ClaudeApi => "Claude API",
         Gemini => "Gemini",
+        Colab => "Colab",
         Muse => "Muse",
         _ => id
     };
@@ -39,6 +53,10 @@ internal static class AiUsageErrorCodes
     public const string CodexMissing = "codexMissing";
     public const string Blocked = "blocked";
     public const string Unavailable = "unavailable";
+    /// <summary>Signed in, but the account may not read this data (for example Console billing).</summary>
+    public const string NoAccess = "noAccess";
+    /// <summary>More than one account could be meant; nothing is shown rather than a guess.</summary>
+    public const string Ambiguous = "ambiguous";
 }
 
 /// <summary>
@@ -54,7 +72,26 @@ internal sealed record AiUsageWindow(
     DateTimeOffset? ResetsAt,
     int? WindowMinutes);
 
-internal sealed record AiUsageReading(string? Plan, IReadOnlyList<AiUsageWindow> Windows);
+/// <summary>
+/// A balance rather than a limit: Claude Console API credits (<c>usd</c>, the plan's monthly grant and
+/// purchased credits on separate rows, one per expiry), Codex credits (<c>credits</c>), or Colab compute
+/// units (<c>units</c>, with the current hourly consumption, <c>null</c> when unknown). Amounts keep full
+/// precision; the panel decides how to show tiny values. <see cref="State"/> is <c>unlimited</c> or
+/// <c>unreadable</c> when there is no amount to show.
+/// </summary>
+internal sealed record AiUsageBalance(
+    string Kind,
+    string? Label,
+    decimal Amount,
+    string Unit,
+    DateTimeOffset? ExpiresAt,
+    decimal? PerHour = null,
+    string? State = null);
+
+internal sealed record AiUsageReading(string? Plan, IReadOnlyList<AiUsageWindow> Windows, IReadOnlyList<AiUsageBalance>? Balances = null)
+{
+    public IReadOnlyList<AiUsageBalance> BalanceList => Balances ?? [];
+}
 
 internal sealed record AiUsageResult(string Status, AiUsageReading? Reading, string? ErrorCode)
 {
@@ -76,8 +113,11 @@ internal sealed record AiUsageServiceSnapshot(
     string? ErrorCode,
     bool Stale,
     bool Refreshing,
-    DateTimeOffset? CheckedAt = null)
+    DateTimeOffset? CheckedAt = null,
+    IReadOnlyList<AiUsageBalance>? Balances = null)
 {
+    public IReadOnlyList<AiUsageBalance> BalanceList => Balances ?? [];
+
     public static AiUsageServiceSnapshot Initial(string id) =>
         new(id, AiUsageStatus.Idle, null, [], null, null, false, false);
 
@@ -97,6 +137,7 @@ internal sealed record AiUsageServiceSnapshot(
                 Status = AiUsageStatus.Ok,
                 Plan = reading.Plan,
                 Windows = reading.Windows,
+                Balances = reading.BalanceList,
                 FetchedAt = now,
                 ErrorCode = null,
                 Stale = false,
@@ -111,18 +152,21 @@ internal sealed record AiUsageServiceSnapshot(
                 Status = AiUsageStatus.SignedOut,
                 Plan = null,
                 Windows = [],
+                Balances = [],
                 ErrorCode = null,
                 Stale = false,
                 Refreshing = false
             };
         }
 
-        var keepLast = Windows.Count > 0 && FetchedAt is not null;
+        // A failed read keeps the last good values marked stale; it never turns into 0% or a $0 balance.
+        var keepLast = (Windows.Count > 0 || BalanceList.Count > 0) && FetchedAt is not null;
         return this with
         {
             Status = AiUsageStatus.Error,
             ErrorCode = result.ErrorCode ?? AiUsageErrorCodes.Network,
             Windows = keepLast ? Windows : [],
+            Balances = keepLast ? BalanceList : [],
             Plan = keepLast ? Plan : null,
             Stale = keepLast,
             Refreshing = false

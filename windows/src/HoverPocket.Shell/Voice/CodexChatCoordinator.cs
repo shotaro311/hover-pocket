@@ -49,11 +49,43 @@ internal sealed partial class CodexChatCoordinator(
     private string Digest => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(tools.Definitions.GetRawText())));
     private void Publish() => Changed?.Invoke(this, Snapshot);
 
+    /// <summary>
+    /// Called after a ChatGPT sign-in anywhere in the app (chat, voice, AI Usage share one login). A
+    /// "sign in" prompt left by an earlier failed connection, for example the model catalog loaded
+    /// before signing in, is no longer true; the next request connects with the new login.
+    /// </summary>
+    public void ClearSignInRequired()
+    {
+        lock (_sync)
+        {
+            _signInEpoch++;
+            if (_error != "chat_sign_in_required") return;
+            _error = null;
+        }
+        Publish();
+    }
+
+    private int _signInEpoch;
+
+    private int SignInEpoch { get { lock (_sync) return _signInEpoch; } }
+
+    /// <summary>
+    /// Records a request's failure. A request that started before a sign-in and then failed for lack of
+    /// one says nothing about the new login: it records <paramref name="replacement"/> instead of the
+    /// sign-in prompt. The comparison and the write share one lock with <see cref="ClearSignInRequired"/>.
+    /// </summary>
+    private void SetErrorAfter(Exception exception, string fallback, int epoch, string? replacement)
+    {
+        var code = exception is CodexAppServerProtocolException protocol ? protocol.Code : fallback;
+        lock (_sync) _error = code == "chat_sign_in_required" && epoch != _signInEpoch ? replacement : code;
+    }
+
     public async Task SendAsync(string text, CancellationToken token = default)
     {
         if (string.IsNullOrWhiteSpace(text) || text.Length > 16000) throw new ArgumentException("chat_text_invalid");
         if (!await _gate.WaitAsync(0, token)) throw new InvalidOperationException("chat_busy");
         ActiveTurn? active = null;
+        var epoch = SignInEpoch;
         try
         {
             lock (_sync) { ObjectDisposedException.ThrowIf(_disposed, this); _busy = true; _error = null; _phase = "thinking"; }
@@ -93,7 +125,7 @@ internal sealed partial class CodexChatCoordinator(
         }
         catch (Exception exception) when (exception is CodexAppServerProtocolException or IOException or JsonException or InvalidOperationException)
         {
-            lock (_sync) _error = exception is CodexAppServerProtocolException protocol ? protocol.Code : "chat_request_failed";
+            SetErrorAfter(exception, "chat_request_failed", epoch, "chat_request_failed");
             HoverPocket.Shell.Services.AppDiagnostics.Record("chat.send.failed." + VoiceTextSafety.SanitizeErrorCode(_error), exception);
             await DisconnectAsync();
         }
@@ -136,6 +168,7 @@ internal sealed partial class CodexChatCoordinator(
     public async Task SelectAsync(string? threadId, CancellationToken token = default)
     {
         if (!await _gate.WaitAsync(0, token)) throw new InvalidOperationException("chat_busy");
+        var epoch = SignInEpoch;
         try
         {
             lock (_sync) { ObjectDisposedException.ThrowIf(_disposed, this); _busy = true; _error = null; _phase = "thinking"; }
@@ -158,7 +191,7 @@ internal sealed partial class CodexChatCoordinator(
         }
         catch (Exception exception) when (exception is CodexAppServerProtocolException or IOException or JsonException or InvalidOperationException)
         {
-            lock (_sync) _error = exception is CodexAppServerProtocolException protocol ? protocol.Code : "chat_history_failed";
+            SetErrorAfter(exception, "chat_history_failed", epoch, "chat_history_failed");
             await DisconnectAsync();
         }
         finally { lock (_sync) _busy = false; _gate.Release(); Publish(); }

@@ -15,6 +15,7 @@ internal sealed partial class CodexChatCoordinator
     internal async Task LoadModelsAsync(CancellationToken token)
     {
         if (!await _gate.WaitAsync(0, token)) throw new InvalidOperationException("chat_busy");
+        var epoch = SignInEpoch;
         try
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
@@ -44,7 +45,8 @@ internal sealed partial class CodexChatCoordinator
         catch (OperationCanceledException) { await DisconnectAsync(); }
         catch (Exception ex) when (ex is CodexAppServerProtocolException or JsonException or IOException)
         {
-            _error = ex is CodexAppServerProtocolException protocol ? protocol.Code : "chat_models_unavailable";
+            // A catalog read that began before a sign-in elsewhere must not bring the prompt back.
+            SetErrorAfter(ex, "chat_models_unavailable", epoch, null);
             await DisconnectAsync();
         }
         finally { _gate.Release(); Publish(); }

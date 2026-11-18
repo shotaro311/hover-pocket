@@ -44,8 +44,7 @@ internal sealed partial class PanelBridgeController : IDisposable
         await login.StartAsync(Path.Combine(_settingsStore.RootDirectory, "CodexVoice"), token);
         while (login.Status == "waiting") await Task.Delay(150, token);
         if (login.Status != "succeeded") throw new CodexAppServerProtocolException("chat_login_failed");
-        // The chat and AI Usage share this login, so readings of the previous account are dropped.
-        _aiUsage?.BeginAccountChange(HoverPocket.Shell.Providers.AiUsage.AiUsageServiceIds.Codex);
+        OnChatGptSignedIn();
     }
     public HoverPocket.Shell.Providers.Assets.AssetPlaybackOwner AssetPlayback { get; } = new();
     private readonly ProviderRegistry _providerRegistry;
@@ -1631,6 +1630,7 @@ internal sealed partial class PanelBridgeController : IDisposable
     private void OnVoiceLoginChanged(object? sender, EventArgs e)
     {
         if (_disposed) return;
+        if (_voiceLogin.Status == "succeeded") OnChatGptSignedIn();
         _ = RefreshVoiceAfterLoginAsync();
     }
 

@@ -50,6 +50,17 @@
 .hp-usage-card[data-service="claude"] .hp-usage-mark { color: #f2b08a; }
 .hp-usage-card[data-service="gemini"] .hp-usage-mark { color: #a8b8ff; }
 .hp-usage-card[data-service="muse"] .hp-usage-mark { color: #e6b3f0; }
+.hp-usage-card[data-service="claude-api"] .hp-usage-mark { color: #f2b08a; }
+.hp-usage-card[data-service="colab"] .hp-usage-mark { color: #f7c46c; }
+
+.hp-usage-balances {
+  margin-top: 9px;
+}
+
+.hp-usage-rows + .hp-usage-balances {
+  padding-top: 9px;
+  border-top: 1px solid var(--hp-line);
+}
 
 .hp-usage-name {
   margin: 0;

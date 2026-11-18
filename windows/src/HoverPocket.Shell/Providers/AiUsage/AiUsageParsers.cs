@@ -59,7 +59,37 @@ internal static partial class AiUsageParsers
 
         if (windows.Count == 0)
             throw new AiUsageParseException("codex response has no usage windows");
-        return new AiUsageReading(plan, Limit(windows));
+        // Credits belong to the ordinary allowance: read them from the single-bucket view `rateLimits`,
+        // or from the `codex` bucket when only the multi-bucket view is present.
+        var ordinary = rateLimitsResponse.TryGetProperty("rateLimits", out var view) && view.ValueKind == JsonValueKind.Object
+            ? view
+            : buckets.FirstOrDefault(bucket => IsCodexMainBucket(bucket.Key)).Snapshot;
+        return new AiUsageReading(plan, Limit(windows), CodexCredits(ordinary));
+    }
+
+    /// <summary>
+    /// Codex credits extend usage after the plan's limits; the balance is a credit count, not dollars
+    /// (learn.chatgpt.com/docs/pricing). No balance means no row; an unreadable balance is shown as
+    /// unreadable on its own row and never stops the usage windows.
+    /// </summary>
+    private static IReadOnlyList<AiUsageBalance> CodexCredits(JsonElement snapshot)
+    {
+        if (snapshot.ValueKind != JsonValueKind.Object || !snapshot.TryGetProperty("credits", out var credits)
+            || credits.ValueKind == JsonValueKind.Null) return [];
+        AiUsageBalance Unreadable() => new("codexCredits", null, 0, "credits", null, State: "unreadable");
+        if (credits.ValueKind != JsonValueKind.Object) return [Unreadable()];
+        if (credits.TryGetProperty("unlimited", out var unlimited) && unlimited.ValueKind == JsonValueKind.True)
+            return [new AiUsageBalance("codexCredits", null, 0, "credits", null, State: "unlimited")];
+        if (!credits.TryGetProperty("balance", out var balance) || balance.ValueKind == JsonValueKind.Null) return [];
+        decimal? value = balance.ValueKind switch
+        {
+            JsonValueKind.String when decimal.TryParse(balance.GetString(), NumberStyles.Float, CultureInfo.InvariantCulture, out var parsed) => parsed,
+            JsonValueKind.Number when balance.TryGetDecimal(out var number) => number,
+            _ => null
+        };
+        return value is { } amount and >= 0 and <= 1_000_000_000m
+            ? [new AiUsageBalance("codexCredits", null, amount, "credits", null)]
+            : [Unreadable()];
     }
 
     /// <summary><c>account: null</c> means signed out; a missing or odd <c>account</c> is a format change.</summary>
@@ -188,6 +218,156 @@ internal static partial class AiUsageParsers
             : HasCapability(selected, "claude_pro") ? "Pro"
             : null;
         return (id, plan);
+    }
+
+    /// <summary>
+    /// The Claude Console organization: the only valid one with the <c>api</c> capability. With several,
+    /// the plan's organization cannot be told apart, so the result is ambiguous instead of a guess.
+    /// </summary>
+    public static (string? Id, bool Ambiguous) SelectClaudeConsoleOrganization(JsonElement organizations)
+    {
+        if (organizations.ValueKind != JsonValueKind.Array) return (null, false);
+        var candidates = organizations.EnumerateArray()
+            .Where(organization => organization.ValueKind == JsonValueKind.Object && HasCapability(organization, "api"))
+            .Select(organization => ReadString(organization, "uuid"))
+            .Where(id => id is not null && ClaudeOrganizationIdPattern().IsMatch(id))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        return candidates.Length switch
+        {
+            1 => (candidates[0], false),
+            0 => (null, false),
+            _ => (null, true)
+        };
+    }
+
+    /// <summary>
+    /// Parses <c>GET platform.claude.com/api/organizations/{id}/prepaid/credits</c> (2026-11-18 shape).
+    /// <c>promo_tranches</c> are grants such as the Max plan's monthly "API credit (Max)"; <c>tranches</c>
+    /// are purchased credits, shown one row per expiry so each amount keeps its own date. Amounts are
+    /// minor units with an explicit exponent in US dollars; anything else, or a tranche that cannot be
+    /// read, is a format change. Only empty tranche lists with an explicit zero total read as $0.
+    /// </summary>
+    public static AiUsageReading ParseClaudeConsoleCredits(JsonElement credits)
+    {
+        if (credits.ValueKind != JsonValueKind.Object) throw new AiUsageParseException("console credits is not an object");
+        RequireUsd(credits);
+        var balances = new List<AiUsageBalance>();
+        var tranchesSeen = 0;
+        if (TrancheList(credits, "promo_tranches") is { } promo)
+            foreach (var tranche in promo.EnumerateArray())
+            {
+                tranchesSeen++;
+                var grant = ReadTranche(tranche);
+                balances.Add(new AiUsageBalance("planCredit", Clean(ReadString(tranche, "name")), grant.Amount, "usd", grant.ExpiresAt));
+            }
+        var purchased = new SortedDictionary<DateTimeOffset, decimal>();
+        decimal purchasedWithoutExpiry = 0;
+        var hasPurchasedWithoutExpiry = false;
+        if (TrancheList(credits, "tranches") is { } tranches)
+            foreach (var tranche in tranches.EnumerateArray())
+            {
+                tranchesSeen++;
+                var paid = ReadTranche(tranche);
+                if (paid.ExpiresAt is { } expires) purchased[expires] = purchased.GetValueOrDefault(expires) + paid.Amount;
+                else { purchasedWithoutExpiry += paid.Amount; hasPurchasedWithoutExpiry = true; }
+            }
+        foreach (var (expires, amount) in purchased)
+            balances.Add(new AiUsageBalance("purchasedCredit", null, amount, "usd", expires));
+        if (hasPurchasedWithoutExpiry) balances.Add(new AiUsageBalance("purchasedCredit", null, purchasedWithoutExpiry, "usd", null));
+        if (tranchesSeen == 0)
+        {
+            // Without tranches the breakdown is unknown; only a total of exactly zero is shown.
+            if (!credits.TryGetProperty("balance", out var total) || ReadMinorAmount(total) is not { } amount)
+                throw new AiUsageParseException("console credits has no balance");
+            if (amount != 0) throw new AiUsageParseException("console credits breakdown missing");
+            balances.Add(new AiUsageBalance("purchasedCredit", null, 0, "usd", null));
+        }
+        return new AiUsageReading(null, [], balances);
+    }
+
+    // A tranche list that is present must be an array (or null); any other shape is a format change,
+    // never a silently skipped half of the balance.
+    private static JsonElement? TrancheList(JsonElement credits, string name)
+    {
+        if (!credits.TryGetProperty(name, out var list) || list.ValueKind == JsonValueKind.Null) return null;
+        return list.ValueKind == JsonValueKind.Array ? list : throw new AiUsageParseException(name + " is not a list");
+    }
+
+    private static void RequireUsd(JsonElement element)
+    {
+        if (element.TryGetProperty("currency", out var currency) && !(currency.ValueKind == JsonValueKind.String && currency.GetString() == "USD"))
+            throw new AiUsageParseException("credit currency is not USD");
+    }
+
+    private static (decimal Amount, DateTimeOffset? ExpiresAt) ReadTranche(JsonElement tranche)
+    {
+        if (tranche.ValueKind != JsonValueKind.Object) throw new AiUsageParseException("credit tranche is not an object");
+        RequireUsd(tranche);
+        decimal? amount = tranche.TryGetProperty("remaining", out var remaining) ? ReadMinorAmount(remaining) : null;
+        // `remaining_amount_minor_units` is cents only alongside an explicit USD currency.
+        if (amount is null && ReadInt64(tranche, "remaining_amount_minor_units") is { } minor && ReadString(tranche, "currency") == "USD")
+            amount = CheckedAmount(minor, 2);
+        return amount is { } value
+            ? (value, ReadTime(tranche, "expires_at"))
+            : throw new AiUsageParseException("credit tranche has no remaining amount");
+    }
+
+    // { "credits": { "amount_minor": 10000, "exponent": 2 } } or { "money": { ... } } → 100.00
+    private static decimal? ReadMinorAmount(JsonElement holder)
+    {
+        if (holder.ValueKind != JsonValueKind.Object) return null;
+        foreach (var name in new[] { "credits", "money" })
+        {
+            if (!holder.TryGetProperty(name, out var value) || value.ValueKind != JsonValueKind.Object) continue;
+            RequireUsd(value);
+            if (!value.TryGetProperty("amount_minor", out var minorValue) || minorValue.ValueKind != JsonValueKind.Number
+                || !minorValue.TryGetInt64(out var minor)
+                || !value.TryGetProperty("exponent", out var exponentValue) || exponentValue.ValueKind != JsonValueKind.Number
+                || !exponentValue.TryGetInt32(out var exponent))
+                throw new AiUsageParseException("credit amount needs an integer amount_minor and exponent");
+            return CheckedAmount(minor, exponent);
+        }
+        return null;
+    }
+
+    private static decimal CheckedAmount(long minor, int exponent) =>
+        minor >= 0 && exponent is >= 0 and <= 6 && minor < 1_000_000_000_000
+            ? minor / (decimal)Math.Pow(10, exponent)
+            : throw new AiUsageParseException("credit amount out of range");
+
+    /// <summary>
+    /// Parses <c>GET colab.research.google.com/tun/m/ccu-info?authuser=0</c> (2026-11-18 shape):
+    /// <c>currentBalance</c> compute units and <c>consumptionRateHourly</c>. <c>authuser=0</c> is the
+    /// first Google account signed in to the profile.
+    /// </summary>
+    public static AiUsageReading ParseColab(string body)
+    {
+        var text = body.TrimStart();
+        if (text.StartsWith(")]}'", StringComparison.Ordinal)) text = text[4..];
+        if (text.TrimStart().StartsWith('<')) throw new AiUsageParseException("colab returned an HTML page");
+        JsonDocument document;
+        try { document = JsonDocument.Parse(text); }
+        catch (JsonException) { throw new AiUsageParseException("colab response is not JSON"); }
+        using (document)
+        {
+            var root = document.RootElement;
+            if (root.ValueKind != JsonValueKind.Object || ReadNumber(root, "currentBalance") is not { } balance
+                || !double.IsFinite(balance) || balance is < 0 or > 1_000_000)
+                throw new AiUsageParseException("colab response has no balance");
+            // Unknown or odd rates stay null ("rate unknown"), which the panel keeps apart from a real 0.
+            decimal? perHour = ReadNumber(root, "consumptionRateHourly") is { } rate && double.IsFinite(rate) && rate is >= 0 and < 10_000
+                ? KeepPositive(rate)
+                : null;
+            return new AiUsageReading(null, [], [new AiUsageBalance("computeUnits", null, KeepPositive(balance), "units", null, perHour)]);
+        }
+    }
+
+    // decimal cannot hold values below 1e-28; such a positive value must not become zero.
+    private static decimal KeepPositive(double value)
+    {
+        var converted = (decimal)value;
+        return value > 0 && converted == 0 ? 0.0000000001m : converted;
     }
 
     private static bool HasCapability(JsonElement organization, string capability) =>

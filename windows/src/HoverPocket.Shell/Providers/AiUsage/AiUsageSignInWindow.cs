@@ -94,7 +94,7 @@ internal sealed class AiUsageSignInWindow : Window
         try
         {
             var environment = await AiUsageWebSession.GetEnvironmentAsync(_userDataFolder);
-            await _webView.EnsureCoreWebView2Async(environment, AiUsageWebSession.ProfileOptions(environment, _service));
+            await _webView.EnsureCoreWebView2Async(environment, AiUsageWebSession.ProfileOptions(environment, AiUsageServiceIds.Profile(_service)));
             var core = _webView.CoreWebView2;
             core.Settings.AreHostObjectsAllowed = false;
             core.Settings.IsWebMessageEnabled = false;

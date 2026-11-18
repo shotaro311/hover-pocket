@@ -8,7 +8,8 @@ internal sealed record AiUsageFetchResponse(int Status, string Type, string Url,
 
 /// <summary>
 /// A hidden, non-activating WebView2 that runs <c>fetch()</c> inside one service's own origin. Each
-/// service has its own WebView2 profile, so signing out of one never touches another. The view has no
+/// sign-in has its own WebView2 profile, so signing out of one never touches another; Colab reads with
+/// Gemini's Google profile, so those two are signed in and out together. The view has no
 /// bridge, no host objects and no popups; top-level navigation is limited to the one origin it was sent
 /// to, and every request is a same-origin fetch whose body is read with a size cap.
 /// </summary>

@@ -19,6 +19,8 @@ internal sealed class AiUsageService : IDisposable
     private readonly AiUsageWebReader _webReader = new();
     private readonly Dictionary<string, AiUsageServiceSnapshot> _snapshots = new(StringComparer.Ordinal);
     private readonly Dictionary<string, int> _generations = new(StringComparer.Ordinal);
+    // Sign-outs in progress per service; a count, so one ending early cannot lift another's hold.
+    private readonly Dictionary<string, int> _suspended = new(StringComparer.Ordinal);
     private readonly SemaphoreSlim _refreshGate = new(1, 1);
     private readonly Dictionary<string, AiUsageSignInWindow> _signInWindows = new(StringComparer.Ordinal);
     private readonly CancellationTokenSource _lifetime = new();
@@ -61,7 +63,10 @@ internal sealed class AiUsageService : IDisposable
                 id = snapshot.Id,
                 name = AiUsageServiceIds.DisplayName(snapshot.Id),
                 visible = !hiddenServices.Contains(snapshot.Id, StringComparer.Ordinal),
-                signIn = snapshot.Id == AiUsageServiceIds.Codex ? "codex" : "web",
+                signIn = snapshot.Id == AiUsageServiceIds.Codex ? "codex"
+                    : AiUsageServiceIds.SignIn.Contains(snapshot.Id, StringComparer.Ordinal) ? "web"
+                    : "shared",
+                sharedWith = AiUsageServiceIds.Profile(snapshot.Id) == snapshot.Id ? null : AiUsageServiceIds.Profile(snapshot.Id),
                 status = snapshot.Status,
                 plan = snapshot.Plan,
                 errorCode = snapshot.ErrorCode,
@@ -75,6 +80,16 @@ internal sealed class AiUsageService : IDisposable
                     usedPercent = window.UsedPercent,
                     resetsAt = window.ResetsAt?.ToString("O"),
                     windowMinutes = window.WindowMinutes
+                }).ToArray(),
+                balances = snapshot.BalanceList.Select(balance => new
+                {
+                    kind = balance.Kind,
+                    label = balance.Label,
+                    amount = balance.Amount,
+                    unit = balance.Unit,
+                    expiresAt = balance.ExpiresAt?.ToString("O"),
+                    perHour = balance.PerHour,
+                    state = balance.State
                 }).ToArray()
             }).ToArray()
         };
@@ -154,7 +169,7 @@ internal sealed class AiUsageService : IDisposable
         foreach (var id in services)
             await RunOneAsync(id, token, async () =>
             {
-                await using var session = await AiUsageWebSession.CreateAsync(_webDataFolder, id);
+                await using var session = await AiUsageWebSession.CreateAsync(_webDataFolder, AiUsageServiceIds.Profile(id));
                 return await _webReader.ReadAsync(session, id, token);
             });
     }
@@ -200,7 +215,7 @@ internal sealed class AiUsageService : IDisposable
         var now = _clock();
         lock (_snapshots)
         {
-            if (_generations[id] != generation) return;
+            if (_generations[id] != generation || _suspended.GetValueOrDefault(id) > 0) return;
             _snapshots[id] = _snapshots[id].Apply(result, now);
         }
         RaiseChanged();
@@ -238,7 +253,7 @@ internal sealed class AiUsageService : IDisposable
     public async Task SignInAsync(string service, Window? owner, bool english, CancellationToken cancellationToken)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        if (!AiUsageServiceIds.Web.Contains(service, StringComparer.Ordinal))
+        if (!AiUsageServiceIds.SignIn.Contains(service, StringComparer.Ordinal))
             throw new ArgumentOutOfRangeException(nameof(service));
         if (_signInWindows.TryGetValue(service, out var existing))
         {
@@ -260,8 +275,11 @@ internal sealed class AiUsageService : IDisposable
         using (cancellationToken.Register(() => window.Dispatcher.BeginInvoke(window.Close)))
             await closed.Task;
         if (_disposed) return;
-        BeginAccountChange(service);
-        await RefreshAsync([service], force: true, cancellationToken);
+        // Gemini and Colab share the Google sign-in: reset both under one lock, then notify once, so no
+        // notification carries one service's old account next to the other's reset.
+        var affected = AiUsageServiceIds.SharingSignIn(service);
+        ResetTogether(affected);
+        await RefreshAsync(affected, force: true, cancellationToken);
     }
 
     /// <summary>
@@ -271,26 +289,81 @@ internal sealed class AiUsageService : IDisposable
     public async Task SignOutAsync(string service, CancellationToken cancellationToken)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        if (!AiUsageServiceIds.Web.Contains(service, StringComparer.Ordinal))
+        if (!AiUsageServiceIds.SignIn.Contains(service, StringComparer.Ordinal))
             throw new ArgumentOutOfRangeException(nameof(service));
-        // Hide the old account at once, then again after the running refresh has finished and the profile
-        // is cleared, so nothing read before the clearing survives, even if the read-back fails.
-        BeginAccountChange(service);
-        await _refreshGate.WaitAsync(cancellationToken);
+        // Colab shares Gemini's Google sign-in, so both are affected. While the profile is being cleared,
+        // no reading of these services is applied (a read already queued would still see the old
+        // account). They are reset when the sign-out starts and again when it ends, whether it succeeded,
+        // failed or was cancelled, so nothing from before the clearing can reappear.
+        var affected = AiUsageServiceIds.SharingSignIn(service);
+        SuspendAndReset(affected, suspend: true);
+        Exception? failure = null;
         try
         {
-            if (_readerOverride is null)
+            await _refreshGate.WaitAsync(cancellationToken);
+            try
             {
-                await using var session = await AiUsageWebSession.CreateAsync(_webDataFolder, service);
-                await session.ClearProfileAsync();
+                if (_readerOverride is null)
+                {
+                    await using var session = await AiUsageWebSession.CreateAsync(_webDataFolder, AiUsageServiceIds.Profile(service));
+                    await session.ClearProfileAsync();
+                }
             }
-            BeginAccountChange(service);
+            finally
+            {
+                _refreshGate.Release();
+            }
+        }
+        catch (Exception exception)
+        {
+            failure = exception;
         }
         finally
         {
-            _refreshGate.Release();
+            SuspendAndReset(affected, suspend: false);
         }
-        await RefreshAsync([service], force: true, cancellationToken);
+        if (failure is null)
+        {
+            await RefreshAsync(affected, force: true, cancellationToken);
+            return;
+        }
+        // The clearing failed or was cancelled: still read the real state back, then report the failure.
+        if (!_disposed) _ = RefreshQuietlyAsync(affected);
+        System.Runtime.ExceptionServices.ExceptionDispatchInfo.Throw(failure);
+    }
+
+    private void SuspendAndReset(IReadOnlyList<string> services, bool suspend)
+    {
+        lock (_snapshots)
+        {
+            foreach (var id in services)
+            {
+                var count = _suspended.GetValueOrDefault(id) + (suspend ? 1 : -1);
+                if (count > 0) _suspended[id] = count; else _suspended.Remove(id);
+                _generations[id]++;
+                _snapshots[id] = AiUsageServiceSnapshot.Initial(id);
+            }
+        }
+        RaiseChanged();
+    }
+
+    private void ResetTogether(IReadOnlyList<string> services)
+    {
+        lock (_snapshots)
+        {
+            foreach (var id in services)
+            {
+                _generations[id]++;
+                _snapshots[id] = AiUsageServiceSnapshot.Initial(id);
+            }
+        }
+        RaiseChanged();
+    }
+
+    private async Task RefreshQuietlyAsync(IReadOnlyList<string> services)
+    {
+        try { await RefreshAsync(services, force: true); }
+        catch (Exception exception) when (exception is OperationCanceledException or ObjectDisposedException) { }
     }
 
     public void Dispose()

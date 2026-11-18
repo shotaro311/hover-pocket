@@ -134,10 +134,11 @@ internal sealed class AiUsageVerifier
             Check(reading.Windows[2] is { Kind: "session", Model: "GPT-5.3-Codex-Spark", UsedPercent: 3 }, "codex: model bucket keeps its name");
             Check(reading.Windows[0].ResetsAt == DateTimeOffset.FromUnixTimeSeconds(1763434800), "codex: unix reset");
         }
-        // Live shape on 2026-11-18: the only window is weekly and arrives as `primary`.
+        // Shape of the live response on 2026-11-18 (balances are made-up values): the only window is
+        // weekly and arrives as `primary`; credits sit in the ordinary `rateLimits` view.
         using (var weeklyOnly = JsonDocument.Parse("""
             {"ordinaryUsageAllowed":true,
-             "rateLimits":{"limitId":"codex","limitName":null,"primary":{"usedPercent":8,"windowDurationMins":10080,"resetsAt":1795487156},"secondary":null,"planType":"prolite"},
+             "rateLimits":{"limitId":"codex","limitName":null,"primary":{"usedPercent":8,"windowDurationMins":10080,"resetsAt":1795487156},"secondary":null,"planType":"prolite","credits":{"hasCredits":true,"unlimited":false,"balance":"12345.6789"}},
              "rateLimitsByLimitId":{"codex":{"limitId":"codex","limitName":null,"primary":{"usedPercent":8,"windowDurationMins":10080,"resetsAt":1795487156},"secondary":null,"planType":"prolite"}},
              "rateLimitResetCredits":{"availableCount":3,"credits":null},"rateLimitUpsell":null}
             """))
@@ -145,7 +146,84 @@ internal sealed class AiUsageVerifier
             var reading = AiUsageParsers.ParseCodex(weeklyOnly.RootElement, null);
             Check(reading.Plan == "Pro Lite" && reading.Windows.Count == 1 && reading.Windows[0] is { Kind: "weekly", UsedPercent: 8, WindowMinutes: 10080 },
                 "codex: a weekly primary window is labelled weekly, not by position");
+            Check(reading.BalanceList is [{ Kind: "codexCredits", Unit: "credits", Amount: 12345.6789m, State: null }],
+                "codex: credits read from the ordinary view at full precision, as a credit count");
         }
+        string CodexWith(string credits) => "{\"rateLimits\":{\"primary\":{\"usedPercent\":5,\"windowDurationMins\":10080},\"credits\":" + credits + "}}";
+        AiUsageReading CodexCreditsCase(string credits) { using var document = JsonDocument.Parse(CodexWith(credits)); return AiUsageParsers.ParseCodex(document.RootElement, null); }
+        Check(CodexCreditsCase("""{"hasCredits":true,"unlimited":false,"balance":42.5}""").BalanceList is [{ Amount: 42.5m, State: null }], "codex: a numeric balance is accepted");
+        var oddCredits = CodexCreditsCase("""{"hasCredits":true,"unlimited":false,"balance":"lots"}""");
+        Check(oddCredits.Windows.Count == 1 && oddCredits.BalanceList is [{ State: "unreadable" }], "codex: an unreadable balance shows as unreadable and keeps the usage windows");
+        Check(CodexCreditsCase("""{"hasCredits":true,"unlimited":true,"balance":null}""").BalanceList is [{ State: "unlimited" }], "codex: unlimited credits are shown as unlimited");
+        Check(CodexCreditsCase("""{"hasCredits":false,"unlimited":false,"balance":null}""").BalanceList.Count == 0, "codex: no balance provided adds no row");
+
+        // platform.claude.com prepaid/credits, 2026-11-18 shape (made-up purchased amounts, identifiers removed).
+        using (var console = JsonDocument.Parse("""
+            {"amount":11234,"currency":"USD","balance":{"money":null,"credits":{"amount_minor":11234,"exponent":2}},
+             "tranches":[
+               {"remaining_amount_minor_units":734,"currency":"USD","expires_at":"2026-12-14T00:00:00Z","remaining":{"money":null,"credits":{"amount_minor":734,"exponent":2}},"program_id":"api_credits","name":null},
+               {"remaining_amount_minor_units":500,"currency":"USD","expires_at":"2027-03-01T00:00:00Z","remaining":{"money":null,"credits":{"amount_minor":500,"exponent":2}},"program_id":"api_credits","name":null}],
+             "promo_tranches":[{"remaining_amount_minor_units":10000,"currency":"USD","expires_at":"2026-12-12T00:00:00Z","remaining":{"money":null,"credits":{"amount_minor":10000,"exponent":2}},"program_id":"subscription_api_credit","name":"API credit (Max)"}],
+             "next_expires_at":"2026-12-12T00:00:00Z"}
+            """))
+        {
+            var balances = AiUsageParsers.ParseClaudeConsoleCredits(console.RootElement).BalanceList;
+            Check(balances.Count == 3 && balances[0] is { Kind: "planCredit", Label: "API credit (Max)", Amount: 100.00m, Unit: "usd" }
+                && balances[0].ExpiresAt == DateTimeOffset.Parse("2026-12-12T00:00:00Z")
+                && balances[1] is { Kind: "purchasedCredit", Amount: 7.34m } && balances[1].ExpiresAt == DateTimeOffset.Parse("2026-12-14T00:00:00Z")
+                && balances[2] is { Kind: "purchasedCredit", Amount: 5.00m } && balances[2].ExpiresAt == DateTimeOffset.Parse("2027-03-01T00:00:00Z"),
+                "claude api: plan grant apart from purchases, purchases one row per expiry, from minor units");
+        }
+        using (var empty = JsonDocument.Parse("""{"balance":{"money":null,"credits":{"amount_minor":0,"exponent":2}},"tranches":[],"promo_tranches":[]}"""))
+            Check(AiUsageParsers.ParseClaudeConsoleCredits(empty.RootElement).BalanceList is [{ Amount: 0m }], "claude api: empty tranches with a zero total read as a real $0");
+        void ConsoleFailure(string json, string label) =>
+            ExpectParseFailure(() => { using var document = JsonDocument.Parse(json); AiUsageParsers.ParseClaudeConsoleCredits(document.RootElement); }, label);
+        ConsoleFailure("""{"balance":{"credits":{"amount_minor":1500,"exponent":2}},"tranches":[],"promo_tranches":[]}""", "claude api: a positive total without a breakdown is not shown as purchased");
+        ConsoleFailure("""{"promo_tranches":[{"remaining":{"credits":{"amount_minor":-5,"exponent":2}}}]}""", "claude api: a negative amount is a format change");
+        ConsoleFailure("""{"currency":"USD"}""", "claude api: no balance is a format change, never $0");
+        ConsoleFailure("""{"promo_tranches":[{"remaining":{"credits":{"amount_minor":100,"exponent":2}}},{"remaining":{}}]}""", "claude api: an unreadable tranche fails instead of a partial total");
+        ConsoleFailure("""{"promo_tranches":[{"remaining":{"credits":{"amount_minor":100}}}]}""", "claude api: a missing exponent is a format change");
+        ConsoleFailure("""{"promo_tranches":[{"remaining":{"credits":{"amount_minor":100,"exponent":"2"}}}]}""", "claude api: a non-integer exponent is a format change");
+        ConsoleFailure("""{"currency":"EUR","promo_tranches":[{"remaining":{"credits":{"amount_minor":100,"exponent":2}}}]}""", "claude api: a non-USD currency is not shown in dollars");
+        ConsoleFailure("""{"promo_tranches":[{"currency":"JPY","remaining":{"credits":{"amount_minor":100,"exponent":0}}}]}""", "claude api: a non-USD tranche is not shown in dollars");
+        ConsoleFailure("""{"promo_tranches":{"x":1},"tranches":[{"currency":"USD","remaining":{"credits":{"amount_minor":100,"exponent":2}}}]}""", "claude api: a grant list of the wrong shape is not skipped");
+        ConsoleFailure("""{"promo_tranches":[{"remaining":{"credits":{"amount_minor":"100","exponent":2}}}]}""", "claude api: a string amount is a format change");
+        ConsoleFailure("""{"promo_tranches":[{"remaining":{"money":{"currency":"EUR","amount_minor":100,"exponent":2}}}]}""", "claude api: a non-USD amount object is not shown in dollars");
+        try
+        {
+            using var stringAmount = JsonDocument.Parse("""{"promo_tranches":[{"remaining":{"credits":{"amount_minor":null,"exponent":2}}}]}""");
+            AiUsageParsers.ParseClaudeConsoleCredits(stringAmount.RootElement);
+            Check(false, "claude api: a null amount is a parse failure, not another exception");
+        }
+        catch (AiUsageParseException) { Check(true, "claude api: a null amount is a parse failure, not another exception"); }
+        using (var consoleOrgs = JsonDocument.Parse("""
+            [{"uuid":"00000000-0000-4000-8000-000000000002","capabilities":["chat","claude_max"]},
+             {"uuid":"not-a-uuid","capabilities":["api"]},
+             {"uuid":"00000000-0000-4000-8000-000000000001","capabilities":["api","customer_terms:standard"]}]
+            """))
+            Check(AiUsageParsers.SelectClaudeConsoleOrganization(consoleOrgs.RootElement) is ("00000000-0000-4000-8000-000000000001", false),
+                "claude api: the one valid api organization is used, skipping invalid ones and the chat one");
+        using (var twoOrgs = JsonDocument.Parse("""
+            [{"uuid":"00000000-0000-4000-8000-000000000001","capabilities":["api"]},{"uuid":"00000000-0000-4000-8000-000000000003","capabilities":["api"]}]
+            """))
+            Check(AiUsageParsers.SelectClaudeConsoleOrganization(twoOrgs.RootElement) is (null, true), "claude api: several api organizations are ambiguous, not guessed");
+        using (var sameOrg = JsonDocument.Parse("""
+            [{"uuid":"0000000A-0000-4000-8000-000000000001","capabilities":["api"]},{"uuid":"0000000a-0000-4000-8000-000000000001","capabilities":["api"]}]
+            """))
+            Check(AiUsageParsers.SelectClaudeConsoleOrganization(sameOrg.RootElement) is ({ } _, false), "claude api: the same organization in two letter cases is one organization");
+        Check(AiUsageWebReader.Classify(new(403, "basic", "", """{"type":"error","error":{"type":"permission_error"}}""", false)) is { Status: AiUsageStatus.SignedOut },
+            "claude api: the organization list's 403 JSON is signed out (the credits call maps 403 to noAccess instead)");
+
+        // colab.research.google.com/tun/m/ccu-info, 2026-11-18 shape (made-up values).
+        var colab = AiUsageParsers.ParseColab("""{"currentBalance":87.6543,"consumptionRateHourly":0,"assignmentsCount":0,"eligibleGpus":[],"ineligibleGpus":[],"eligibleTpus":[]}""");
+        Check(colab.BalanceList is [{ Kind: "computeUnits", Unit: "units", Amount: 87.6543m, PerHour: 0m }], "colab: compute units and hourly rate at full precision");
+        Check(AiUsageParsers.ParseColab(")]}'\n{\"currentBalance\":0.04,\"consumptionRateHourly\":0.004}").BalanceList is [{ Amount: 0.04m, PerHour: 0.004m }],
+            "colab: tiny positive values are kept, not rounded to zero (XSSI prefix accepted)");
+        Check(AiUsageParsers.ParseColab("""{"currentBalance":3,"consumptionRateHourly":"fast"}""").BalanceList is [{ PerHour: null }], "colab: an odd rate is unknown, not zero");
+        Check(AiUsageParsers.ParseColab("""{"currentBalance":1e-30,"consumptionRateHourly":1e-30}""").BalanceList is [{ Amount: > 0m, PerHour: > 0m }],
+            "colab: values below decimal precision stay positive"); 
+        ExpectParseFailure(() => AiUsageParsers.ParseColab("<!DOCTYPE html><title>Error 401 (Unauthorized)!!1</title>"), "colab: an HTML page is not a balance");
+        ExpectParseFailure(() => AiUsageParsers.ParseColab("""{"currentBalance":-1}"""), "colab: a negative balance is a format change");
         using (var signedOut = JsonDocument.Parse("""{"account":null,"requiresOpenaiAuth":true}"""))
             Check(!AiUsageParsers.IsCodexSignedIn(signedOut.RootElement), "codex: missing account is signed out");
         ExpectParseFailure(() => { using var none = JsonDocument.Parse("""{"rateLimits":{"primary":null}}"""); AiUsageParsers.ParseCodex(none.RootElement, null); }, "codex: no windows is a parse failure");
@@ -196,6 +274,10 @@ internal sealed class AiUsageVerifier
             "snapshot: a failed refresh keeps the last reading as stale");
         var firstFailure = AiUsageServiceSnapshot.Initial("muse").Apply(AiUsageResult.Failure(AiUsageErrorCodes.Changed), now);
         Check(firstFailure is { Status: AiUsageStatus.Error, Stale: false, Windows.Count: 0 }, "snapshot: a first failure shows no bars");
+        var balanceOk = AiUsageServiceSnapshot.Initial("colab").Apply(AiUsageResult.Success(new AiUsageReading(null, [], [new AiUsageBalance("computeUnits", null, 12.5m, "units", null)])), now);
+        var balanceFailed = balanceOk.Apply(AiUsageResult.Failure(AiUsageErrorCodes.Network), now.AddMinutes(5));
+        Check(balanceFailed is { Status: AiUsageStatus.Error, Stale: true } && balanceFailed.BalanceList is [{ Amount: 12.5m }],
+            "snapshot: a failed balance read keeps the last balance as stale, never 0");
         var signedOut = failed.Apply(AiUsageResult.SignedOut(), now.AddMinutes(6));
         Check(signedOut is { Status: AiUsageStatus.SignedOut, Windows.Count: 0, Plan: null, Stale: false }, "snapshot: sign-out clears old readings");
     }
@@ -208,7 +290,9 @@ internal sealed class AiUsageVerifier
         {
             ["codex"] = AiUsageResult.Success(new AiUsageReading("Pro", [new AiUsageWindow("c", "session", null, 10, null, 300)])),
             ["claude"] = AiUsageResult.Success(new AiUsageReading("Max 5x", [new AiUsageWindow("a", "weekly", "Fable", 35, null, 10080)])),
+            ["claude-api"] = AiUsageResult.Success(new AiUsageReading(null, [], [new AiUsageBalance("planCredit", "API credit (Max)", 100m, "usd", null)])),
             ["gemini"] = AiUsageResult.SignedOut(),
+            ["colab"] = AiUsageResult.SignedOut(),
             ["muse"] = AiUsageResult.Failure(AiUsageErrorCodes.Changed)
         };
         var root = Path.Combine(Path.GetTempPath(), "HoverPocket", "AiUsageVerify", Guid.NewGuid().ToString("N"));
@@ -305,8 +389,62 @@ internal sealed class AiUsageVerifier
 
         var state = JsonSerializer.SerializeToNode(service.BuildState(["muse"]), BridgeJson.Options)!;
         var services = state["services"]!.AsArray();
-        Check(services.Count == 4 && services[3]!["visible"]!.GetValue<bool>() == false && services[0]!["signIn"]!.GetValue<string>() == "codex"
-            && services[1]!["windows"]![0]!["model"]!.GetValue<string>() == "Fable", "service: wire state lists all services with visibility");
+        JsonNode Service(string id) => services.Single(node => node!["id"]!.GetValue<string>() == id)!;
+        Check(services.Count == 6 && Service("muse")["visible"]!.GetValue<bool>() == false && Service("codex")["signIn"]!.GetValue<string>() == "codex"
+            && Service("claude")["windows"]![0]!["model"]!.GetValue<string>() == "Fable"
+            && Service("colab")["signIn"]!.GetValue<string>() == "shared" && Service("colab")["sharedWith"]!.GetValue<string>() == "gemini"
+            && Service("claude-api")["balances"]![0]!["amount"]!.GetValue<decimal>() == 100m, "service: wire state lists all services, balances and the shared sign-in");
+
+        // Gemini's Google sign-in also feeds Colab: signing out of Gemini must drop Colab's balance too.
+        var google = new Dictionary<string, int>();
+        var geminiRead = new TaskCompletionSource<AiUsageResult>(TaskCreationOptions.RunContinuationsAsynchronously);
+        using (var shared = new AiUsageService(Path.Combine(root, "codex6"), Path.Combine(root, "web6"), (id, _) =>
+        {
+            google[id] = google.GetValueOrDefault(id) + 1;
+            if (id == "gemini" && google[id] == 1) return geminiRead.Task;
+            return Task.FromResult(google[id] == 1 && id == "colab"
+                ? AiUsageResult.Success(new AiUsageReading(null, [], [new AiUsageBalance("computeUnits", null, 87.6m, "units", null)]))
+                : AiUsageResult.SignedOut());
+        }, () => now))
+        {
+            // A refresh of both is under way (Gemini first, Colab still queued) when Gemini is signed out.
+            var running = shared.RefreshAsync(["gemini", "colab"], force: true);
+            var signingOut = false;
+            var leaked = false;
+            shared.Changed += (_, _) => { if (signingOut && shared.Snapshot("colab").BalanceList.Count > 0) leaked = true; };
+            signingOut = true;
+            var signOut = shared.SignOutAsync("gemini", CancellationToken.None);
+            geminiRead.SetResult(AiUsageResult.Success(new AiUsageReading(null, [new AiUsageWindow("g", "weekly", null, 10, null, 10080)])));
+            await running;
+            await signOut;
+            Check(!leaked, "service: no change notification shows the old Colab balance during a Gemini sign-out");
+            Check(google["colab"] == 2 && shared.Snapshot("colab") is { Status: AiUsageStatus.SignedOut, Balances.Count: 0 }
+                && shared.Snapshot("gemini").Status == AiUsageStatus.SignedOut,
+                "service: signing out of Gemini resets and re-reads Colab"); 
+            // Two overlapping sign-outs: cancelling the second must not lift the first one's hold.
+            var queued = new TaskCompletionSource<AiUsageResult>(TaskCreationOptions.RunContinuationsAsynchronously);
+            using (var overlap = new AiUsageService(Path.Combine(root, "codex7"), Path.Combine(root, "web7"), (id, _) =>
+                id == "gemini" ? queued.Task : Task.FromResult(AiUsageResult.Success(new AiUsageReading(null, [], [new AiUsageBalance("computeUnits", null, 5m, "units", null)]))), () => now))
+            {
+                var stale = false;
+                var holding = false;
+                overlap.Changed += (_, _) => { if (holding && overlap.Snapshot("colab").BalanceList.Count > 0) stale = true; };
+                var refreshing = overlap.RefreshAsync(["gemini", "colab"], force: true);
+                holding = true;
+                var first = overlap.SignOutAsync("gemini", CancellationToken.None);
+                using var cancel = new CancellationTokenSource();
+                var second = overlap.SignOutAsync("gemini", cancel.Token);
+                cancel.Cancel();
+                try { await second; } catch (OperationCanceledException) { }
+                queued.SetResult(AiUsageResult.SignedOut());
+                await refreshing;
+                holding = false;
+                await first;
+                Check(!stale, "service: a cancelled overlapping sign-out does not lift the other's hold");
+            }
+            try { await shared.SignOutAsync("colab", CancellationToken.None); Check(false, "service: Colab has no sign-out of its own"); }
+            catch (ArgumentOutOfRangeException) { Check(true, "service: Colab has no sign-out of its own"); }
+        }
     }
 
     /// <summary>
@@ -384,8 +522,20 @@ internal sealed class AiUsageVerifier
                 new AiUsageWindow("claude:session", "session", null, 32, now.AddMinutes(55), 300),
                 new AiUsageWindow("claude:weekly_all", "weekly", null, 30, now.AddDays(5), 10080),
                 new AiUsageWindow("claude:weekly_scoped:Fable", "weekly", "Fable", 85, now.AddDays(5), 10080)])),
+            ["claude-api"] = AiUsageResult.Success(new AiUsageReading(null, [], [
+                new AiUsageBalance("planCredit", "API credit (Max)", 100m, "usd", now.AddDays(24)),
+                new AiUsageBalance("purchasedCredit", null, 12.34m, "usd", now.AddDays(26)),
+                new AiUsageBalance("purchasedCredit", null, 0.004m, "usd", now.AddDays(90))])),
             ["gemini"] = AiUsageResult.SignedOut(),
+            ["colab"] = AiUsageResult.Success(new AiUsageReading(null, [], [new AiUsageBalance("computeUnits", null, 87.6m, "units", null, 0m)])),
             ["muse"] = AiUsageResult.Failure(AiUsageErrorCodes.Changed)
+        };
+        readings["codex"] = readings["codex"] with
+        {
+            Reading = readings["codex"].Reading! with { Balances = [
+                new AiUsageBalance("codexCredits", null, 12345.68m, "credits", null),
+                new AiUsageBalance("codexCredits", null, 0, "credits", null, State: "unlimited"),
+                new AiUsageBalance("codexCredits", null, 0, "credits", null, State: "unreadable")] }
         };
         using var controller = new PanelBridgeController(providers, store, store.Load(providers.ProviderIds),
             externalIntegrationsEnabled: false, aiUsageReader: (id, _) => Task.FromResult(readings[id]));
@@ -402,7 +552,7 @@ internal sealed class AiUsageVerifier
         }
 
         var initial = await Call(panel, "aiUsage.getState", new { refresh = true });
-        Check(initial["result"]?["services"]?.AsArray().Count == 4, "bridge: panel reads the usage state");
+        Check(initial["result"]?["services"]?.AsArray().Count == 6, "bridge: panel reads the usage state");
         using var wait = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         while (controller.AiUsageForVerify!.Snapshot("muse").Status == AiUsageStatus.Idle) await Task.Delay(20, wait.Token);
         Check((await Call(panel, "aiUsage.signIn", new { service = "claude" }))["error"]?["code"]?.GetValue<string>() == "unknown_method",
@@ -429,7 +579,7 @@ internal sealed class AiUsageVerifier
         await VerifySettingsUiAsync(controller, store, log);
 
         var hidden = await Call(settings, "aiUsage.setVisible", new { service = "muse", visible = false });
-        Check(hidden["result"]?["services"]?[3]?["visible"]?.GetValue<bool>() == false
+        Check(hidden["result"]?["services"]?.AsArray().Single(node => node!["id"]!.GetValue<string>() == "muse")?["visible"]?.GetValue<bool>() == false
             && controller.CurrentSettings.AiUsageHiddenServices.SequenceEqual(["muse"])
             && store.Load(providers.ProviderIds).AiUsageHiddenServices.SequenceEqual(["muse"]), "bridge: hiding a service is saved");
     }
@@ -458,7 +608,7 @@ internal sealed class AiUsageVerifier
                 await Task.Delay(100, timeout.Token);
             await dispatcher.ProcessRawMessageAsync("""{"id":"select","method":"provider.select","params":{"id":"ai-usage"}}""");
             await dispatcher.PostEventAsync("state.changed", controller.BuildState(BridgeSurface.Panel));
-            while (await web.ExecuteScriptAsync("document.querySelectorAll('.hp-usage-card').length === 4") != "true")
+            while (await web.ExecuteScriptAsync("document.querySelectorAll('.hp-usage-card').length === 6") != "true")
                 await Task.Delay(100, timeout.Token);
             async Task<bool> Js(string expression) => await web.ExecuteScriptAsync(expression) == "true";
             Check(await Js("document.querySelector('[data-provider-title]').textContent === 'AI Usage'"), "panel UI: title");
@@ -476,8 +626,22 @@ internal sealed class AiUsageVerifier
                 "panel UI: signed-out card points to Settings");
             Check(await Js("document.querySelector('[data-service=muse] .hp-usage-error')?.textContent.includes('読み取れませんでした') && !document.querySelector('[data-service=muse] .hp-usage-row')"),
                 "panel UI: error card shows a reason and no 0% bar");
+            Check(await Js("document.querySelector('[data-service=\"claude-api\"]').textContent.includes('API credit (Max)') && document.querySelector('[data-service=\"claude-api\"]').textContent.includes('$100.00') && document.querySelector('[data-service=\"claude-api\"]').textContent.includes('$12.34')"),
+                "panel UI: Claude API plan grant and purchased credits");
+            Check(await Js("[...document.querySelectorAll('[data-service=\"claude-api\"] .hp-usage-value')].some(n => n.textContent === '<$0.01')"),
+                "panel UI: a tiny positive credit reads <$0.01, not $0.00");
+            Check(await Js("/まで（あと\\d+日）/.test(document.querySelector('[data-service=\"claude-api\"] .hp-usage-balance .hp-usage-reset').textContent)"), "panel UI: credit expiry with days left");
+            Check(await Js("document.querySelector('[data-service=colab]').textContent.includes('87.6') && document.querySelector('[data-service=colab]').textContent.includes('いまは消費していません')"),
+                "panel UI: Colab compute units and rate");
+            Check(await Js("document.querySelector('[data-service=codex] .hp-usage-balance')?.textContent.includes('12,345.68')"), "panel UI: Codex credit count");
+            Check(await Js("[...document.querySelectorAll('[data-service=codex] .hp-usage-balance .hp-usage-value')].map(n => n.textContent).join('|') === '12,345.68|無制限|読み取れません'"),
+                "panel UI: unlimited and unreadable credits are shown as such, never 0");
+            Check(await Js("!document.querySelector('[data-service=colab] .hp-usage-bar') && !document.querySelector('[data-service=\"claude-api\"] .hp-usage-bar')"), "panel UI: balances are amounts, not bars");
             Check(await Js("document.querySelector('.hp-usage').scrollWidth <= document.querySelector('.hp-usage').clientWidth"), "panel UI: no horizontal overflow");
             await Capture(web, "panel");
+            await web.ExecuteScriptAsync("document.querySelector('.hp-usage').scrollTop = 10000");
+            await Task.Delay(150, timeout.Token);
+            await Capture(web, "panel-bottom");
             log("PASS ai-usage panel UI rendered in WebView2");
         }
         finally
@@ -497,7 +661,7 @@ internal sealed class AiUsageVerifier
         {
             window.Show();
             while (window.WebViewForVerify?.CoreWebView2 is null
-                || await window.WebViewForVerify.ExecuteScriptAsync("document.querySelectorAll('.ai-usage-settings-row').length === 4") != "true")
+                || await window.WebViewForVerify.ExecuteScriptAsync("document.querySelectorAll('.ai-usage-settings-row').length === 6") != "true")
                 await Task.Delay(100, timeout.Token);
             var web = window.WebViewForVerify;
             await web.ExecuteScriptAsync("document.querySelector('[data-category=ai]').click(); document.querySelector('[data-ai-usage-settings]').scrollIntoView({block:'start'})");
@@ -510,6 +674,12 @@ internal sealed class AiUsageVerifier
             Check(await Js("[...document.querySelectorAll('[data-ai-usage-settings] [data-service=codex] button')].length === 0"),
                 "settings UI: no sign-in button while Codex is signed in");
             Check(await Js("[...document.querySelectorAll('[data-ai-usage-settings] input[type=checkbox]')].every(i => i.checked)"), "settings UI: all services shown by default");
+            Check(await Js("document.querySelectorAll('[data-ai-usage-settings] [data-service=colab] button').length === 0 && document.querySelector('[data-ai-usage-settings] [data-service=colab]').textContent.includes('Gemini')"),
+                "settings UI: Colab uses the Gemini sign-in, with no buttons of its own");
+            Check(await Js("[...document.querySelectorAll('[data-ai-usage-settings] [data-service=\"claude-api\"] button')].some(b => b.textContent === 'サインインし直す')"),
+                "settings UI: Claude API has its own sign-in");
+            Check(await Js("[...document.querySelectorAll('[data-ai-usage-settings] [data-service=gemini] button')].some(b => b.textContent === 'サインアウト')"),
+                "settings UI: Gemini offers sign-out while Colab still reads with its Google sign-in");
             await Task.Delay(150, timeout.Token);
             await Capture(web, "settings");
             log("PASS ai-usage Settings UI rendered in WebView2");

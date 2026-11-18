@@ -102,6 +102,35 @@ internal static class CodexChatVerifier
                 inline.Focused = false;
                 Check(!inline.KeepOpen && inline.Draft == "未送信の下書き", "manual hide preserves draft without keeping panel open");
             }
+            // The model catalog loaded before signing in leaves "sign in"; a sign-in elsewhere must clear it.
+            var signedOutFirst = true;
+            await using (var stale = new InlineChatController(new CodexChatCoordinator(_ =>
+            {
+                var harness = new Harness { SignedOut = signedOutFirst }; signedOutFirst = false; return Task.FromResult(harness.Client());
+            }, tools, new CodexChatHistory(Path.Combine(root, "stale"))), _ => Task.CompletedTask))
+            {
+                await stale.LoadModelsAsync(token);
+                Check(stale.Snapshot.ErrorCode == "chat_sign_in_required", "catalog before sign-in shows the sign-in prompt");
+                await Task.Delay(50, token);
+                Check(stale.Snapshot.ErrorCode == "chat_sign_in_required", "the prompt persists on its own after signing in elsewhere");
+                stale.SignedIn();
+                Check(stale.Snapshot.ErrorCode is null, "a sign-in anywhere clears the stale chat prompt");
+                await stale.LoadModelsAsync(token);
+                Check(stale.Snapshot.ErrorCode is null && stale.Models.Count == 1, "the next request connects with the new login");
+            }
+            var lateGate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            await using (var late = new InlineChatController(new CodexChatCoordinator(async ct =>
+            {
+                await lateGate.Task.WaitAsync(ct);
+                return new Harness { SignedOut = true }.Client();
+            }, tools, new CodexChatHistory(Path.Combine(root, "late"))), _ => Task.CompletedTask))
+            {
+                var loading = late.LoadModelsAsync(token);
+                late.SignedIn();
+                lateGate.SetResult();
+                await loading;
+                Check(late.Snapshot.ErrorCode is null, "a catalog read that predates the sign-in does not bring the prompt back");
+            }
             await using (var failed = new InlineChatController(new CodexChatCoordinator(_ => Task.FromException<CodexAppServerClient>(new IOException("generated connection failure")),
                 tools, new CodexChatHistory(Path.Combine(root, "failed"))), _ => Task.CompletedTask))
             {
@@ -171,6 +200,7 @@ internal static class CodexChatVerifier
         internal ConcurrentQueue<(string Method, JsonElement Parameters)> Requests { get; } = new();
         internal ConcurrentQueue<JsonElement> Responses { get; } = new();
         internal volatile bool TurnStarted;
+        internal volatile bool SignedOut;
         public CodexAppServerClient Client() => CodexAppServerClient.AttachForTesting(_reader, new Writer(Receive), TimeSpan.FromSeconds(3), () => { _reader.Close(); return ValueTask.CompletedTask; });
         public void Notify(string method, object parameters) => Push(new { method, @params = parameters });
         public void Call(int id, string method, object parameters) => Push(new { id, method, @params = parameters });
@@ -185,7 +215,7 @@ internal static class CodexChatVerifier
             object result = name switch
             {
                 "model/list" => new { data = new[] { new { model = "fixture-model", displayName = "Fixture Model", defaultReasoningEffort = "medium", supportedReasoningEfforts = new[] { new { reasoningEffort = "medium" }, new { reasoningEffort = "high" } } } }, nextCursor = (string?)null },
-                "account/read" => new { account = new { type = "chatgpt" }, requiresOpenaiAuth = true },
+                "account/read" => SignedOut ? new { account = (object?)null, requiresOpenaiAuth = true } : new { account = (object?)new { type = "chatgpt" }, requiresOpenaiAuth = true },
                 "thread/start" => new { thread = new { id = "chat-1" } },
                 "turn/start" => new { turn = new { id = "turn-1", status = "inProgress" } },
                 "thread/resume" => new { thread = new { id = "chat-1", turns = new[] {

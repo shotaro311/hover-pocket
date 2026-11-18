@@ -93,6 +93,8 @@ internal sealed class InlineChatController : IAsyncDisposable
             }
         });
     }
+    internal void SignedIn() => _chat.ClearSignInRequired();
+
     internal void Login()
     {
         if (Busy || _disposed) throw new InvalidOperationException("chat_busy");

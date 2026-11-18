@@ -39,6 +39,26 @@ internal sealed partial class PanelBridgeController
         return category;
     }
 
+    /// <summary>
+    /// The chat, the voice lane and AI Usage share one ChatGPT login (the CodexVoice profile). After a
+    /// sign-in from any of them, clear the chat's stale sign-in prompt and re-read Codex usage for the
+    /// new login.
+    /// </summary>
+    private void OnChatGptSignedIn()
+    {
+        if (System.Windows.Application.Current?.Dispatcher is { } dispatcher && !dispatcher.CheckAccess())
+        {
+            dispatcher.BeginInvoke(OnChatGptSignedIn);
+            return;
+        }
+        if (_disposed) return;
+        _inlineChat?.SignedIn();
+        if (_aiUsage is null) return;
+        _aiUsage.BeginAccountChange(AiUsageServiceIds.Codex);
+        if (VisibleAiUsageServices().Contains(AiUsageServiceIds.Codex))
+            _ = RefreshAiUsageInBackground([AiUsageServiceIds.Codex], force: true);
+    }
+
     /// <summary>Remembers loaded Settings pages so the panel can switch them to the AI category.</summary>
     private object MarkSurfaceReady(BridgeDispatcher dispatcher, BridgeSurface surface)
     {
@@ -103,7 +123,7 @@ internal sealed partial class PanelBridgeController
         register("aiUsage.signOut", async (parameters, token) =>
         {
             var service = ReadAiUsageService(parameters);
-            if (service == AiUsageServiceIds.Codex) throw new InvalidOperationException("codex_sign_out_unsupported");
+            if (!AiUsageServiceIds.SignIn.Contains(service, StringComparer.Ordinal)) throw new InvalidOperationException("ai_usage_sign_out_unsupported");
             await usage.SignOutAsync(service, token);
             return BuildAiUsageState();
         });

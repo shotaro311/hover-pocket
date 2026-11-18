@@ -48,8 +48,8 @@ export function createAiUsageSettings(root, request, on) {
       "パネルの「AI Usage」に、5時間・1週間・モデル別（ClaudeのFableなど）の使用率を表示します。表示するサービスを選び、それぞれサインインしてください。",
       "The AI Usage tool shows five-hour, weekly, and model-specific limits (such as Claude's Fable). Choose services and sign in to each.");
     find("privacy").textContent = tx(
-      "Claude・Gemini・MuseはHoverPocketの窓で、Codexは普段のブラウザーでOpenAIのログイン画面からサインインします。パスワードはHoverPocketに渡りません。ログイン状態はこのPCのHoverPocket専用の保存場所に、サービスごとに分けて残ります。使用状況を読むために各サービスのページを画面に出さずに開き、パネルには使用率・リセット時刻・プラン名・枠の名前だけを表示します。",
-      "Claude, Gemini and Muse sign in inside a HoverPocket window; Codex signs in on OpenAI's page in your usual browser. HoverPocket never receives your password. Each session stays in its own HoverPocket-only profile on this PC. To read usage, HoverPocket opens each service's pages off screen, and the panel shows only percentages, reset times, plan names and limit names.");
+      "Claude・Claude Console・Gemini・MuseはHoverPocketの窓で、Codexは普段のブラウザーでOpenAIのログイン画面からサインインします（チャット・音声と共通の1つのログイン）。パスワードはHoverPocketに渡りません。ログイン状態はこのPCのHoverPocket専用の保存場所にサービスごとに残り、ColabだけはGeminiと同じGoogleのログインを使います。使用状況を読むために各サービスのページを画面に出さずに開き、パネルには使用率・リセット時刻・プラン名・枠の名前と、残高・期限・1時間あたりの消費だけを表示します。",
+      "Claude, Claude Console, Gemini and Muse sign in inside a HoverPocket window; Codex signs in on OpenAI's page in your usual browser (one login shared with the chat and voice). HoverPocket never receives your password. Each session stays in its own HoverPocket-only profile on this PC; Colab alone uses Gemini's Google sign-in. To read usage, HoverPocket opens each service's pages off screen, and the panel shows only percentages, reset times, plan and limit names, balances, expiry dates and hourly consumption.");
     const list = find("list");
     list.replaceChildren();
     for (const service of usage?.services ?? []) list.append(row(service));
@@ -80,7 +80,9 @@ export function createAiUsageSettings(root, request, on) {
     const buttons = document.createElement("div");
     buttons.className = "settings-button-row";
     const pending = busy.get(service.id);
-    if (service.signIn === "codex") {
+    if (service.signIn === "shared") {
+      // Colab reads with Gemini's Google sign-in; it has no sign-in of its own.
+    } else if (service.signIn === "codex") {
       if (service.status !== "ok") buttons.append(button(
         pending === "signIn" ? tx("ブラウザでログイン中…", "Signing in in your browser…") : tx("ChatGPTにログイン", "Sign in to ChatGPT"),
         () => act(service.id, "signIn", "aiUsage.signIn"), Boolean(pending)));
@@ -89,7 +91,9 @@ export function createAiUsageSettings(root, request, on) {
         pending === "signIn" ? tx("サインイン画面で続けてください…", "Continue in the sign-in window…")
           : service.status === "ok" ? tx("サインインし直す", "Sign in again") : tx("サインイン", "Sign in"),
         () => act(service.id, "signIn", "aiUsage.signIn"), Boolean(pending)));
-      if (service.status === "ok" || service.status === "error") buttons.append(button(
+      // A shared sign-in (Gemini's Google profile also feeds Colab) can be signed out while either reads.
+      const readsWithThis = (usage?.services ?? []).some((item) => item.sharedWith === service.id && (item.status === "ok" || item.status === "error"));
+      if (service.status === "ok" || service.status === "error" || readsWithThis) buttons.append(button(
         pending === "signOut" ? tx("サインアウト中…", "Signing out…") : tx("サインアウト", "Sign out"),
         () => act(service.id, "signOut", "aiUsage.signOut"), Boolean(pending)));
     }
@@ -109,7 +113,9 @@ export function createAiUsageSettings(root, request, on) {
     if (service.refreshing) return tx("確認中…", "Checking…");
     switch (service.status) {
       case "ok": return [tx("サインイン済み", "Signed in"), service.plan].filter(Boolean).join(" · ");
-      case "signedOut": return tx("未サインイン", "Not signed in");
+      case "signedOut": return service.signIn === "shared"
+        ? tx("未サインイン（Geminiでサインインしてください）", "Not signed in (sign in to Gemini)")
+        : tx("未サインイン", "Not signed in");
       case "error": return tx("読み込みエラー（パネルに理由を表示）", "Read error (details in the panel)");
       default: return tx("未確認", "Not checked yet");
     }
@@ -117,8 +123,10 @@ export function createAiUsageSettings(root, request, on) {
 
   function serviceHint(id) {
     switch (id) {
-      case "codex": return tx("チャットと同じChatGPTのログインを使います。", "Uses the same ChatGPT login as the chat.");
-      case "gemini": return tx("Googleアカウントでgemini.google.comにサインインします。", "Sign in to gemini.google.com with your Google account.");
+      case "codex": return tx("チャット・音声と同じ1つのChatGPTログインを使います。", "Uses the one ChatGPT login shared with the chat and voice.");
+      case "gemini": return tx("Googleアカウントでgemini.google.comにサインインします。Colabもこのサインインを使います。", "Sign in to gemini.google.com with your Google account. Colab uses this sign-in too.");
+      case "claude-api": return tx("Claude Console（platform.claude.com）にサインインします。Maxプランに毎月付くAPIクレジットは、プランにリンクしたConsoleの組織に付きます。", "Sign in to Claude Console (platform.claude.com). The Max plan's monthly API credits go to the Console organization linked to the plan.");
+      case "colab": return tx("Geminiと同じGoogleアカウントのサインインを使い、Colabのコンピューティング ユニットの残高を表示します。Googleアカウントが複数あるときは、最初にサインインしたアカウントを読みます。", "Uses the Gemini Google sign-in to show Colab compute units. With several Google accounts, the first one signed in is read.");
       case "muse": return tx("muse.aiにサインインします。表示するのは1週間の枠です。", "Sign in to muse.ai. Muse reports a weekly limit.");
       default: return "";
     }

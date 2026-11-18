@@ -51,9 +51,9 @@ internal static class AiUsageCodexReader
 }
 
 /// <summary>
-/// Reads Claude, Gemini and Muse usage inside each site's origin through <see cref="AiUsageWebSession"/>.
-/// Only fixed paths are requested and every response is parsed in C#; nothing from these pages
-/// reaches the HoverPocket bridge except the normalized windows.
+/// Reads Claude, Claude Console, Gemini, Colab and Muse inside each site's origin through
+/// <see cref="AiUsageWebSession"/>. Only fixed paths are requested and every response is parsed in C#;
+/// nothing from these pages reaches the HoverPocket bridge except the normalized windows and balances.
 /// A service is "signed out" only when it says so explicitly (401/403 with a JSON error, or Gemini's
 /// null viewer). Challenge pages, redirects and other surprises are errors that keep the last reading.
 /// </summary>
@@ -69,6 +69,7 @@ internal sealed partial class AiUsageWebReader
     public static Uri SignInUri(string service) => service switch
     {
         AiUsageServiceIds.Claude => new Uri("https://claude.ai/login"),
+        AiUsageServiceIds.ClaudeApi => new Uri("https://platform.claude.com/login"),
         // Straight to the Google account chooser; it returns to the usage page after sign-in.
         AiUsageServiceIds.Gemini => new Uri("https://accounts.google.com/ServiceLogin?continue=https%3A%2F%2Fgemini.google.com%2Fusage"),
         AiUsageServiceIds.Muse => new Uri("https://muse.ai/"),
@@ -83,7 +84,7 @@ internal sealed partial class AiUsageWebReader
         if (host is "accounts.google.com" or "appleid.apple.com" or "login.microsoftonline.com" or "login.live.com") return true;
         return service switch
         {
-            AiUsageServiceIds.Claude => Under(host, "claude.ai") || Under(host, "anthropic.com") || Under(host, "claude.com"),
+            AiUsageServiceIds.Claude or AiUsageServiceIds.ClaudeApi => Under(host, "claude.ai") || Under(host, "anthropic.com") || Under(host, "claude.com"),
             AiUsageServiceIds.Gemini => Under(host, "google.com") || Under(host, "gemini.google.com"),
             AiUsageServiceIds.Muse => Under(host, "muse.ai"),
             _ => false
@@ -97,7 +98,9 @@ internal sealed partial class AiUsageWebReader
             return service switch
             {
                 AiUsageServiceIds.Claude => await ReadClaudeAsync(session, cancellationToken),
+                AiUsageServiceIds.ClaudeApi => await ReadClaudeApiAsync(session, cancellationToken),
                 AiUsageServiceIds.Gemini => await ReadGeminiAsync(session, cancellationToken),
+                AiUsageServiceIds.Colab => await ReadColabAsync(session, cancellationToken),
                 AiUsageServiceIds.Muse => await ReadMuseAsync(session, cancellationToken),
                 _ => AiUsageResult.Failure(AiUsageErrorCodes.Unavailable)
             };
@@ -138,6 +141,41 @@ internal sealed partial class AiUsageWebReader
         if (Classify(usage) is { } late) return late;
         using var usageDocument = JsonDocument.Parse(usage.Body);
         return AiUsageResult.Success(AiUsageParsers.ParseClaude(usageDocument.RootElement, organization.Plan));
+    }
+
+    /// <summary>
+    /// Claude Console (platform.claude.com) has its own sign-in, separate from claude.ai; the plan's
+    /// monthly API credits are granted to the Console organization linked to the plan.
+    /// </summary>
+    private static async Task<AiUsageResult> ReadClaudeApiAsync(AiUsageWebSession session, CancellationToken cancellationToken)
+    {
+        await session.NavigateAsync(new Uri("https://platform.claude.com/robots.txt"), NavigationTimeout, cancellationToken);
+        var organizations = await GetJsonAsync(session, "/api/organizations", cancellationToken);
+        if (Classify(organizations) is { } early) return early;
+        (string? Id, bool Ambiguous) organization;
+        using (var document = JsonDocument.Parse(organizations.Body))
+            organization = AiUsageParsers.SelectClaudeConsoleOrganization(document.RootElement);
+        if (organization.Ambiguous) return AiUsageResult.Failure(AiUsageErrorCodes.Ambiguous);
+        if (organization.Id is null) return AiUsageResult.Failure(AiUsageErrorCodes.Unavailable);
+        var credits = await GetJsonAsync(session, $"/api/organizations/{organization.Id}/prepaid/credits", cancellationToken);
+        // The organization list already proved the session; a refusal here is a billing permission.
+        if (credits.Status is 401 or 403) return AiUsageResult.Failure(AiUsageErrorCodes.NoAccess);
+        if (Classify(credits) is { } late) return late;
+        using var creditsDocument = JsonDocument.Parse(credits.Body);
+        return AiUsageResult.Success(AiUsageParsers.ParseClaudeConsoleCredits(creditsDocument.RootElement));
+    }
+
+    /// <summary>
+    /// Colab compute units, read with the Google sign-in of the Gemini profile. Signed out, Colab answers
+    /// 401 with Google's HTML error page (checked 2026-11-18), so a 401 there means signed out.
+    /// </summary>
+    private static async Task<AiUsageResult> ReadColabAsync(AiUsageWebSession session, CancellationToken cancellationToken)
+    {
+        await session.NavigateAsync(new Uri("https://colab.research.google.com/robots.txt"), NavigationTimeout, cancellationToken);
+        var response = await GetJsonAsync(session, "/tun/m/ccu-info?authuser=0", cancellationToken);
+        if (response.Status == 401 && !response.Truncated) return AiUsageResult.SignedOut();
+        if (Classify(response) is { } early) return early;
+        return AiUsageResult.Success(AiUsageParsers.ParseColab(response.Body));
     }
 
     /// <summary>

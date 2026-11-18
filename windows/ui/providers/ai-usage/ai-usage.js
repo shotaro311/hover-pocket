@@ -1,6 +1,6 @@
 import { on } from "../../js/bridge.js";
 
-const SERVICE_MARKS = { codex: "Cx", claude: "Cl", gemini: "Ge", muse: "Mu" };
+const SERVICE_MARKS = { codex: "Cx", claude: "Cl", "claude-api": "CA", gemini: "Ge", colab: "Co", muse: "Mu" };
 
 /**
  * Lists each AI service's usage windows (five-hour, weekly, model-scoped weekly) as bars.
@@ -73,9 +73,12 @@ export function renderAiUsageProvider({ container, state, request }) {
     article.append(head);
 
     if (service.status === "signedOut") {
+      const shared = (usage?.services ?? []).find((item) => item.id === service.sharedWith)?.name;
       const body = message(service.signIn === "codex"
         ? tx("ChatGPTにログインしていません。", "Not signed in to ChatGPT.")
-        : tx("サインインしていません。", "Not signed in."));
+        : shared
+          ? tx(`${shared}のサインインを使います。サインインしていません。`, `Uses the ${shared} sign-in, which is signed out.`)
+          : tx("サインインしていません。", "Not signed in."));
       body.append(settingsButton(tx("設定でサインイン", "Sign in from Settings")));
       article.append(body);
       return article;
@@ -91,12 +94,23 @@ export function renderAiUsageProvider({ container, state, request }) {
       article.append(list);
     }
 
+    const balances = service.balances ?? [];
+    if (balances.length > 0) {
+      const list = document.createElement("ul");
+      list.className = "hp-usage-rows hp-usage-balances";
+      for (const balance of balances) {
+        const item = balanceRow(balance, service.stale);
+        if (item) list.append(item);
+      }
+      article.append(list);
+    }
+
     if (service.status === "error") {
       const error = document.createElement("p");
       error.className = "hp-usage-error";
       error.textContent = (service.stale ? tx("前回の値を表示中。", "Showing the last reading. ") : "") + errorText(service.errorCode);
       article.append(error);
-    } else if (service.windows.length === 0) {
+    } else if (service.windows.length === 0 && balances.length === 0) {
       article.append(message(service.refreshing || service.status === "idle"
         ? tx("読み込み中…", "Loading…")
         : tx("表示できる枠がありません。", "No usage windows reported.")));
@@ -148,6 +162,88 @@ export function renderAiUsageProvider({ container, state, request }) {
     return item;
   }
 
+  /** A balance (credits or compute units) has no limit, so it is shown as an amount, not a bar. */
+  function balanceRow(balance, stale) {
+    const amount = typeof balance.amount === "number" ? balance.amount : NaN;
+    if (!balance.state && (!Number.isFinite(amount) || amount < 0)) return null;
+    const item = document.createElement("li");
+    item.className = "hp-usage-row hp-usage-balance";
+    item.dataset.kind = balance.kind ?? "";
+    item.dataset.balance = JSON.stringify(balance);
+    if (stale) item.classList.add("is-stale");
+    if (balance.state === "unreadable") item.dataset.level = "warn";
+    const top = document.createElement("div");
+    top.className = "hp-usage-row-top";
+    const label = document.createElement("span");
+    label.className = "hp-usage-label";
+    label.textContent = balanceLabel(balance);
+    const value = document.createElement("span");
+    value.className = "hp-usage-value";
+    value.textContent = balance.state === "unlimited" ? tx("無制限", "Unlimited")
+      : balance.state === "unreadable" ? tx("読み取れません", "Unreadable")
+      : formatAmount(amount, balance.unit);
+    top.append(label, value);
+    const detail = document.createElement("div");
+    detail.className = "hp-usage-reset";
+    item.append(top, detail);
+    updateBalance(item);
+    return item;
+  }
+
+  function updateBalance(item) {
+    const balance = JSON.parse(item.dataset.balance);
+    const detail = item.querySelector(".hp-usage-reset");
+    detail.textContent = balance.state ? "" : balanceDetail(balance, balance.amount);
+    detail.hidden = detail.textContent === "";
+  }
+
+  function balanceLabel(balance) {
+    switch (balance.kind) {
+      case "planCredit": return balance.label || tx("プラン特典のクレジット", "Plan credits");
+      case "purchasedCredit": return tx("購入したクレジット", "Purchased credits");
+      case "codexCredits": return tx("Codexクレジット", "Codex credits");
+      case "computeUnits": return tx("コンピューティング ユニット", "Compute units");
+      default: return balance.label || tx("残高", "Balance");
+    }
+  }
+
+  // A positive amount below the shown precision reads "<0.1" or "<$0.01", never zero.
+  function formatAmount(amount, unit) {
+    const locale = english ? "en-US" : "ja-JP";
+    if (unit === "usd") {
+      if (amount > 0 && amount < 0.01) return "<$0.01";
+      return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(amount);
+    }
+    if (unit === "units") {
+      if (amount > 0 && amount < 0.1) return "<0.1";
+      return new Intl.NumberFormat(locale, { minimumFractionDigits: 1, maximumFractionDigits: 1 }).format(amount);
+    }
+    if (amount > 0 && amount < 0.01) return "<0.01";
+    return new Intl.NumberFormat(locale, { maximumFractionDigits: 2 }).format(amount);
+  }
+
+  function formatRate(perHour) {
+    if (perHour > 0 && perHour < 0.01) return "<0.01";
+    return new Intl.NumberFormat(english ? "en-US" : "ja-JP", { maximumFractionDigits: 2 }).format(perHour);
+  }
+
+  function balanceDetail(balance, amount) {
+    if (balance.unit === "units") {
+      const perHour = typeof balance.perHour === "number" && Number.isFinite(balance.perHour) ? balance.perHour : null;
+      if (perHour === null) return tx("消費量は不明", "Rate unknown");
+      if (perHour === 0) return tx("いまは消費していません", "Not consuming now");
+      const hours = Math.floor(amount / perHour);
+      return tx(`消費 ${formatRate(perHour)}/時間 · 約${hours}時間分`, `${formatRate(perHour)}/hour · about ${hours} hours left`);
+    }
+    const expires = balance.expiresAt ? Date.parse(balance.expiresAt) : NaN;
+    if (Number.isNaN(expires)) return "";
+    const formatted = new Intl.DateTimeFormat(english ? "en-US" : "ja-JP", { month: "numeric", day: "numeric", weekday: "short" }).format(new Date(expires));
+    const remaining = expires - Date.now();
+    if (remaining <= 0) return tx(`${formatted}に失効`, `Expired ${formatted}`);
+    const days = Math.ceil(remaining / 86_400_000);
+    return tx(`${formatted}まで（あと${days}日）`, `Until ${formatted} (${days} days)`);
+  }
+
   function updateTimes(item) {
     const limit = { kind: item.dataset.kind, windowMinutes: Number(item.dataset.minutes) || null, resetsAt: item.dataset.resetsAt || null };
     const elapsed = elapsedPercent(limit);
@@ -161,7 +257,9 @@ export function renderAiUsageProvider({ container, state, request }) {
   }
 
   function tick() {
-    if (!disposed) root.querySelectorAll(".hp-usage-row").forEach(updateTimes);
+    if (disposed) return;
+    root.querySelectorAll(".hp-usage-row:not(.hp-usage-balance)").forEach(updateTimes);
+    root.querySelectorAll(".hp-usage-balance").forEach(updateBalance);
   }
 
   function windowLabel(limit) {
@@ -228,6 +326,8 @@ export function renderAiUsageProvider({ container, state, request }) {
       case "timeout": return tx("時間内に応答がありませんでした。", "The service did not respond in time.");
       case "blocked": return tx("確認画面で止まりました。設定のサインイン画面を開き直してください。", "Stopped at a verification page. Open the sign-in window in Settings again.");
       case "unavailable": return tx("いまは取得できません。少し待って更新してください。", "Usage is unavailable right now. Try again later.");
+      case "noAccess": return tx("このアカウントでは請求情報を見る権限がありません。", "This account cannot view billing.");
+      case "ambiguous": return tx("Consoleの組織が複数あり、どれかを特定できません。", "Several Console organizations; cannot tell which one.");
       default: return tx("接続できませんでした。", "Could not connect.");
     }
   }

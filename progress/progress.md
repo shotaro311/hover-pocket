@@ -5,6 +5,11 @@ updated_by: claude
 status: production-macos-0.2.17; production-windows-0.2.18
 ---
 
+## 2026-11-18 AI Usageの残高追加とチャットのログイン表示（次の版、未配信）
+
+- AI UsageにClaude Console のAPIクレジット（プラン特典と購入分）、Codexのクレジット、Colabのコンピューティング ユニットを追加し、6サービスにした。Claude APIは別のサインイン、ColabはGeminiのGoogleのサインインを使う。チャットはどこでChatGPTにログインしても「ログインが必要です」がすぐ消えるように直した。
+- Codex（Astra / high）のレビューを2回行い指摘をすべて直した（共通ルール上は「レビュー未完了」、2回目のあとの修正は未確認）。`--verify ai-usage` 136項目とチャットの検証が合格。OpenAIのAPIクレジットは試験の結果（隠れたWebView2ではログイン画面に戻り、開くだけで計測用の送信が起きる）で対象外とした。Codexのレビューと配信は未実施、未コミット。[作業記録](2026-11/2026-11-18_hover-pocket-ai-usage-balances.md)。
+
 ## 2026-11-18 Windows 0.2.18 本番配信
 
 - AI Usageを含む `d0a088b` をmainへpushし、Windows CIが成功（最初の `0934780` は契約チェックの目印とぶつかって失敗し、分岐を部分クラスへ移して直した）。[Windows 0.2.18](https://github.com/shotaro311/hover-pocket/releases/tag/win-v0.2.18) を `--latest=false` で公開し、8配布物の一致と公開物の99項目検査に合格。macOSは不変。
