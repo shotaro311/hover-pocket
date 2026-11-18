@@ -57,3 +57,12 @@ ssh mac "cat /Users/shotaro/code/share/hover-menu-preview/.build/ai-usage-verifi
 差分ファイルには追跡済みの変更と `??` の新規ファイルを含めた。
 
 共通仕様と参照実装の経緯は [Windowsパネル](2026-11-18_hover-pocket-ai-usage-panel.md) と [Windows残高](2026-11-18_hover-pocket-ai-usage-balances.md) に記載されている。
+
+## macOS 0.2.18（771）の公開とこのMacの更新
+
+- `65ede677eb8556207a5441ae0342841bd0d758ed` からDeveloper IDとHardened Runtimeで署名した。Apple Developerの契約同意が画面に反映され、`notarytool history` が成功した後に提出した。公証 `2854aea0-fa37-481f-ae2b-3c6708271dab` は `Accepted`。stapleとGatekeeper評価に合格した。
+- [macOS 0.2.18（771）](https://github.com/shotaro311/hover-pocket/releases/tag/v0.2.18-771)を公開し、タグが上記コミットを指すことを確認した。GitHubのLatestと[macOS更新フィード](https://github.com/shotaro311/hover-pocket/releases/download/macos-latest/appcast.xml)を771へ更新した。配信スクリプトの終了コード2はアップロード後の一時ファイル処理による。版付きReleaseの4ファイルと更新フィード側の2ファイルが公開されたことはGitHubから取得して確認した。
+- 公開前と公開後の読み戻しは各99項目が合格。公開ZIPは35,004,643バイト、SHA-256は `26af73373c55413fb7d99ee4ac476908dcbd9a4923f3580f309fea98d46db7ce`。独立取得した公開ZIPでDeveloper ID署名、staple、Gatekeeperを確認し、SparkleのEdDSA署名とbuild 771を照合した。Windows 0.2.19の全8ファイルの名前・サイズ・SHA-256と、`releases.win.json`・`RELEASES` のバイトが公開前と一致した。
+- 更新前に0.2.17（683）一式と利用者データを退避した。素材DBはSQLite Backup APIで保存し、整合性と外部キーを検査した。公開ZIPから更新し、PID `70567` から `7838` に切り替わったこと、AppKitイベントループの稼働、本体と同梱helperを含む全バンドルのファイルが公開物と一致することを確認した。
+- 素材DBの論理内容と原本65点、会話履歴、画像クリップボード20件のIDと内容は一致した。テキストクリップボード30件のうち29件はID・内容・順序が一致し、先頭1件は起動時に現在のクリップボードと同じ既存文字列を再取得したためIDと時刻だけが更新された。設定49項目のうち変更はSparkleの `SULastCheckTime` のみ。SQLiteのWAL/SHMと起動時の日次スナップショットの生成は通常動作で、新しい日次スナップショットの整合性と内容の一致も確認した。
+- [Verify macOS Capabilities](https://github.com/shotaro311/hover-pocket/actions/runs/44302391033)はパネルの100回開閉を含めて成功。[Verify Pocket Contracts](https://github.com/shotaro311/hover-pocket/actions/runs/44302391055)はUbuntuとWindowsが成功し、macOSジョブはGitHub Actionsの `macos-14-arm64-us-default` が提供対象外のため実行前に取り消された。既存の未解決事項として残す。実アカウントでのAI Usage受入は未実施。

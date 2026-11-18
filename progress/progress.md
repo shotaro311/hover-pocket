@@ -2,13 +2,18 @@
 project_slug: hover-menu-preview
 updated: 2026-11-18
 updated_by: codex
-status: production-macos-0.2.17; production-windows-0.2.19
+status: production-macos-0.2.18; production-windows-0.2.19
 ---
+
+## 2026-11-18 macOS 0.2.18 本番配信
+
+- AI Usageを含む `65ede67` からDeveloper ID署名・Apple公証・stapleを行い、[macOS 0.2.18（771）](https://github.com/shotaro311/hover-pocket/releases/tag/v0.2.18-771)を公開した。公開後の読み戻し99項目に合格し、Windows 0.2.19の全配布物とフィードの一致を確認した。
+- このMacを公開ZIPから更新し、新しいPIDで稼働を確認した。素材DBと原本、会話、設定、クリップボードを照合した。クリップボードの同じ文字列1件は再起動でIDと時刻が更新された。詳細は[macOSの作業記録](2026-11/2026-11-18_hover-pocket-mac-ai-usage.md)。
 
 ## 2026-11-18 macOSのAI Usage
 
 - Windows 0.2.19と同じ6サービスの使用率・残高をパネルに表示し、設定の「AI」から表示とサインインを管理できるようにした。共通ChatGPTログイン後にチャットの案内を消し、Codex使用状況を読み直す。作業ブランチは `codex/mac-ai-usage-20261118`。[macOSの作業記録](2026-11/2026-11-18_hover-pocket-mac-ai-usage.md)。
-- レビュー後、Colabの403 HTMLを取得の起点に使えるようにし、サインイン窓のHTTPS制限を最上位に限定した。警告0、AI Usageの回帰検証134項目と既存の設定・パネル・チャット検証に合格。実サイトの匿名検証では5サービスとも初回で `signedOut`。実アカウントでの受入とmacOS配信は未実施。
+- レビュー後、Colabの403 HTMLを取得の起点に使えるようにし、サインイン窓のHTTPS制限を最上位に限定した。警告0、AI Usageの回帰検証134項目と既存の設定・パネル・チャット検証に合格。実サイトの匿名検証では5サービスとも初回で `signedOut`。実アカウントでの受入は未実施。
 
 ## 2026-11-18 Windows 0.2.19 本番配信
 
