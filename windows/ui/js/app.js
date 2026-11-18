@@ -1,6 +1,7 @@
 import { on, request } from "./bridge.js";
 import { chatIcon, createInlineChat } from "./inline-chat.js";
 import { renderAssetsProvider } from "../providers/assets/assets.js";
+import { renderAiUsageProvider } from "../providers/ai-usage/ai-usage.js";
 import { labelForSize, setLanguage, t } from "./i18n.js";
 import { renderCalculatorProvider, runCalculatorUiVerify } from "../providers/calculator/calculator.js";
 import { renderCalendarProvider } from "../providers/calendar/calendar.js";
@@ -12,6 +13,7 @@ import { renderPocketSurfaceProvider, runPocketSurfaceUiVerify } from "../provid
 
 const providerRenderers = {
   assets: renderAssetsProvider,
+  "ai-usage": renderAiUsageProvider,
   controls: renderControlsProvider,
   calculator: renderCalculatorProvider,
   calendar: renderCalendarProvider,
@@ -361,7 +363,7 @@ function renderProvider(state, options, providerWillRemount) {
   const providerKey = providerRenderKey(state);
   if (!providerWillRemount) {
     if (options.refreshProvider) {
-      void providerRefresh?.();
+      void providerRefresh?.({ panelOpened: true });
     }
     return;
   }
@@ -389,7 +391,7 @@ function renderProvider(state, options, providerWillRemount) {
         ? () => lifecycle.dispose()
         : null;
     providerRefresh = typeof lifecycle?.refresh === "function"
-      ? () => lifecycle.refresh()
+      ? (refreshOptions) => lifecycle.refresh(refreshOptions)
       : null;
     providerStateFlush = typeof lifecycle?.flushPendingState === "function"
       ? () => lifecycle.flushPendingState()
@@ -1429,6 +1431,7 @@ function iconSvg(name) {
     clipboard: '<svg viewBox="0 0 24 24" fill="none" stroke-width="1.8"><path d="M9 4h6l1 2h2v15H6V6h2z"/><path d="M9 4h6v4H9zM9 12h6M9 16h4"/></svg>',
     timer: '<svg viewBox="0 0 24 24" fill="none" stroke-width="1.8"><path d="M10 2h4M12 14l3-3"/><circle cx="12" cy="13" r="8"/></svg>',
     assets: '<svg viewBox="0 0 24 24" fill="none" stroke-width="1.8"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="8" cy="8" r="2"/><path d="m3 18 6-6 4 4 4-5 4 7"/></svg>',
+    gauge: '<svg viewBox="0 0 24 24" fill="none" stroke-width="1.8"><path d="M4 17a8 8 0 1 1 16 0"/><path d="M12 17l4-5"/><path d="M7 17h.01M17 17h.01M12 9v.01"/></svg>',
     target: '<svg viewBox="0 0 24 24" fill="none" stroke-width="1.8"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="4"/><path d="M12 2v3M22 12h-3M12 22v-3M2 12h3"/></svg>',
     note: '<svg viewBox="0 0 24 24" fill="none" stroke-width="1.8"><path d="M6 3h9l3 3v15H6z"/><path d="M14 3v4h4M9 11h6M9 15h4"/></svg>',
     refresh: '<svg viewBox="0 0 24 24" fill="none" stroke-width="1.8"><path d="M20 12a8 8 0 1 1-2.3-5.6"/><path d="M20 4v6h-6"/></svg>',

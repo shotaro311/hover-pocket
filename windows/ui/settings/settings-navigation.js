@@ -54,7 +54,10 @@ export function createSettingsNavigation(request) {
     catch { document.querySelector("[data-capture-status]").textContent = english ? "Capture settings are unavailable." : "撮影の設定を開けませんでした。"; }
     finally { document.querySelector("[data-capture-settings]").disabled = false; }
   };
-  return { render(language) {
+  return { select(id) {
+    if (!categories.some((entry) => entry[0] === id)) return;
+    category = id; search.value = ""; paint(); document.querySelector(".settings-content").scrollTop = 0;
+  }, render(language) {
     english = language === "en";
     document.querySelector("[data-settings-label]").textContent = english ? "Settings" : "設定";
     nav.setAttribute("aria-label", english ? "Settings categories" : "設定カテゴリ");

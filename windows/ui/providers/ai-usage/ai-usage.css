@@ -1,0 +1,192 @@
+.hp-usage {
+  height: 100%;
+  overflow: auto;
+  scrollbar-width: none;
+}
+
+.hp-usage::-webkit-scrollbar {
+  display: none;
+}
+
+.hp-usage-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr));
+  align-content: start;
+  gap: 8px;
+}
+
+.hp-usage-card {
+  position: relative;
+  min-width: 0;
+  padding: 10px 12px 11px;
+  border: 1px solid var(--hp-line);
+  border-radius: 8px;
+  background: linear-gradient(145deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.022));
+}
+
+.hp-usage-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  margin-bottom: 8px;
+}
+
+.hp-usage-mark {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.07);
+  color: var(--hp-muted);
+  font-size: calc(10px * var(--hp-text-scale));
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.hp-usage-card[data-service="codex"] .hp-usage-mark { color: #9fd8ff; }
+.hp-usage-card[data-service="claude"] .hp-usage-mark { color: #f2b08a; }
+.hp-usage-card[data-service="gemini"] .hp-usage-mark { color: #a8b8ff; }
+.hp-usage-card[data-service="muse"] .hp-usage-mark { color: #e6b3f0; }
+
+.hp-usage-name {
+  margin: 0;
+  font-size: calc(13px * var(--hp-text-scale));
+  font-weight: 650;
+}
+
+.hp-usage-plan {
+  min-width: 0;
+  max-width: 40%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding: 1px 7px;
+  border: 1px solid var(--hp-line-strong);
+  border-radius: 999px;
+  color: var(--hp-muted);
+  font-size: calc(10.5px * var(--hp-text-scale));
+  white-space: nowrap;
+}
+
+.hp-usage-meta {
+  margin-left: auto;
+  overflow: hidden;
+  color: var(--hp-dim);
+  font-size: calc(10.5px * var(--hp-text-scale));
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hp-usage-meta.is-warning {
+  color: #f5c35b;
+}
+
+.hp-usage-rows {
+  display: grid;
+  gap: 9px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.hp-usage-row-top {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.hp-usage-label {
+  overflow: hidden;
+  color: var(--hp-text);
+  font-size: calc(11.5px * var(--hp-text-scale));
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hp-usage-value {
+  flex: none;
+  font-size: calc(13px * var(--hp-text-scale));
+  font-variant-numeric: tabular-nums;
+  font-weight: 650;
+}
+
+.hp-usage-bar {
+  position: relative;
+  height: 6px;
+  overflow: visible;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.hp-usage-fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  min-width: 2px;
+  border-radius: inherit;
+  background: var(--hp-accent);
+  transition: width 0.3s ease;
+}
+
+.hp-usage-row[data-level="warn"] .hp-usage-fill { background: #f5c35b; }
+.hp-usage-row[data-level="high"] .hp-usage-fill { background: var(--hp-danger); }
+.hp-usage-row[data-level="warn"] .hp-usage-value { color: #f5c35b; }
+.hp-usage-row[data-level="high"] .hp-usage-value { color: var(--hp-danger); }
+.hp-usage-row.is-stale .hp-usage-fill { opacity: 0.45; }
+
+.hp-usage-pace[hidden] {
+  display: none;
+}
+
+.hp-usage-pace {
+  position: absolute;
+  top: -3px;
+  bottom: -3px;
+  width: 2px;
+  margin-left: -1px;
+  border-radius: 1px;
+  background: rgba(255, 255, 255, 0.62);
+}
+
+.hp-usage-reset {
+  margin-top: 4px;
+  color: var(--hp-dim);
+  font-size: calc(10.5px * var(--hp-text-scale));
+  font-variant-numeric: tabular-nums;
+}
+
+.hp-usage-message {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 10px;
+  color: var(--hp-muted);
+  font-size: calc(11.5px * var(--hp-text-scale));
+}
+
+.hp-usage-message p {
+  margin: 0;
+}
+
+.hp-usage-error {
+  margin: 8px 0 0;
+  color: #f5c35b;
+  font-size: calc(11px * var(--hp-text-scale));
+}
+
+.hp-usage-action {
+  padding: 4px 10px;
+  border: 1px solid var(--hp-line-strong);
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--hp-text);
+  font-size: calc(11px * var(--hp-text-scale));
+  cursor: pointer;
+}
+
+.hp-usage-action:hover {
+  background: rgba(255, 255, 255, 0.1);
+}

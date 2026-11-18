@@ -182,6 +182,10 @@ internal sealed class UserSettingsStore
         if (settings.PanelWidthDips is { } width) settings.PanelWidthDips = double.IsFinite(width) ? Math.Clamp(width, resizeLimits.MinWidth, resizeLimits.MaxWidth) : null;
         if (settings.PanelHeightDips is { } height) settings.PanelHeightDips = double.IsFinite(height) ? Math.Max(resizeLimits.MinHeight, height) : null;
         settings.Shortcuts ??= new UserSettings().Shortcuts;
+        settings.AiUsageHiddenServices = (settings.AiUsageHiddenServices ?? [])
+            .Where(Providers.AiUsage.AiUsageServiceIds.IsKnown)
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
         var known = providerIds.ToHashSet(StringComparer.OrdinalIgnoreCase);
         var order = settings.ProviderOrder
             .Where(id => known.Contains(id))

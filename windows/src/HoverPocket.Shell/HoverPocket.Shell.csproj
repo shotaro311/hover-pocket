@@ -13,7 +13,7 @@
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
     <StartupObject>HoverPocket.Shell.Program</StartupObject>
-    <Version>0.2.17</Version>
+    <Version>0.2.18</Version>
     <NoWarn>$(NoWarn);WFO0003</NoWarn>
     <GoogleOAuthClientId Condition="'$(GoogleOAuthClientId)' == ''"></GoogleOAuthClientId>
     <GoogleOAuthClientSecret Condition="'$(GoogleOAuthClientSecret)' == ''"></GoogleOAuthClientSecret>
@@ -58,6 +58,7 @@
   <ItemGroup>
     <Content Include="../../../artifacts/media-tools-windows/*" Link="MediaTools/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <Content Include="..\..\Resources\ThirdParty\NAudio-LICENSE.txt" Link="ThirdParty\NAudio-LICENSE.txt" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="..\..\Resources\ThirdParty\CodexBar-LICENSE.txt" Link="ThirdParty\CodexBar-LICENSE.txt" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="..\..\ui\**\*">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       <Link>ui\%(RecursiveDir)%(Filename)%(Extension)</Link>

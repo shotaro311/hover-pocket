@@ -1,0 +1,142 @@
+/**
+ * Settings › AI › AI usage: which services the panel shows and the sign-in for each.
+ * Claude, Gemini and Muse open a HoverPocket sign-in window; Codex reuses the chat's ChatGPT login.
+ */
+export function createAiUsageSettings(root, request, on) {
+  let usage = null;
+  let english = false;
+  const busy = new Map();
+  root.innerHTML = `<h2 data-title></h2><p class="settings-note" data-note></p><div class="ai-usage-settings-list" data-list></div><p class="settings-note" data-privacy></p><p class="settings-status" role="status" data-status></p>`;
+  const find = (name) => root.querySelector(`[data-${name}]`);
+  const tx = (ja, en) => (english ? en : ja);
+
+  on("aiUsage.changed", (payload) => { usage = payload; paint(); });
+  // Show the last known state at once, but contact the services only while this section is on screen
+  // (Settings shows one category at a time by toggling `hidden`).
+  void load(false);
+  new MutationObserver(() => { if (!root.hidden) void load(true); }).observe(root, { attributes: true, attributeFilter: ["hidden"] });
+
+  async function load(refresh) {
+    try {
+      usage = await request("aiUsage.getState", refresh ? { refresh: true } : undefined);
+      paint();
+    } catch {
+      find("status").textContent = tx("AI使用状況を読み込めませんでした。", "Could not load AI usage.");
+    }
+  }
+
+  async function act(service, kind, method, params) {
+    if (busy.has(service)) return;
+    busy.set(service, kind);
+    find("status").textContent = "";
+    paint();
+    try {
+      usage = await request(method, { service, ...params });
+    } catch {
+      find("status").textContent = kind === "signIn"
+        ? tx("サインインを完了できませんでした。もう一度お試しください。", "Sign-in did not finish. Please try again.")
+        : tx("変更を保存できませんでした。", "Could not save the change.");
+    } finally {
+      busy.delete(service);
+      paint();
+    }
+  }
+
+  function paint() {
+    find("title").textContent = tx("AI使用状況", "AI usage");
+    find("note").textContent = tx(
+      "パネルの「AI Usage」に、5時間・1週間・モデル別（ClaudeのFableなど）の使用率を表示します。表示するサービスを選び、それぞれサインインしてください。",
+      "The AI Usage tool shows five-hour, weekly, and model-specific limits (such as Claude's Fable). Choose services and sign in to each.");
+    find("privacy").textContent = tx(
+      "Claude・Gemini・MuseはHoverPocketの窓で、Codexは普段のブラウザーでOpenAIのログイン画面からサインインします。パスワードはHoverPocketに渡りません。ログイン状態はこのPCのHoverPocket専用の保存場所に、サービスごとに分けて残ります。使用状況を読むために各サービスのページを画面に出さずに開き、パネルには使用率・リセット時刻・プラン名・枠の名前だけを表示します。",
+      "Claude, Gemini and Muse sign in inside a HoverPocket window; Codex signs in on OpenAI's page in your usual browser. HoverPocket never receives your password. Each session stays in its own HoverPocket-only profile on this PC. To read usage, HoverPocket opens each service's pages off screen, and the panel shows only percentages, reset times, plan names and limit names.");
+    const list = find("list");
+    list.replaceChildren();
+    for (const service of usage?.services ?? []) list.append(row(service));
+  }
+
+  function row(service) {
+    const item = document.createElement("div");
+    item.className = "ai-usage-settings-row";
+    item.dataset.service = service.id;
+
+    const toggle = document.createElement("label");
+    toggle.className = "toggle-row";
+    const name = document.createElement("span");
+    name.className = "provider-title";
+    name.textContent = service.name;
+    const visible = document.createElement("input");
+    visible.type = "checkbox";
+    visible.checked = service.visible;
+    visible.disabled = busy.has(service.id);
+    visible.setAttribute("aria-label", tx(`${service.name}をパネルに表示`, `Show ${service.name} in the panel`));
+    visible.onchange = () => act(service.id, "visible", "aiUsage.setVisible", { visible: visible.checked });
+    toggle.append(name, visible);
+
+    const status = document.createElement("span");
+    status.className = "settings-status ai-usage-settings-state";
+    status.textContent = statusText(service);
+
+    const buttons = document.createElement("div");
+    buttons.className = "settings-button-row";
+    const pending = busy.get(service.id);
+    if (service.signIn === "codex") {
+      if (service.status !== "ok") buttons.append(button(
+        pending === "signIn" ? tx("ブラウザでログイン中…", "Signing in in your browser…") : tx("ChatGPTにログイン", "Sign in to ChatGPT"),
+        () => act(service.id, "signIn", "aiUsage.signIn"), Boolean(pending)));
+    } else {
+      buttons.append(button(
+        pending === "signIn" ? tx("サインイン画面で続けてください…", "Continue in the sign-in window…")
+          : service.status === "ok" ? tx("サインインし直す", "Sign in again") : tx("サインイン", "Sign in"),
+        () => act(service.id, "signIn", "aiUsage.signIn"), Boolean(pending)));
+      if (service.status === "ok" || service.status === "error") buttons.append(button(
+        pending === "signOut" ? tx("サインアウト中…", "Signing out…") : tx("サインアウト", "Sign out"),
+        () => act(service.id, "signOut", "aiUsage.signOut"), Boolean(pending)));
+    }
+    item.append(toggle, status, buttons);
+
+    const hint = serviceHint(service.id);
+    if (hint) {
+      const note = document.createElement("p");
+      note.className = "settings-note";
+      note.textContent = hint;
+      item.append(note);
+    }
+    return item;
+  }
+
+  function statusText(service) {
+    if (service.refreshing) return tx("確認中…", "Checking…");
+    switch (service.status) {
+      case "ok": return [tx("サインイン済み", "Signed in"), service.plan].filter(Boolean).join(" · ");
+      case "signedOut": return tx("未サインイン", "Not signed in");
+      case "error": return tx("読み込みエラー（パネルに理由を表示）", "Read error (details in the panel)");
+      default: return tx("未確認", "Not checked yet");
+    }
+  }
+
+  function serviceHint(id) {
+    switch (id) {
+      case "codex": return tx("チャットと同じChatGPTのログインを使います。", "Uses the same ChatGPT login as the chat.");
+      case "gemini": return tx("Googleアカウントでgemini.google.comにサインインします。", "Sign in to gemini.google.com with your Google account.");
+      case "muse": return tx("muse.aiにサインインします。表示するのは1週間の枠です。", "Sign in to muse.ai. Muse reports a weekly limit.");
+      default: return "";
+    }
+  }
+
+  function button(text, onClick, disabled) {
+    const node = document.createElement("button");
+    node.type = "button";
+    node.textContent = text;
+    node.disabled = disabled;
+    node.onclick = onClick;
+    return node;
+  }
+
+  return {
+    render(state) {
+      english = state.settings.language === "en";
+      paint();
+    },
+  };
+}

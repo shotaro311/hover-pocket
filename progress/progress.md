@@ -1,9 +1,15 @@
 ---
 project_slug: hover-menu-preview
-updated: 2026-11-15
+updated: 2026-11-18
 updated_by: claude
 status: production-macos-0.2.17; production-windows-0.2.17
 ---
+
+## 2026-11-18 Windows版 AI使用状況パネル
+
+- 新しいツール「AI Usage」を追加し、Codex・Claude・Gemini・Museの5時間枠・1週間枠・モデル別の枠（ClaudeのFable）を並べた。サインインは設定のAIで行い、Codexはチャットと同じChatGPTログイン、ほかの3つはHoverPocket専用のブラウザー保存場所で本人がサインインする。取得方法は[CodexBar](https://github.com/steipete/CodexBar)（MIT）を参考にした。
+- ビルド警告0、`--verify ai-usage` 65項目と既存の検証8種類が合格。本人がHoverPocketのサインイン窓でClaude・Gemini（Google）・Museにサインインし、CodexはChatGPTログインを行い、4つとも実データを読めた（Museは置き場所の変更に合わせて直した）。本番アプリのチャット用ログインは無効のため、配信後に設定で一度ログインが要る。
+- Codex（Astra / high）の読み取り専用レビューを2回行い、指摘（2回目の重大1件を含む）をすべて直した。共通ルール上は2回目で指摘が残ったため「レビュー未完了」で、2回目のあとの修正は未確認。最終の検証は `--verify ai-usage` 92項目と既存5種類が合格。サービス別プロファイルで本人が再サインインし、4サービスとも実データを読めた。3回目のレビューの要否の判断、配信、macOS版は未実施。未コミット。[実装と検証の記録](2026-11/2026-11-18_hover-pocket-ai-usage-panel.md)。
 
 ## 2026-11-16 Windows 0.2.17 本番配信
 

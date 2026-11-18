@@ -32,5 +32,6 @@
 - Google Calendar API（OAuth）: カレンダー。
 - Open-Meteo: 天気予報。
 - Syncthingと公開中継 `mailbox.mw.leastauthority.com`（magic-wormhole）: 素材ライブラリの端末間同期とコード接続。
-- Codex（ChatGPTアカウントでのログイン）: パネル内チャットと自作ツールの生成。
+- Codex（ChatGPTアカウントでのログイン）: パネル内チャットと自作ツールの生成。Windowsでは利用枠の読み取りにも使う。
+- claude.ai、gemini.google.com、muse.ai: Windowsの「AI Usage」で、本人がサインインした各サービスの使用率を読み取る（読み取りのみ）。
 - 公開サイトの配信設定: `wrangler.jsonc`（Cloudflare）と `.github/workflows/pages.yml`。

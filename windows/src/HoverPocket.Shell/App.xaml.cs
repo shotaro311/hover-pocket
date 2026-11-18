@@ -128,6 +128,13 @@ public partial class App : System.Windows.Application
             return;
         }
 
+        if (options.AiUsageVerifyMode is { } aiUsageMode)
+        {
+            VerifyConsole.AttachParent();
+            _ = RunAiUsageVerificationAsync(aiUsageMode == "live");
+            return;
+        }
+
         if (options.VerifyCalc || options.VerifyTimer || options.VerifyCalendar)
         {
             VerifyConsole.AttachParent();
@@ -342,6 +349,14 @@ public partial class App : System.Windows.Application
         {
             Environment.ExitCode = 1;
         }
+    }
+
+    private async Task RunAiUsageVerificationAsync(bool live)
+    {
+        Environment.ExitCode = live
+            ? await Providers.AiUsage.AiUsageVerifier.RunLiveAsync(VerifyConsole.WriteLine)
+            : await new Providers.AiUsage.AiUsageVerifier().RunAsync(VerifyConsole.WriteLine);
+        Shutdown();
     }
 
     private async Task RunWeatherVerificationAsync()

@@ -60,7 +60,13 @@ internal sealed class ProviderRegistry
                 "Timer",
                 "timer",
                 "Timer and Pomodoro",
-                "Run up to two timers, pin up to four presets, pause, resume, stop, and restore state.")
+                "Run up to two timers, pin up to four presets, pause, resume, stop, and restore state."),
+            new ProviderDescriptor(
+                "ai-usage",
+                "AI Usage",
+                "gauge",
+                "Codex, Claude, Gemini, and Muse limits",
+                "See the five-hour, weekly, and model-specific usage limits of each signed-in AI service.")
         ]);
     }
 

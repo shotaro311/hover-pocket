@@ -72,6 +72,8 @@ internal sealed class UserSettings
 
     public Dictionary<string, bool> ProviderVisibility { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 
+    public List<string> AiUsageHiddenServices { get; set; } = [];
+
     public UserSettings Clone()
     {
         return new UserSettings
@@ -105,7 +107,8 @@ internal sealed class UserSettings
             AutoHideTopHandle = AutoHideTopHandle,
             DisableTopEdgeInFullscreen = DisableTopEdgeInFullscreen,
             ProviderOrder = [.. ProviderOrder],
-            ProviderVisibility = new Dictionary<string, bool>(ProviderVisibility, StringComparer.OrdinalIgnoreCase)
+            ProviderVisibility = new Dictionary<string, bool>(ProviderVisibility, StringComparer.OrdinalIgnoreCase),
+            AiUsageHiddenServices = [.. AiUsageHiddenServices]
         };
     }
 }

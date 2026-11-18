@@ -34,8 +34,12 @@ internal sealed record StartupOptions(
     bool VerifyLivePreviewFallback,
     ShellSettings Settings)
 {
+    /// <summary><c>offline</c> for <c>--verify ai-usage</c>, <c>live</c> for <c>--verify ai-usage-live</c>.</summary>
+    public string? AiUsageVerifyMode { get; init; }
+
     public bool IsVerify =>
-        VerifyShell
+        AiUsageVerifyMode is not null
+        || VerifyShell
         || VerifyDisplay
         || VerifyUi
         || VerifyUiModel
@@ -89,6 +93,7 @@ internal sealed record StartupOptions(
         var verifyLivePreview = false;
         var verifyLivePreviewFallback = false;
         DisplayPlacement? displayPlacement = null;
+        string? aiUsageVerifyMode = null;
 
         for (var index = 0; index < args.Length; index++)
         {
@@ -120,6 +125,15 @@ internal sealed record StartupOptions(
                     StringComparison.OrdinalIgnoreCase);
                 verifyUpdater = string.Equals(verifyTarget, "updater", StringComparison.OrdinalIgnoreCase);
                 verifyReleaseConfig = string.Equals(verifyTarget, "release-config", StringComparison.OrdinalIgnoreCase);
+                aiUsageVerifyMode = verifyTarget.ToLowerInvariant() switch
+                {
+                    "ai-usage" => "offline",
+#if DEBUG
+                    // Reads real accounts; like the Voice E2E flags, Release builds do not accept it.
+                    "ai-usage-live" => "live",
+#endif
+                    _ => null
+                };
                 continue;
             }
 
@@ -215,7 +229,10 @@ internal sealed record StartupOptions(
             togglePlaybackForVerify,
             verifyLivePreview,
             verifyLivePreviewFallback,
-            new ShellSettings(displayPlacement));
+            new ShellSettings(displayPlacement))
+        {
+            AiUsageVerifyMode = aiUsageVerifyMode
+        };
     }
 
     private static bool TryParseDisplayPlacement(string value, out DisplayPlacement placement)

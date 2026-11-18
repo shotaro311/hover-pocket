@@ -358,3 +358,8 @@ select,textarea { max-width: 100%; }
 .settings-button-row.settings-spaced-row, .segmented.settings-spaced-row { justify-content: flex-start; }
 [data-settings-nav] button > span:first-child { display: flex; align-items: center; justify-content: center; }
 .settings-section h2 { scroll-margin-top: 140px; }
+
+.ai-usage-settings-list { display: grid; gap: 8px; margin-top: 12px; }
+.ai-usage-settings-row { display: grid; gap: 6px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: rgba(255, 255, 255, 0.03); }
+.ai-usage-settings-row .settings-note { margin: 0; }
+.ai-usage-settings-state { font-size: 12px; }

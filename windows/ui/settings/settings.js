@@ -5,6 +5,7 @@ import { on, request } from "../js/bridge.js";
 import { labelForSize, setLanguage, t } from "../js/i18n.js";
 import { createGenerationTargetState } from "./generation-target-state.mjs";
 import { createWeatherSettings } from "./weather-settings.js";
+import { createAiUsageSettings } from "./ai-usage-settings.js";
 
 const languageEl = document.querySelector("[data-language]");
 const displayPlacementEl = document.querySelector("[data-display-placement]");
@@ -89,9 +90,11 @@ let stickyState = null;
 let generationState = null;
 const generationTarget = createGenerationTargetState();
 const weatherSettings = createWeatherSettings(document.querySelector("[data-weather-settings]"), request, render);
+const aiUsageSettings = createAiUsageSettings(document.querySelector("[data-ai-usage-settings]"), request, on);
 
 on("state.changed", (state) => render(state));
 on("voice.stateChanged", (state) => render(state));
+on("settings.focusCategory", (payload) => navigation.select(payload?.category));
 
 bootstrap();
 
@@ -108,6 +111,7 @@ function render(state) {
   setLanguage(state.settings.language);
   weatherSettings.render(state);
   assetSyncSettings.render(state);
+  aiUsageSettings.render(state);
   document.querySelectorAll("[data-i18n]").forEach((node) => {
     node.textContent = t(node.getAttribute("data-i18n"));
   });
@@ -217,6 +221,7 @@ function render(state) {
   autoUpdatesEl.checked = state.settings.autoCheckForUpdates !== false;
   updateStatusEl.textContent = state.updater?.message ?? "";
   navigation.render(state.settings.language);
+  if (state.openSettingsCategory) navigation.select(state.openSettingsCategory);
 }
 
 function renderVoiceConnection(settings, english) {

@@ -44,6 +44,8 @@ internal sealed partial class PanelBridgeController : IDisposable
         await login.StartAsync(Path.Combine(_settingsStore.RootDirectory, "CodexVoice"), token);
         while (login.Status == "waiting") await Task.Delay(150, token);
         if (login.Status != "succeeded") throw new CodexAppServerProtocolException("chat_login_failed");
+        // The chat and AI Usage share this login, so readings of the previous account are dropped.
+        _aiUsage?.BeginAccountChange(HoverPocket.Shell.Providers.AiUsage.AiUsageServiceIds.Codex);
     }
     public HoverPocket.Shell.Providers.Assets.AssetPlaybackOwner AssetPlayback { get; } = new();
     private readonly ProviderRegistry _providerRegistry;
@@ -119,7 +121,8 @@ internal sealed partial class PanelBridgeController : IDisposable
         bool externalIntegrationsEnabled = true,
         VoiceE2EReceiptStore? voiceE2EReceiptStore = null,
         UserSettings? isolatedVoiceE2EDefaults = null,
-        ICodexGenerationSandboxProvisioner? codexGenerationSandboxProvisioner = null)
+        ICodexGenerationSandboxProvisioner? codexGenerationSandboxProvisioner = null,
+        Func<string, CancellationToken, Task<HoverPocket.Shell.Providers.AiUsage.AiUsageResult>>? aiUsageReader = null)
     {
         _providerRegistry = providerRegistry;
         _settingsStore = settingsStore;
@@ -341,6 +344,7 @@ internal sealed partial class PanelBridgeController : IDisposable
         {
             _ = _voiceCoordinator.InitializeAsync();
         }
+        InitializeAiUsage(aiUsageReader);
     }
 
     public event EventHandler<UserSettings>? SettingsChanged;
@@ -414,9 +418,14 @@ internal sealed partial class PanelBridgeController : IDisposable
 
         Register(
             "app.getState",
-            (_, _) => Task.FromResult<object?>(BuildState(surface)));
+            (_, _) => Task.FromResult<object?>(BuildState(surface, includeOpenCategory: surface == BridgeSurface.Settings)));
         RegisterUx(Register, surface);
-        Register("app.ready", (_, _) => Task.FromResult<object?>(new { ok = true }));
+        RegisterAiUsage(Register, surface, approvalOwner);
+        Register("app.ready", (_, _) =>
+        {
+            if (surface == BridgeSurface.Settings) _readySettingsDispatchers.Add(dispatcher);
+            return Task.FromResult<object?>(new { ok = true });
+        });
         Register("diagnostics.echo", (parameters, _) => Task.FromResult<object?>(DeserializeObject(parameters)));
         Register("settings.setPanelSize", SetPanelSizeAsync);
         Register("settings.setDisplayPlacement", SetDisplayPlacementAsync);
@@ -576,6 +585,7 @@ internal sealed partial class PanelBridgeController : IDisposable
         return new BridgeAttachment(() =>
         {
             _dispatchers.Remove(dispatcher);
+            _readySettingsDispatchers.Remove(dispatcher);
             if (surface == BridgeSurface.Panel
                 && approvalOwner is not null
                 && ReferenceEquals(_voiceApprovalOwner, approvalOwner))
@@ -611,13 +621,14 @@ internal sealed partial class PanelBridgeController : IDisposable
         _voiceE2EReceiptStore?.RecordMediaEvent(VoiceE2EMediaEventKind.SafeClose);
         _voiceCoordinator.Dispose();
         _voiceLogin.Dispose();
+        _aiUsage?.Dispose();
         _aiNativeExecutionLease?.Invalidate();
         _pocketAppHostController?.Dispose();
         _pocketAppGenerationController?.Dispose();
         _generatedPocketApps?.Dispose();
     }
 
-    public object BuildState(BridgeSurface surface = BridgeSurface.Panel)
+    public object BuildState(BridgeSurface surface = BridgeSurface.Panel, bool includeOpenCategory = false)
     {
         var includeGeneration = surface == BridgeSurface.Settings;
         var includePocketSurface = surface == BridgeSurface.Panel;
@@ -694,6 +705,7 @@ internal sealed partial class PanelBridgeController : IDisposable
                 providerOrder = EffectiveProviderOrder(),
                 providerVisibility = CurrentSettings.ProviderVisibility
             },
+            openSettingsCategory = includeOpenCategory ? TakePendingSettingsCategory() : null,
             weatherRegions = WeatherRegions.All,
             updater = _updaterService.Snapshot,
             panel = new
