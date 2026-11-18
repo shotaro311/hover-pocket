@@ -53,12 +53,40 @@ if CommandLine.arguments.contains("--check-chat-model-catalog") {
     app.run(); exit(1)
 }
 
+#if DEBUG
+if CommandLine.arguments.contains("--verify-ai-usage-anonymous") {
+    let app = NSApplication.shared
+    Task { @MainActor in
+        exit(await AiUsageVerificationCommand.runAnonymous() ? 0 : 1)
+    }
+    app.run()
+    exit(1)
+}
+if let argument = CommandLine.arguments.firstIndex(of: "--verify-ai-usage"),
+   argument + 1 < CommandLine.arguments.count {
+    let app = NSApplication.shared
+    Task { @MainActor in
+        do {
+            let output = URL(fileURLWithPath: CommandLine.arguments[argument + 1], isDirectory: true)
+            try await AiUsageVerificationCommand.run(output: output)
+            exit(0)
+        } catch {
+            print("FAIL AI Usage: \(error)")
+            exit(1)
+        }
+    }
+    app.run()
+    exit(1)
+}
+#endif
+
 if CommandLine.arguments.contains("--verify-chat") {
     let app = NSApplication.shared
     Task { @MainActor in
         do {
             let root = FileManager.default.temporaryDirectory.appendingPathComponent("HoverPocket-ChatVerify-" + UUID().uuidString)
             try CodexChatController.verify(at: root)
+            try await CodexChatController.verifySignInStatus(at: root)
             try CodexChatPanelVerification.run()
             print("chat_verification=ok evidence=\(root.path)"); exit(0)
         } catch { print("chat_verification=failed \(error)"); exit(1) }

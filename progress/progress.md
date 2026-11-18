@@ -1,9 +1,14 @@
 ---
 project_slug: hover-menu-preview
 updated: 2026-11-18
-updated_by: claude
+updated_by: codex
 status: production-macos-0.2.17; production-windows-0.2.19
 ---
+
+## 2026-11-18 macOSのAI Usage
+
+- Windows 0.2.19と同じ6サービスの使用率・残高をパネルに表示し、設定の「AI」から表示とサインインを管理できるようにした。共通ChatGPTログイン後にチャットの案内を消し、Codex使用状況を読み直す。作業ブランチは `codex/mac-ai-usage-20261118`。[macOSの作業記録](2026-11/2026-11-18_hover-pocket-mac-ai-usage.md)。
+- レビュー後、Colabの403 HTMLを取得の起点に使えるようにし、サインイン窓のHTTPS制限を最上位に限定した。警告0、AI Usageの回帰検証134項目と既存の設定・パネル・チャット検証に合格。実サイトの匿名検証では5サービスとも初回で `signedOut`。実アカウントでの受入とmacOS配信は未実施。
 
 ## 2026-11-18 Windows 0.2.19 本番配信
 

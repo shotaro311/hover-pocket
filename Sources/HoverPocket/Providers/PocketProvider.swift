@@ -11,19 +11,22 @@ struct ProviderActions {
     let refresh: @MainActor () -> Void
     let beginExternalDrag: @MainActor () -> Void
     let closePanel: @MainActor () -> Void
+    let openAISettings: @MainActor () -> Void
 
     init(
         isPreviewActive: Bool = false,
         settings: AppSettings,
         refresh: @escaping @MainActor () -> Void = {},
         beginExternalDrag: @escaping @MainActor () -> Void = {},
-        closePanel: @escaping @MainActor () -> Void = {}
+        closePanel: @escaping @MainActor () -> Void = {},
+        openAISettings: @escaping @MainActor () -> Void = {}
     ) {
         self.isPreviewActive = isPreviewActive
         self.settings = settings
         self.refresh = refresh
         self.beginExternalDrag = beginExternalDrag
         self.closePanel = closePanel
+        self.openAISettings = openAISettings
     }
 }
 

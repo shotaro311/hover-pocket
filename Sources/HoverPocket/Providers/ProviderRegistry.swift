@@ -15,7 +15,8 @@ struct ProviderRegistry: Sendable {
             ClipboardProvider(),
             AssetsProvider(),
             StickyNotesProvider(),
-            TimerProvider()
+            TimerProvider(),
+            AiUsageProvider()
         ]
     )
 

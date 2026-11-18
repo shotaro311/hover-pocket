@@ -6,6 +6,7 @@ struct PluginHostView: View {
     let isPreviewActive: Bool
     let onExternalDragStarted: () -> Void
     let onClosePanel: () -> Void
+    let onOpenAISettings: () -> Void
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
@@ -27,6 +28,9 @@ struct PluginHostView: View {
                         },
                         closePanel: {
                             onClosePanel()
+                        },
+                        openAISettings: {
+                            onOpenAISettings()
                         }
                     )
                 )

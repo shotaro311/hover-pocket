@@ -984,6 +984,7 @@ final class HoverWindowController {
                 settings: settings,
                 stickyReminders: stickyReminders,
                 onOpenSettings: { [weak self] in self?.showSettings() },
+                onOpenAISettings: { [weak self] in self?.showSettings(category: .ai) },
                 onClosePanel: { [weak self] in self?.closePreview() },
                 onExternalDragStarted: { [weak self] in self?.prepareForExternalDrag() }
             )
@@ -1048,9 +1049,9 @@ final class HoverWindowController {
         showPreview(on: screen)
     }
 
-    private func showSettings() {
+    private func showSettings(category: SettingsCategory? = nil) {
         cancelClose()
-        settingsWindowController.show()
+        settingsWindowController.show(category: category)
         closePreview()
     }
 

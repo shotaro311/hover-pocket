@@ -24,10 +24,17 @@ enum SettingsWindowLayout {
 }
 
 @MainActor
+final class SettingsPresentation: ObservableObject {
+    @Published var selectedCategory: SettingsCategory? = .general
+    @Published var isVisible = false
+}
+
+@MainActor
 final class SettingsWindowController {
     var onOpenProvider: ((PluginID) -> Void)?
     private let settings: AppSettings
     private let providerStore: ProviderStore
+    private let presentation = SettingsPresentation()
     private var window: NSWindow?
     private var cancellables = Set<AnyCancellable>()
 
@@ -37,7 +44,8 @@ final class SettingsWindowController {
         observeSettings()
     }
 
-    func show() {
+    func show(category: SettingsCategory? = nil) {
+        if let category { presentation.selectedCategory = category }
         if window == nil {
             window = makeWindow()
         } else if let window,
@@ -46,6 +54,7 @@ final class SettingsWindowController {
         }
 
         window?.makeKeyAndOrderFront(nil)
+        presentation.isVisible = true
         NSApp.activate(ignoringOtherApps: true)
     }
 
@@ -71,7 +80,7 @@ final class SettingsWindowController {
         window.isReleasedWhenClosed = false
         window.contentMinSize = SettingsWindowLayout.minimumContentSize(limitedTo: contentSize)
         let hostingController = NSHostingController(
-            rootView: SettingsView(settings: settings, providerStore: providerStore, onOpenPocketApp: { [weak self] appID in
+            rootView: SettingsView(settings: settings, providerStore: providerStore, presentation: presentation, onOpenPocketApp: { [weak self] appID in
                 self?.onOpenProvider?(PluginID(rawValue: PocketSurfaceRegistry.generatedProviderID(appID: appID)))
             })
         )
@@ -79,7 +88,10 @@ final class SettingsWindowController {
         window.contentViewController = hostingController
         window.setContentSize(contentSize)
         NotificationCenter.default.publisher(for: NSWindow.willCloseNotification, object: window)
-            .sink { _ in LibraryDevicePairingController.shared.cancel() }
+            .sink { [weak self] _ in
+                self?.presentation.isVisible = false
+                LibraryDevicePairingController.shared.cancel()
+            }
             .store(in: &cancellables)
         window.center()
         return window

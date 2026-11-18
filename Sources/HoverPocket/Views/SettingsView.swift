@@ -3,6 +3,8 @@ import SwiftUI
 struct SettingsView: View {
     @ObservedObject var settings: AppSettings
     @ObservedObject var providerStore: ProviderStore
+    @ObservedObject var presentation: SettingsPresentation
+    @ObservedObject var aiUsage = AiUsageStore.shared
     var onOpenPocketApp: ((String) -> Void)? = nil
     @ObservedObject private var calendarStore = GoogleCalendarStore.shared
     @ObservedObject private var appUpdater = AppUpdater.shared
@@ -11,7 +13,6 @@ struct SettingsView: View {
     @ObservedObject private var codexVoiceHost = PocketCodexLibrary.host
     @ObservedObject private var codexVoiceAccount = CodexVoiceAccountLoginController.shared
     @StateObject private var weatherLocationModel = WeatherLocationSettingsModel()
-    @State private var selectedCategory: SettingsCategory? = .general
     @State private var capabilityDataSnapshot: CapabilityDataGovernanceSnapshot?
     @State private var capabilityDataError: String?
     @State private var isShowingCapabilityHistoryDeleteConfirmation = false
@@ -23,7 +24,7 @@ struct SettingsView: View {
 
     var body: some View {
         HStack(spacing: 0) {
-            List(selection: $selectedCategory) {
+            List(selection: $presentation.selectedCategory) {
                 ForEach(availableCategories) { category in
                     Label(category.title(language: language), systemImage: category.symbol)
                         .tag(category)
@@ -49,10 +50,10 @@ struct SettingsView: View {
                         .padding(24)
                         .frame(maxWidth: .infinity, alignment: .leading)
                     }
-                    .opacity(selectedCategory == category ? 1 : 0)
-                    .allowsHitTesting(selectedCategory == category)
-                    .disabled(selectedCategory != category)
-                    .accessibilityHidden(selectedCategory != category)
+                    .opacity(presentation.selectedCategory == category ? 1 : 0)
+                    .allowsHitTesting(presentation.selectedCategory == category)
+                    .disabled(presentation.selectedCategory != category)
+                    .accessibilityHidden(presentation.selectedCategory != category)
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -63,6 +64,11 @@ struct SettingsView: View {
             refreshVoiceCredentialState()
             if HoverPocketRuntimeEnvironment.shared.externalIntegrationsEnabled {
                 calendarStore.restoreConnectionIfNeeded()
+            }
+        }
+        .onChange(of: presentation.isVisible && presentation.selectedCategory == .ai, initial: true) { _, visible in
+            if visible, HoverPocketRuntimeEnvironment.shared.externalIntegrationsEnabled {
+                aiUsage.refresh(AiUsageService.allCases.filter { !settings.hiddenAiUsageServices.contains($0) })
             }
         }
         .onChange(of: settings.voiceProvider) { _, provider in
@@ -171,6 +177,9 @@ struct SettingsView: View {
         case .shortcuts:
             SettingsCard { ShortcutSettingsView(settings: settings) }
         case .ai:
+            if HoverPocketRuntimeEnvironment.shared.externalIntegrationsEnabled {
+                SettingsCard { AiUsageSettingsView(settings: settings, usage: aiUsage, codexAccount: codexVoiceAccount) }
+            }
             SettingsCard { voiceSection }
             SettingsCard { pocketAppsSection }
         case .advanced:

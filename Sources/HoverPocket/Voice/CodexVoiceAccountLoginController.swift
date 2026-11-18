@@ -109,12 +109,19 @@ final class CodexVoiceAccountLoginController: ObservableObject {
         -> [CodexVoiceManagedLoginContext]
     private let browserOpener: @MainActor @Sendable (URL) -> Bool
     private let credentialChangeHandler: @MainActor @Sendable () -> Void
+    private let loginActivityHandler: @MainActor (Bool) -> Void
+    private var loginActive = false
 
     convenience init() {
         self.init(
             contextProvider: Self.resolveProductionContexts,
             browserOpener: Self.openProductionBrowser,
-            credentialChangeHandler: Self.publishProductionCredentialChange
+            credentialChangeHandler: Self.publishProductionCredentialChange,
+            loginActivityHandler: { active in
+                guard HoverPocketRuntimeEnvironment.shared.externalIntegrationsEnabled else { return }
+                if active { AiUsageStore.shared.beginAccountChange(.codex) }
+                else { AiUsageStore.shared.endAccountChange(.codex) }
+            }
         )
     }
 
@@ -122,11 +129,13 @@ final class CodexVoiceAccountLoginController: ObservableObject {
         contextProvider: @escaping @Sendable () async throws
             -> [CodexVoiceManagedLoginContext],
         browserOpener: @escaping @MainActor @Sendable (URL) -> Bool,
-        credentialChangeHandler: @escaping @MainActor @Sendable () -> Void
+        credentialChangeHandler: @escaping @MainActor @Sendable () -> Void,
+        loginActivityHandler: @escaping @MainActor (Bool) -> Void = { _ in }
     ) {
         self.contextProvider = contextProvider
         self.browserOpener = browserOpener
         self.credentialChangeHandler = credentialChangeHandler
+        self.loginActivityHandler = loginActivityHandler
     }
 
     private nonisolated static func resolveProductionContexts() async throws
@@ -139,6 +148,7 @@ final class CodexVoiceAccountLoginController: ObservableObject {
     }
 
     private static func publishProductionCredentialChange() {
+        CodexChatController.shared.chatGPTDidSignIn()
         VoiceLaneRuntime.shared.credentialsDidChange()
     }
 
@@ -159,6 +169,8 @@ final class CodexVoiceAccountLoginController: ObservableObject {
               cleanupTask == nil,
               state != .signingIn else { return }
         let generation = beginOperation(state: .signingIn)
+        loginActive = true
+        loginActivityHandler(true)
         operationTask = Task { [weak self] in
             await self?.performLogin(generation: generation)
         }
@@ -351,6 +363,7 @@ final class CodexVoiceAccountLoginController: ObservableObject {
             state = .signedIn
             finishOperation(generation)
             credentialChangeHandler()
+            finishLoginActivity()
         } catch is CancellationError {
             streamContinuation?.finish()
             if generation == operationGeneration {
@@ -363,7 +376,14 @@ final class CodexVoiceAccountLoginController: ObservableObject {
             await Self.cancelLoginAndClose(client: client, loginID: loginID)
             clearActiveClient(client, generation: generation)
             publishFailure(error, generation: generation)
+            if isCurrent(generation) { finishLoginActivity() }
         }
+    }
+
+    private func finishLoginActivity() {
+        guard loginActive else { return }
+        loginActive = false
+        if !isShuttingDown { loginActivityHandler(false) }
     }
 
     private func selectAccountClient(
@@ -558,6 +578,7 @@ final class CodexVoiceAccountLoginController: ObservableObject {
             await Self.cancelLoginAndClose(client: client, loginID: loginID)
             await task?.value
             self?.cleanupTask = nil
+            self?.finishLoginActivity()
         }
     }
 

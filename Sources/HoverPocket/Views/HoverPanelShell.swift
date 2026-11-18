@@ -11,6 +11,7 @@ struct HoverPanelShell: View {
     @ObservedObject private var assets = AssetLibraryRuntime.shared
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let onOpenSettings: () -> Void
+    let onOpenAISettings: () -> Void
     let onClosePanel: () -> Void
     let onExternalDragStarted: () -> Void
 
@@ -69,7 +70,8 @@ struct HoverPanelShell: View {
                         settings: settings,
                         isPreviewActive: store.providerActive,
                         onExternalDragStarted: onExternalDragStarted,
-                        onClosePanel: onClosePanel
+                        onClosePanel: onClosePanel,
+                        onOpenAISettings: onOpenAISettings
                     )
                     .frame(maxHeight: .infinity)
                     .environment(\.panelTextSize, settings.panelTextSize)
@@ -77,7 +79,7 @@ struct HoverPanelShell: View {
                 .frame(width: baseline.width, height: contentHeight - chatHeight)
 
                 if !assets.fullscreen {
-                    VoiceLaneHostView(runtime: voiceRuntime, settings: settings, height: chatHeight, onOpenSettings: onOpenSettings)
+                    VoiceLaneHostView(runtime: voiceRuntime, settings: settings, height: chatHeight, onOpenSettings: onOpenAISettings)
                         .overlay(alignment: .top) {
                             if !chat.panelFolded {
                                 RoundedRectangle(cornerRadius: 2).fill(Color.secondary.opacity(0.6))

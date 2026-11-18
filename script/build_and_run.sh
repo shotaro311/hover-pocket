@@ -2,6 +2,20 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+
+if [[ "${1:-}" == "--verify-ai-usage" || "${1:-}" == "--verify-ai-usage-anonymous" ]]; then
+  cd "$ROOT_DIR"
+  swift build -c debug -Xswiftc -warnings-as-errors
+  verify_executable="$(swift build -c debug --show-bin-path)/HoverPocket"
+  if [[ "$1" == "--verify-ai-usage-anonymous" ]]; then
+    exec "$verify_executable" --verify-ai-usage-anonymous
+  fi
+  "$verify_executable" --verify-ai-usage "$ROOT_DIR/.build/ai-usage-verification"
+  "$verify_executable" --verify-panel-layout
+  "$verify_executable" --verify-chat
+  exit 0
+fi
+
 APP_NAME="HoverPocket"
 DISPLAY_NAME="ホバーポケット"
 PRODUCT_NAME="HoverPocket"
@@ -261,6 +275,7 @@ for media_file in "$ROOT_DIR/artifacts/media-tools-macos/"*; do
   fi
 done
 mkdir -p "$BUNDLE_DIR/Contents/Resources/ThirdParty/pairing-helper"
+cp "$ROOT_DIR/script/ThirdParty/CodexBar-LICENSE.txt" "$BUNDLE_DIR/Contents/Resources/ThirdParty/"
 cp "$ROOT_DIR/shared/pairing-helper/"{LICENSE.txt,NOTICE.md,THIRD-PARTY-LICENSES.html} "$BUNDLE_DIR/Contents/Resources/ThirdParty/pairing-helper/"
 ditto "$ROOT_DIR/.build/$HOVERPOCKET_SWIFT_CONFIGURATION/HoverPocket_HoverPocket.bundle" "$BUNDLE_DIR/Contents/Resources/HoverPocket_HoverPocket.bundle"
 install_app_icon

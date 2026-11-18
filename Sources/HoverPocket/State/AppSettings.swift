@@ -160,6 +160,10 @@ final class AppSettings: ObservableObject {
         }
     }
 
+    @Published var hiddenAiUsageServices: Set<AiUsageService> {
+        didSet { defaults.set(hiddenAiUsageServices.map(\.rawValue).sorted(), forKey: "hiddenAiUsageServices") }
+    }
+
     @Published var hiddenProviderRawValues: Set<String> {
         didSet {
             defaults.set(Array(hiddenProviderRawValues).sorted(), forKey: Self.hiddenProvidersKey)
@@ -344,6 +348,8 @@ final class AppSettings: ObservableObject {
         self.providerOrderRawValues = defaults.stringArray(forKey: Self.providerOrderKey) ?? []
         let hiddenValues = defaults.stringArray(forKey: Self.hiddenProvidersKey) ?? []
         self.hiddenProviderRawValues = Set(hiddenValues)
+        self.hiddenAiUsageServices = Set((defaults.stringArray(forKey: "hiddenAiUsageServices") ?? [])
+            .compactMap(AiUsageService.init(rawValue:)))
         if defaults.object(forKey: Self.rememberLastSelectedProviderKey) == nil {
             self.rememberLastSelectedProvider = true
         } else {
@@ -408,10 +414,7 @@ final class AppSettings: ObservableObject {
 
     func orderedManifests(_ manifests: [PluginManifest]) -> [PluginManifest] {
         let byID = Dictionary(uniqueKeysWithValues: manifests.map { ($0.id.rawValue, $0) })
-        let ordered = providerOrderRawValues.compactMap { byID[$0] }
-        let orderedIDs = Set(ordered.map(\.id.rawValue))
-        let missing = manifests.filter { !orderedIDs.contains($0.id.rawValue) }
-        return ordered + missing
+        return orderedProviderIDs(manifests, preservingProviderIDs: []).compactMap { byID[$0] }
     }
 
     func visibleManifests(_ manifests: [PluginManifest]) -> [PluginManifest] {
@@ -553,7 +556,12 @@ final class AppSettings: ObservableObject {
         let retainedOrder = providerOrderRawValues.filter {
             retainedIDs.contains($0) && seen.insert($0).inserted
         }
-        return retainedOrder + manifests.map(\.id.rawValue).filter { seen.insert($0).inserted }
+        var appended = manifests.map(\.id.rawValue).filter { seen.insert($0).inserted }
+        if let index = appended.firstIndex(of: AiUsageProvider.pluginID.rawValue) {
+            let usageID = appended.remove(at: index)
+            appended.append(usageID)
+        }
+        return retainedOrder + appended
     }
 
     private func setOptionalString(_ value: String?, forKey key: String) {
