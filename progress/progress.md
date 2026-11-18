@@ -2,8 +2,13 @@
 project_slug: hover-menu-preview
 updated: 2026-11-18
 updated_by: claude
-status: production-macos-0.2.17; production-windows-0.2.17
+status: production-macos-0.2.17; production-windows-0.2.18
 ---
+
+## 2026-11-18 Windows 0.2.18 本番配信
+
+- AI Usageを含む `d0a088b` をmainへpushし、Windows CIが成功（最初の `0934780` は契約チェックの目印とぶつかって失敗し、分岐を部分クラスへ移して直した）。[Windows 0.2.18](https://github.com/shotaro311/hover-pocket/releases/tag/win-v0.2.18) を `--latest=false` で公開し、8配布物の一致と公開物の99項目検査に合格。macOSは不変。
+- データと0.2.17一式を退避してからこのPCへ適用した。PID 65200 が0.2.18で応答中で、データは更新前後で一致（クリップボードの先頭画像1件の時刻だけが再起動で更新）。本番アプリでのサインインはこれから。Codexのレビューは2回で「未完了」のまま、ユーザーの判断で配信した。[配信記録](2026-11/2026-11-18_hover-pocket-windows-0218-release.md)。
 
 ## 2026-11-18 Windows版 AI使用状況パネル
 
