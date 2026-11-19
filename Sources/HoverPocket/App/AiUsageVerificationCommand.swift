@@ -566,11 +566,27 @@ enum AiUsageVerificationCommand {
         settings.hiddenAiUsageServices = []
         let now = Date()
         let copy = AiUsageCopy(language: .japanese)
-        let sampleWindow = AiUsageWindow(model: "Fable", percent: 86, resetsAt: now + (4 * 24 + 21) * 3600 + 1800, minutes: 10_080)
-        try t.check(copy.windowLabel(sampleWindow) == "Fable · 1週間" && copy.reset(sampleWindow.resetsAt, now: now).hasPrefix("あと4日21時間でリセット（"), "Model label and a long reset interval")
-        try t.check(copy.reset(now + 20 * 60, now: now).contains("20分でリセット") && copy.elapsed(sampleWindow, now: now) != nil,
-                    "Short reset and elapsed marker")
-        try t.check(copy.level(79.9) == .normal && copy.level(80) == .warning && copy.level(90) == .critical, "Color thresholds at 80% and 90%")
+        let sampleWindow = AiUsageWindow(model: "Fable", percent: 76, resetsAt: now + (3 * 24 + 21) * 3600 + 1800, minutes: 10_080)
+        try t.check(copy.windowLabel(sampleWindow) == "Fable" && copy.reset(sampleWindow.resetsAt, now: now) == "3日21時間"
+                    && sampleWindow.column == .other && sampleWindow.resetsAt.map(copy.resetHelp)?.hasSuffix("にリセット") == true,
+                    "Other quota has both its model name and reset countdown plus exact-date help")
+        try t.check(copy.reset(now + 35 * 60, now: now) == "0:35" && copy.reset(now + 289 * 60, now: now) == "4:49"
+                    && copy.reset(now + 3 * 86400, now: now) == "3日" && copy.reset(now, now: now) == "リセット済み"
+                    && copy.reset(nil, now: now) == nil, "Short, long, overdue and unknown reset countdowns")
+        let english = AiUsageCopy(language: .english)
+        try t.check(english.reset(sampleWindow.resetsAt, now: now) == "3d 21h" &&
+                    english.reset(now, now: now) == "Reset" && sampleWindow.resetsAt.map(english.resetHelp)?.hasPrefix("Resets ") == true,
+                    "English reset copy and help")
+        try t.check([0, 24.99, 25, 49.99, 50, 69.99, 70, 100].map(AiUsageTint.init(remaining:)) ==
+                    [.red, .red, .yellow, .yellow, .green, .green, .blue, .blue], "Four color thresholds on remaining usage")
+        try t.check(sampleWindow.remaining.map(copy.percent) == "24%" && copy.percent(94.9) == "94.9%" &&
+                    AiUsageMeterView.angle(at: 0) == 135 && AiUsageMeterView.angle(at: 50) == 270 &&
+                    AiUsageMeterView.angle(at: 100) == 405, "Remaining percentage formatting and clockwise angular range")
+        try t.check(AiUsageWindow(percent: 55, minutes: 4320).column == .other &&
+                    copy.windowLabel(.init(percent: 55, minutes: 4320)) == "3日" &&
+                    AiUsageWindow(model: "Short", percent: 55, minutes: 300).column == .other,
+                    "Named standard windows and unnamed nonstandard durations belong in Other")
+        try verifyOrderAndLayout(t, defaults: defaults, settings: settings, now: now)
         try t.check(copy.balanceValue(.init(kind: .planCredit, value: .amount(0.0001))) == "<$0.01" &&
                     copy.balanceValue(.init(kind: .computeUnits, value: .units(1e-30))) == "<0.1" &&
                     copy.balanceValue(.init(kind: .purchasedCredit, value: .amount(0))) == "$0.00", "Tiny positive balances and an explicit zero")
@@ -579,51 +595,372 @@ enum AiUsageVerificationCommand {
         try t.check(copy.balanceDetail(.init(kind: .computeUnits, value: .units(8)), now: now) == "消費量は不明" &&
                     copy.balanceDetail(.init(kind: .computeUnits, value: .units(8), perHour: 0.004), now: now)?.contains("<0.01") == true,
                     "Unknown and tiny hourly consumption")
-        let fixture = AiUsageStore { service in
+        let scenario = PresentationScenario(now: now)
+        let fixture = AiUsageStore(reader: { service in
             switch service {
-            case .codex: .success(.init(plan: "Pro Lite", windows: [.init(percent: 19, resetsAt: now + 5 * 86400, minutes: 10_080)],
-                                       balances: [.init(kind: .codexCredits, value: .amount(234.567))]))
-            case .claude: .success(.init(plan: "Max 5x", windows: [
-                .init(percent: 33, resetsAt: now + 70 * 60, minutes: 300),
-                .init(percent: 93, resetsAt: now + 2 * 86400, minutes: 10_080),
-                sampleWindow
-            ]))
-            case .claudeAPI: .success(.init(balances: [
-                .init(kind: .planCredit, value: .amount(57.25), label: "API credit (Max)", expiresAt: now + 12 * 86400),
-                .init(kind: .purchasedCredit, value: .amount(0.001), expiresAt: now + 82 * 86400)
-            ]))
-            case .gemini: .signedOut
-            case .colab: .success(.init(balances: [.init(kind: .computeUnits, value: .units(61.83), perHour: 0.04)]))
-            case .muse: .failure(.changed)
+            case .codex:
+                if scenario.showsFailures { return .failure(.network) }
+                return .success(.init(plan: "Pro Lite", windows: [
+                    .init(percent: 5.1, resetsAt: now + 289 * 60, minutes: 300),
+                    .init(percent: 79, resetsAt: now + (3 * 24 + 21) * 3600 + 1800, minutes: 10_080)
+                ], balances: [.init(kind: .codexCredits, value: .amount(40957))]))
+            case .claude:
+                var windows: [AiUsageWindow] = [
+                    .init(percent: 33, resetsAt: now + 70 * 60, minutes: 300),
+                    .init(percent: 55, resetsAt: now + 2 * 86400 + 1800, minutes: 10_080)
+                ]
+                if scenario.showsFailures {
+                    windows += [
+                        .init(model: "Fable", percent: nil, resetsAt: now + 3600, minutes: 10_080),
+                        .init(model: "GPT-5.3-Codex-Spark", percent: 30.1, resetsAt: now + 289 * 60, minutes: 300),
+                        .init(model: "GPT-5.3-Codex-Spark", percent: 55.1,
+                              resetsAt: now + (3 * 24 + 21) * 3600 + 1800, minutes: 10_080)
+                    ]
+                } else {
+                    windows.append(sampleWindow)
+                }
+                return .success(.init(plan: "Max 5x", windows: windows))
+            case .claudeAPI:
+                return .success(.init(balances: [
+                    .init(kind: .planCredit, value: .amount(57.25), label: "API credit (Max)", expiresAt: now + 12 * 86400),
+                    .init(kind: .purchasedCredit, value: .amount(47.73), expiresAt: now + 82 * 86400)
+                ]))
+            case .gemini:
+                return scenario.showsFailures ? .signedOut : .success(.init(windows: [
+                    .init(percent: 48, resetsAt: now + 35 * 60, minutes: 10_080)
+                ]))
+            case .colab:
+                return .success(.init(balances: [.init(kind: .computeUnits, value: .units(570.2), perHour: 0.8)]))
+            case .muse:
+                return scenario.showsFailures ? .failure(.changed) : .success(.init(windows: [
+                    .init(percent: 57, resetsAt: now + 6 * 86400 + 1800, minutes: 10_080)
+                ]))
             }
+        }, now: { scenario.now })
+        func row(_ service: AiUsageService) -> AiUsagePanelService {
+            .init(id: service, snapshot: fixture.snapshot(service), changingAccount: fixture.isChangingAccount(service))
         }
         fixture.refresh(AiUsageService.allCases)
+        try await until { !fixture.snapshots.values.contains(where: \.refreshing) }
+        scenario.now = now + 30
+        fixture.refresh([.claude], force: true)
+        try await until { !fixture.snapshot(.claude).refreshing }
+
+        let fresh = AiUsageService.allCases.map(row)
+        try t.check(fresh.compactMap(\.updateDate).max() == scenario.now &&
+                    fresh.filter { $0.id != .claude }.compactMap(\.updateDate).max() == now,
+                    "Header selects the newest successful visible reading")
+        var oldSuccess = row(.codex).snapshot
+        oldSuccess.fetchedAt = now - 86400
+        let oldRow = AiUsagePanelService(id: .codex, snapshot: oldSuccess, changingAccount: false)
+        try t.check(oldRow.updateDate == oldSuccess.fetchedAt && oldRow.staleDate == nil && !oldRow.snapshot.stale,
+                    "Elapsed time alone neither dims a successful reading nor changes its update label")
+        try t.check(fresh.filter(\.showsListRow).map(\.id) == [.codex, .claude, .gemini, .muse] &&
+                    fresh.compactMap(AiUsagePanelBalance.init).map(\.service) == [.codex, .claudeAPI, .colab],
+                    "Successful balance-only services have chips and meters but no table rows")
+        let loading = AiUsagePanelService(id: .colab, snapshot: .init(refreshing: true), changingAccount: false)
+        let idle = AiUsagePanelService(id: .colab, snapshot: .init(), changingAccount: false)
+        try t.check(loading.showsListRow && !idle.showsListRow, "A balance service gets a row while checking")
+        let api = AiUsagePanelBalance(row(.claudeAPI))
+        try t.check(api?.meterValue(copy) == "$104.98" && api?.help(copy, now: now).contains("$57.25") == true &&
+                    api?.help(copy, now: now).contains("$47.73") == true && api?.total.expiresAt == now + 12 * 86400,
+                    "Claude API adds the balances and retains both amounts and dates in help")
+        try t.check(AiUsagePanelBalance(row(.codex))?.meterValue(copy) == "40,957 CR" &&
+                    AiUsagePanelBalance(row(.colab))?.meterValue(copy) == "570.2 CU", "Native units in the balance meters")
+
+        try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
+        let panel = AiUsagePanelView(settings: settings, usage: fixture, isActive: false, openSettings: {})
+        let preview = panel.background(.black)
+        let minimum = PanelLayout.manualSizeLimits().minimum.width - PanelLayout.surfaceSidePadding * 2
+        let list = try capture(preview, size: NSSize(width: minimum, height: 350), appearance: .darkAqua)
+        try list.write(to: output.appendingPathComponent("list.png"), options: .atomic)
+        try verifyRowMetadata(t, panel: panel, service: row(.claude), now: now, width: minimum)
+        settings.aiUsageLayout = .meter
+        let meter = try capture(preview, size: NSSize(width: 760, height: 510), appearance: .darkAqua)
+        try meter.write(to: output.appendingPathComponent("meter.png"), options: .atomic)
+        try verifyRowMetadata(t, panel: panel, service: row(.claude), now: now, width: minimum)
+
+        scenario.showsFailures = true
+        fixture.beginAccountChange(.muse)
+        fixture.endAccountChange(.muse)
+        fixture.refresh([.codex, .claude, .gemini], force: true)
         try await until { !fixture.snapshots.values.contains(where: \.refreshing) }
         try t.check(AiUsageSettingsView.canSignOut(.gemini, usage: fixture) &&
                     !AiUsageSettingsView.canSignOut(.colab, usage: fixture) && !AiUsageSettingsView.canSignOut(.codex, usage: fixture),
                     "Gemini can sign out when only Colab has a reading")
-        try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
-        let providerStore = ProviderStore(registry: .init(providers: [AiUsageProvider()]), settings: settings)
-        try capture(VStack(spacing: 0) {
-            ProviderHeaderView(providerStore: providerStore, settings: settings, onOpenSettings: {}, onClosePanel: {})
-            Divider()
-            AiUsagePanelView(settings: settings, usage: fixture, isActive: false, openSettings: {})
-        }.background(.black), name: "panel", size: NSSize(width: 520, height: 740), appearance: .darkAqua, output: output)
-        try capture(VStack(alignment: .leading) {
+        try t.check(row(.codex).snapshot.stale && row(.codex).reason(copy) == copy.error(.network) &&
+                    row(.codex).updateDate == nil &&
+                    row(.codex).snapshot.fetchedAt.map(copy.stale)?.hasSuffix(" の値") == true,
+                    "Stale data preserves its value and error, and is excluded from the update clock")
+        try t.check(row(.gemini).emptyMessage(copy) == copy.signedOut && row(.gemini).updateDate == nil &&
+                    row(.muse).emptyMessage(copy) == copy.error(.changed) && row(.muse).orderedWindows.isEmpty &&
+                    row(.muse).updateDate == nil, "Signed-out and error states have reasons and no update clock or numeric reading")
+        let claude = row(.claude)
+        let other = claude.windows(in: .other).map(claude.quota)
+        try t.check(row(.gemini).showsListRow && row(.muse).showsListRow && row(.codex).showsListRow,
+                    "Signed-out, error-only and stale quota services remain listed")
+        let unavailable = other.first
+        try t.check(unavailable?.window.remaining == nil && unavailable?.resetText(copy, now: now) == nil &&
+                    unavailable?.help(copy) == "Fable\n取得できません" &&
+                    unavailable.map { copy.meterAccessibility($0, now: now) } == "Fable 取得できません",
+                    "Unreadable meter has no value or reset line, and explains the state in help and accessibility")
+        let longQuotas = Array(other.dropFirst())
+        try t.check(longQuotas.map { $0.fullName(copy) } == ["GPT-5.3-Codex-Spark 5時間", "GPT-5.3-Codex-Spark 1週間"] &&
+                    longQuotas.allSatisfy { quota in
+                        quota.help(copy).hasPrefix(quota.fullName(copy) + "\n") &&
+                        copy.meterAccessibility(quota, now: now).hasPrefix(quota.fullName(copy) + " ")
+                    }, "Duplicate quota names retain the full name and duration in help and accessibility")
+        try t.check(longQuotas.map { $0.meterDetail(copy, now: now) } == ["5時間 · 4:49", "1週間 · 3日21時間"],
+                    "The second meter line combines duplicate duration and remaining reset time")
+        let unreadableDuplicate = AiUsageQuota(window: .init(model: "GPT-5.3-Codex-Spark", percent: nil,
+                                                            resetsAt: now + 3600, minutes: 300), distinguishesDuration: true)
+        try t.check(unavailable?.meterDetail(copy, now: now) == nil &&
+                    unreadableDuplicate.meterDetail(copy, now: now) == "5時間" &&
+                    unreadableDuplicate.help(copy) == "GPT-5.3-Codex-Spark 5時間\n取得できません",
+                    "Unreadable duplicate meter shows only the duration on its second line")
+        try verifyReadingOpacity(t, quota: .init(window: sampleWindow), copy: copy, now: now)
+        try verifySettingsAction(t, copy: copy)
+        try verifyNarrowContent(t, quota: .init(window: sampleWindow), copy: copy, now: now)
+        let states = try capture(preview, size: NSSize(width: minimum, height: 790), appearance: .darkAqua)
+        try states.write(to: output.appendingPathComponent("meter-states.png"), options: .atomic)
+        settings.aiUsageLayout = .list
+        try verifyPinnedListHeader(t, view: preview, width: minimum)
+        let listStates = try capture(preview, size: NSSize(width: minimum, height: 375), appearance: .darkAqua)
+        try listStates.write(to: output.appendingPathComponent("list-states.png"), options: .atomic)
+        let account = CodexVoiceAccountLoginController(contextProvider: { [] }, browserOpener: { _ in false }, credentialChangeHandler: {})
+        let settingsPNG = try capture(VStack(alignment: .leading) {
             Text(SettingsCategory.ai.title(language: .japanese)).font(.title2.weight(.semibold))
             SettingsCard {
-                AiUsageSettingsView(settings: settings, usage: fixture, codexAccount: .shared)
+                AiUsageSettingsView(settings: settings, usage: fixture, codexAccount: account)
             }
         }.padding(24).frame(maxHeight: .infinity, alignment: .top)
             .background(Color(nsColor: .windowBackgroundColor)),
-            name: "settings", size: NSSize(width: 640, height: 570), appearance: .aqua, output: output)
-        for name in ["panel", "settings"] {
+            size: NSSize(width: 680, height: 580), appearance: .aqua)
+        try t.check(NSBitmapImageRep(data: settingsPNG)?.pixelsWide ?? 0 > 0, "Settings still renders with the service order controls")
+        try settingsPNG.write(to: output.appendingPathComponent("settings.png"), options: .atomic)
+        for name in ["list", "meter", "meter-states", "list-states", "settings"] {
             let file = output.appendingPathComponent("\(name).png")
-            try t.check(NSBitmapImageRep(data: Data(contentsOf: file))?.pixelsWide ?? 0 > 0, "Reopens the rendered \(name) PNG")
+            let bitmap = try NSBitmapImageRep(data: Data(contentsOf: file))
+            try t.check((bitmap?.pixelsWide ?? 0) >= Int(minimum), "Reopens the rendered \(name) PNG")
+            if name != "settings" {
+                let expected = name.hasSuffix("-states") ? Set([AiUsageTint.green, .yellow]) : Set(AiUsageTint.allCases)
+                try t.check(bitmap.map(solidMeterColors) == expected, "\(name) renders the expected palette and dims stale values")
+            }
+        }
+        for layout in AiUsageLayout.allCases {
+            settings.aiUsageLayout = layout
+            for size in PanelTextSizeOption.allCases {
+                let content = panel.panelContent(AiUsageService.allCases.map(row), now: now, width: minimum)
+                    .environment(\.panelTextSize, size)
+                let fitting = NSHostingController(rootView: content)
+                    .sizeThatFits(in: CGSize(width: minimum, height: .greatestFiniteMagnitude))
+                try t.check(fitting.width <= minimum + 0.5, "\(layout) content fits minimum width at \(size) text size")
+            }
         }
     }
 
-    private static func capture<V: View>(_ view: V, name: String, size: NSSize, appearance: NSAppearance.Name, output: URL) throws {
+    private static func verifyPinnedListHeader<V: View>(_ t: Checks, view: V, width: CGFloat) throws {
+        try withHostingView(view, size: NSSize(width: width, height: 155), appearance: .darkAqua) { host in
+            @MainActor func findScrollView(_ view: NSView) -> NSScrollView? {
+                if let scroll = view as? NSScrollView { return scroll }
+                for child in view.subviews {
+                    if let scroll = findScrollView(child) { return scroll }
+                }
+                return nil
+            }
+            guard let scroll = findScrollView(host), let document = scroll.documentView else {
+                throw LibraryError.message("AI Usage: no native scroll view in list")
+            }
+            let clip = scroll.contentView
+            let start = clip.bounds.origin
+            try t.check(document.bounds.height > clip.bounds.height + 60, "Fixture has enough content to scroll")
+            let before = try readBitmap(host)
+            let end = CGPoint(x: start.x, y: start.y + (clip.isFlipped ? 60 : -60))
+            clip.scroll(to: end)
+            scroll.reflectScrolledClipView(clip)
+            host.layoutSubtreeIfNeeded()
+            host.displayIfNeeded()
+            let after = try readBitmap(host)
+            let header = CGRect(x: 38, y: 34, width: width - 60, height: 22)
+            let rows = CGRect(x: 14, y: 70, width: width - 28, height: 75)
+            try t.check(abs(clip.bounds.minY - start.y) > 40 &&
+                        samePixels(before, after, in: header) && !samePixels(before, after, in: rows),
+                        "List column headings stay in place when rows scroll")
+        }
+    }
+
+    private static func verifySettingsAction(_ t: Checks, copy: AiUsageCopy) throws {
+        let proposal = CGSize(width: 320, height: 50)
+        let bordered = NSHostingController(rootView: AiUsageSignedOutView(copy: copy, openSettings: {}).font(.system(size: 12)))
+        let plain = NSHostingController(rootView: HStack(spacing: 6) {
+            Text(copy.signedOut).foregroundStyle(.secondary)
+            Button(copy.text("設定を開く", "Open Settings"), action: {}).buttonStyle(.borderless).controlSize(.small)
+        }.font(.system(size: 12)))
+        try t.check(bordered.sizeThatFits(in: proposal).width > plain.sizeThatFits(in: proposal).width + 4,
+                    "Signed-out settings action uses a bordered button with its own padding")
+    }
+
+    private static func verifyReadingOpacity(_ t: Checks, quota: AiUsageQuota, copy: AiUsageCopy, now: Date) throws {
+        func rendered<V: View>(_ view: V, size: NSSize) throws -> NSBitmapImageRep {
+            try withHostingView(view.background(.black), size: size, appearance: .darkAqua, read: readBitmap)
+        }
+        let meterSize = NSSize(width: AiUsageMeterView.width, height: AiUsageMeterView.height)
+        let freshMeter = try rendered(AiUsageMeterView(quota: quota, copy: copy, now: now), size: meterSize)
+        let staleMeter = try rendered(AiUsageMeterView(quota: quota, copy: copy, now: now, readingOpacity: 0.5), size: meterSize)
+        try t.check(samePixels(freshMeter, staleMeter, in: CGRect(x: 32, y: 69, width: 52, height: 37)) &&
+                    !samePixels(freshMeter, staleMeter, in: CGRect(x: 35, y: 45, width: 46, height: 19)) &&
+                    !samePixels(freshMeter, staleMeter, in: CGRect(x: 41, y: 1, width: 34, height: 13)),
+                    "Stale meter dims the value and arcs while keeping the name and reset text at full brightness")
+        let listSize = NSSize(width: 200, height: 36)
+        let freshList = try rendered(AiUsageListQuotaView(quota: quota, copy: copy, now: now), size: listSize)
+        let staleList = try rendered(AiUsageListQuotaView(quota: quota, copy: copy, now: now, readingOpacity: 0.5), size: listSize)
+        try t.check(samePixels(freshList, staleList, in: CGRect(x: 0, y: 0, width: 24, height: 22)) &&
+                    samePixels(freshList, staleList, in: CGRect(x: 147, y: 0, width: 53, height: 22)) &&
+                    solidMeterColors(freshList) == [.red] && solidMeterColors(staleList).isEmpty,
+                    "Stale list cell keeps its name and reset text at full brightness and dims the reading")
+    }
+
+    private static func samePixels(_ a: NSBitmapImageRep, _ b: NSBitmapImageRep, in rect: CGRect) -> Bool {
+        let scale = CGFloat(a.pixelsWide) / a.size.width
+        let pixels = rect.applying(CGAffineTransform(scaleX: scale, y: scale)).integral
+        guard let first = a.cgImage?.cropping(to: pixels), let second = b.cgImage?.cropping(to: pixels) else { return false }
+        return NSBitmapImageRep(cgImage: first).representation(using: .png, properties: [:]) ==
+            NSBitmapImageRep(cgImage: second).representation(using: .png, properties: [:])
+    }
+
+    private static func verifyNarrowContent(_ t: Checks, quota: AiUsageQuota, copy: AiUsageCopy, now: Date) throws {
+        func size<V: View>(_ view: V, width: CGFloat) -> CGSize {
+            NSHostingController(rootView: view)
+                .sizeThatFits(in: CGSize(width: width, height: 200))
+        }
+        let cell = AiUsageListQuotaView(quota: quota, copy: copy, now: now)
+        let inline = size(cell, width: 160)
+        let stacked = size(cell, width: 96)
+        try t.check(stacked.width <= 96.5 && stacked.height >= inline.height + 10,
+                    "A narrow quota cell moves the complete reset time below the bar")
+        let reason = copy.error(.network)
+        let text = AiUsageReasonText(message: reason)
+        let wrapped = size(text, width: 125)
+        let natural = size(Text(reason).font(.system(size: 11)).fixedSize(horizontal: false, vertical: true), width: 125)
+        try t.check(wrapped.height > size(text, width: 360).height && abs(wrapped.height - natural.height) < 0.5,
+                    "Error text wraps to two lines at a narrow width without shortening it")
+    }
+
+    private static func verifyRowMetadata(_ t: Checks, panel: AiUsagePanelView, service: AiUsagePanelService, now: Date, width: CGFloat) throws {
+        var alternate = service.snapshot
+        alternate.reading?.plan = "Unrelated plan name"
+        alternate.fetchedAt = now - 60
+        let variant = AiUsagePanelService(id: service.id, snapshot: alternate, changingAccount: false)
+        func render(_ row: AiUsagePanelService) throws -> Data {
+            try capture(panel.panelContent([row], now: now, width: width).background(.black),
+                        size: NSSize(width: width, height: 170), appearance: .darkAqua)
+        }
+        try t.check(try render(service) == render(variant), "Fresh service content omits its plan name and fetch time")
+    }
+
+    private static func solidMeterColors(_ bitmap: NSBitmapImageRep) -> Set<AiUsageTint> {
+        guard let image = bitmap.cgImage, let space = CGColorSpace(name: CGColorSpace.sRGB),
+              let context = CGContext(data: nil, width: image.width, height: image.height, bitsPerComponent: 8,
+                                      bytesPerRow: image.width * 4, space: space,
+                                      bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue),
+              let bytes = context.data?.assumingMemoryBound(to: UInt8.self) else { return [] }
+        context.draw(image, in: CGRect(x: 0, y: 0, width: image.width, height: image.height))
+        var found = Set<AiUsageTint>()
+        for y in stride(from: 0, to: image.height, by: 4) {
+            for x in stride(from: 0, to: image.width, by: 4) {
+                let pixel = bytes + y * context.bytesPerRow + x * 4
+                for tint in AiUsageTint.allCases where !found.contains(tint) {
+                    let hex = tint.rawValue
+                    if abs(Int(pixel[0]) - Int(hex >> 16)) <= 3 &&
+                        abs(Int(pixel[1]) - Int(hex >> 8 & 255)) <= 3 &&
+                        abs(Int(pixel[2]) - Int(hex & 255)) <= 3 {
+                        found.insert(tint)
+                    }
+                }
+                if found.count == AiUsageTint.allCases.count { return found }
+            }
+        }
+        return found
+    }
+
+    private static func verifyOrderAndLayout(_ t: Checks, defaults: EphemeralAppSettingsDefaults,
+                                             settings: AppSettings, now: Date) throws {
+        try t.check(settings.aiUsageLayout == .list && settings.aiUsageServiceOrder == AiUsageService.allCases && settings.aiUsageSort == nil,
+                    "Existing settings start in List and keep the original order")
+        let malformed = EphemeralAppSettingsDefaults()
+        malformed.set("unknown", forKey: "aiUsageLayout")
+        malformed.set(["bogus", "muse", "muse", "codex"], forKey: "aiUsageServiceOrder")
+        malformed.set(["weekly", "backwards"], forKey: "aiUsageSort")
+        let repaired = AppSettings(defaults: malformed)
+        try t.check(repaired.aiUsageLayout == .list && repaired.aiUsageSort == nil &&
+                    repaired.aiUsageServiceOrder == [.muse, .codex, .claude, .claudeAPI, .gemini, .colab],
+                    "Invalid layout and sort fall back, and order removes duplicate and unknown IDs")
+        try t.check(!settings.canStepAiUsageService(.codex, by: -1) && settings.canStepAiUsageService(.codex, by: 1) &&
+                    settings.canStepAiUsageService(.muse, by: -1) && !settings.canStepAiUsageService(.muse, by: 1),
+                    "Ordering arrows disable only the outer moves")
+        settings.hiddenAiUsageServices = [.gemini]
+        try t.check(!AiUsagePanelView.applyDrop(["outside:muse"], token: "fixture", target: .codex, settings: settings) &&
+                    AiUsagePanelView.applyDrop(["fixture:muse"], token: "fixture", target: .codex, settings: settings),
+                    "List drop updates the saved order and rejects an external payload")
+        settings.stepAiUsageService(.muse, by: -1)
+        try t.check(settings.aiUsageServiceOrder.first == .muse, "Settings Move up does not cross the first row")
+        settings.stepAiUsageService(.muse, by: 1)
+        try t.check(settings.aiUsageServiceOrder.prefix(2).elementsEqual([.codex, .muse]), "Settings Move down changes the shared order")
+        settings.stepAiUsageService(.muse, by: -1)
+        try t.check(settings.aiUsageServiceOrder.first == .muse, "Settings Move up changes the shared order")
+        settings.aiUsageSort = .init(column: .other, previous: nil)
+        try t.check(!AiUsagePanelView.applyDrop(["fixture:muse"], token: "fixture", target: .colab, settings: settings),
+                    "List stops accepting drops when a sort is active")
+        settings.aiUsageLayout = .meter
+        try t.check(AiUsagePanelView.applyDrop(["fixture:muse"], token: "fixture", target: .claudeAPI, settings: settings),
+                    "Meter cards reorder the shared preference while a list sort is retained")
+        let reloaded = AppSettings(defaults: defaults)
+        try t.check(reloaded.aiUsageLayout == .meter && reloaded.aiUsageSort == settings.aiUsageSort &&
+                    reloaded.aiUsageServiceOrder == [.codex, .claude, .claudeAPI, .muse, .gemini, .colab] &&
+                    reloaded.visibleAiUsageServices == [.codex, .claude, .claudeAPI, .muse, .colab],
+                    "Both layouts, settings order, hidden IDs and sort survive settings recreation")
+        func sample(_ id: AiUsageService, _ values: [Double?]) -> AiUsagePanelService {
+            var snapshot = AiUsageSnapshot()
+            snapshot.apply(.success(.init(windows: values.map { .init(model: "Extra", percent: $0, minutes: 300) })), at: now)
+            return .init(id: id, snapshot: snapshot, changingAccount: false)
+        }
+        let rows = [sample(.muse, [nil]), sample(.colab, [70]), sample(.codex, [95, 10]),
+                    sample(.gemini, []), sample(.claude, [70])]
+        let ascending = settings.aiUsageSort
+        let descending = AiUsageSort(column: .other, previous: ascending)
+        try t.check(AiUsagePanelService.sorted(rows, by: ascending).map(\.id) == [.codex, .colab, .claude, .muse, .gemini],
+                    "Other sorts by minimum remaining with stable ties and missing values last")
+        try t.check(AiUsagePanelService.sorted(rows, by: descending).map(\.id) == [.colab, .claude, .codex, .muse, .gemini] &&
+                    AiUsageSort(column: .other, previous: descending).direction == .asc,
+                    "Second press reverses the order and missing values remain last")
+        try t.check(AiUsageSort(column: .weekly, previous: descending).direction == .asc &&
+                    AiUsagePanelService.sorted(rows, by: nil).map(\.id) == rows.map(\.id),
+                    "A new sort starts ascending and reset restores custom order")
+        _ = settings.moveAiUsageService(.muse, to: .colab)
+        settings.aiUsageLayout = .list
+        settings.aiUsageSort = nil
+        settings.hiddenAiUsageServices = []
+    }
+
+    private final class PresentationScenario {
+        var now: Date
+        var showsFailures = false
+
+        init(now: Date) { self.now = now }
+    }
+
+    private static func capture<V: View>(_ view: V, size: NSSize, appearance: NSAppearance.Name) throws -> Data {
+        try withHostingView(view, size: size, appearance: appearance) { host in
+            guard let png = try readBitmap(host).representation(using: .png, properties: [:]) else {
+                throw AiUsageFailure.unavailable
+            }
+            return png
+        }
+    }
+
+    private static func withHostingView<V: View, Result>(
+        _ view: V, size: NSSize, appearance: NSAppearance.Name, read: (NSView) throws -> Result
+    ) rethrows -> Result {
         let rect = NSRect(origin: .zero, size: size)
         let host = NSHostingView(rootView: view.frame(width: size.width, height: size.height))
         let window = NSWindow(contentRect: rect, styleMask: .borderless, backing: .buffered, defer: false)
@@ -632,9 +969,13 @@ enum AiUsageVerificationCommand {
         host.frame = rect
         host.layoutSubtreeIfNeeded()
         host.displayIfNeeded()
+        return try withExtendedLifetime(window) { try read(host) }
+    }
+
+    private static func readBitmap(_ host: NSView) throws -> NSBitmapImageRep {
+        let rect = host.bounds
         guard let bitmap = host.bitmapImageRepForCachingDisplay(in: rect) else { throw AiUsageFailure.unavailable }
         host.cacheDisplay(in: rect, to: bitmap)
-        guard let png = bitmap.representation(using: .png, properties: [:]) else { throw AiUsageFailure.unavailable }
-        try png.write(to: output.appendingPathComponent("\(name).png"), options: .atomic)
+        return bitmap
     }
 }

@@ -1,156 +1,5 @@
 import SwiftUI
 
-struct AiUsagePanelView: View {
-    @ObservedObject var settings: AppSettings
-    @ObservedObject var usage: AiUsageStore
-    let isActive: Bool
-    let openSettings: () -> Void
-    @Environment(\.panelTextSize) private var textSize
-
-    var body: some View {
-        VStack(spacing: 0) {
-            HStack(spacing: 10) {
-                if visible.contains(where: { usage.snapshot($0).refreshing }) {
-                    ProgressView().controlSize(.mini)
-                }
-                Spacer()
-                Button(action: { usage.refresh(visible, force: true) }) {
-                    Label(copy.text("更新", "Refresh"), systemImage: "arrow.clockwise")
-                }
-                .buttonStyle(.borderless)
-                .disabled(visible.isEmpty)
-            }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 6)
-
-            if visible.isEmpty {
-                ContentUnavailableView {
-                    Text(copy.text("表示するサービスがありません", "No services to show"))
-                } actions: {
-                    Button(copy.text("AI設定を開く", "Open AI settings"), action: openSettings)
-                }
-            } else {
-                ScrollView {
-                    TimelineView(.periodic(from: .now, by: 60)) { context in
-                        VStack(spacing: 8) {
-                            ForEach(visible) { service in
-                                serviceCard(service, now: context.date)
-                            }
-                        }
-                        .padding(.horizontal, 14)
-                        .padding(.bottom, 12)
-                    }
-                }
-            }
-        }
-        .font(.system(size: textSize.scaled(12)))
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .onChange(of: isActive, initial: true) { _, active in
-            if active { usage.refresh(visible) }
-        }
-    }
-
-    private var visible: [AiUsageService] {
-        AiUsageService.allCases.filter { !settings.hiddenAiUsageServices.contains($0) }
-    }
-
-    private var copy: AiUsageCopy { .init(language: settings.appLanguage) }
-
-    private func serviceCard(_ service: AiUsageService, now: Date) -> some View {
-        let state = usage.snapshot(service)
-        return VStack(alignment: .leading, spacing: 7) {
-            HStack {
-                Text(service.title).fontWeight(.semibold)
-                Spacer()
-                if let plan = state.reading?.plan { Text(plan).foregroundStyle(.secondary) }
-            }
-            if let reading = state.reading {
-                VStack(alignment: .leading, spacing: 8) {
-                    ForEach(Array(reading.windows.enumerated()), id: \.offset) { _, window in
-                        windowRow(window, now: now)
-                    }
-                    ForEach(Array(reading.balances.enumerated()), id: \.offset) { _, balance in
-                        balanceRow(balance, now: now)
-                    }
-                }
-                .opacity(state.stale ? 0.60 : 1)
-            }
-            if case .failure(let error) = state.status {
-                if state.stale, let instant = state.fetchedAt {
-                    Text(copy.stale(instant))
-                        .foregroundStyle(.yellow)
-                }
-                Text(copy.error(error)).foregroundStyle(.secondary)
-            } else if state.status == .signedOut {
-                HStack {
-                    Text(copy.text("サインインしていません", "Signed out"))
-                        .foregroundStyle(.secondary)
-                    Spacer()
-                    Button(copy.text("設定でサインイン", "Sign in from Settings"), action: openSettings)
-                        .buttonStyle(.borderless)
-                }
-            } else if state.reading == nil {
-                Text(usage.isChangingAccount(service) ? copy.accountChanging : state.refreshing ? copy.checking : copy.unchecked)
-                    .foregroundStyle(.secondary)
-            }
-        }
-        .padding(10)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 8))
-    }
-
-    private func windowRow(_ window: AiUsageWindow, now: Date) -> some View {
-        let level = copy.level(window.percent)
-        let tint: Color = switch level {
-        case .critical: .red
-        case .warning: .yellow
-        case .normal: .blue
-        }
-        let elapsed = copy.elapsed(window, now: now)
-        let reset = copy.reset(window.resetsAt, now: now)
-        return VStack(alignment: .leading, spacing: 4) {
-            HStack {
-                Text(copy.windowLabel(window))
-                Spacer()
-                Text(copy.percent(window.percent)).monospacedDigit()
-                    .foregroundStyle(level == .normal ? Color.primary : tint)
-            }
-            GeometryReader { geometry in
-                let width = geometry.size.width
-                ZStack(alignment: .leading) {
-                    Capsule().fill(.white.opacity(0.13))
-                    Capsule().fill(tint).frame(width: width * window.percent / 100)
-                    if let elapsed {
-                        Rectangle().fill(.white.opacity(0.95))
-                            .frame(width: 2, height: 8)
-                            .offset(x: max(0, (width - 2) * elapsed))
-                            .help(copy.elapsedLabel(elapsed))
-                    }
-                }
-            }
-            .frame(height: 7)
-            .accessibilityHidden(true)
-            Text(window.kind == .weekly && elapsed != nil
-                 ? reset + " · " + (elapsed.map(copy.elapsedLabel) ?? "") : reset)
-                .font(.system(size: textSize.scaled(10)))
-                .foregroundStyle(.secondary)
-        }
-    }
-
-    private func balanceRow(_ balance: AiUsageBalance, now: Date) -> some View {
-        VStack(alignment: .leading, spacing: 3) {
-            HStack {
-                Text(copy.balanceLabel(balance))
-                Spacer()
-                Text(copy.balanceValue(balance)).monospacedDigit()
-            }
-            if let detail = copy.balanceDetail(balance, now: now) {
-                Text(detail).font(.system(size: textSize.scaled(10))).foregroundStyle(.secondary)
-            }
-        }
-    }
-}
-
 struct AiUsageSettingsView: View {
     @ObservedObject var settings: AppSettings
     @ObservedObject var usage: AiUsageStore
@@ -160,8 +9,8 @@ struct AiUsageSettingsView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text(copy.text("AI使用状況", "AI usage")).font(.headline)
-            ForEach(AiUsageService.allCases) { service in
-                if service != .codex { Divider() }
+            ForEach(settings.aiUsageServiceOrder) { service in
+                if service != settings.aiUsageServiceOrder.first { Divider() }
                 row(service)
             }
         }
@@ -173,13 +22,15 @@ struct AiUsageSettingsView: View {
         let state = usage.snapshot(service)
         let changing = usage.isChangingAccount(service)
         return VStack(alignment: .leading, spacing: 5) {
-            HStack(alignment: .firstTextBaseline) {
+            HStack(alignment: .top) {
                 Text(service.title).fontWeight(.semibold)
                 Text(heading(state: state, changing: changing))
                     .font(.callout)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
                 Spacer()
+                orderButton(service, offset: -1)
+                orderButton(service, offset: 1)
                 Toggle(copy.text("\(service.title)を表示", "Show \(service.title)"), isOn: Binding(
                     get: { !settings.hiddenAiUsageServices.contains(service) },
                     set: { visible in
@@ -224,6 +75,24 @@ struct AiUsageSettingsView: View {
             }
         }
         .padding(.vertical, 3)
+    }
+
+    private func orderButton(_ service: AiUsageService, offset: Int) -> some View {
+        let label = offset < 0 ? copy.text("上へ", "Move up") : copy.text("下へ", "Move down")
+        let allowed = settings.canStepAiUsageService(service, by: offset)
+        return Button {
+            settings.stepAiUsageService(service, by: offset)
+        } label: {
+            Image(systemName: offset < 0 ? "arrow.up" : "arrow.down")
+                .font(.system(size: 11, weight: .semibold))
+                .frame(width: 20, height: 18)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.borderless)
+        .disabled(!allowed)
+        .opacity(allowed ? 1 : 0.45)
+        .help(label)
+        .accessibilityLabel(label)
     }
 
     static func canSignOut(_ service: AiUsageService, usage: AiUsageStore) -> Bool {

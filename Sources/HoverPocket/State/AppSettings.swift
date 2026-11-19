@@ -164,6 +164,47 @@ final class AppSettings: ObservableObject {
         didSet { defaults.set(hiddenAiUsageServices.map(\.rawValue).sorted(), forKey: "hiddenAiUsageServices") }
     }
 
+    @Published var aiUsageLayout: AiUsageLayout {
+        didSet { defaults.set(aiUsageLayout.rawValue, forKey: "aiUsageLayout") }
+    }
+
+    @Published private(set) var aiUsageServiceOrder: [AiUsageService] {
+        didSet { defaults.set(aiUsageServiceOrder.map(\.rawValue), forKey: "aiUsageServiceOrder") }
+    }
+
+    @Published var aiUsageSort: AiUsageSort? {
+        didSet { defaults.set(aiUsageSort.map { [$0.column.rawValue, $0.direction.rawValue] }, forKey: "aiUsageSort") }
+    }
+
+    var visibleAiUsageServices: [AiUsageService] {
+        aiUsageServiceOrder.filter { !hiddenAiUsageServices.contains($0) }
+    }
+
+    func moveAiUsageService(_ service: AiUsageService, to target: AiUsageService) -> Bool {
+        guard let from = aiUsageServiceOrder.firstIndex(of: service),
+              let to = aiUsageServiceOrder.firstIndex(of: target), from != to else { return false }
+        var order = aiUsageServiceOrder
+        order.remove(at: from)
+        order.insert(service, at: to)
+        aiUsageServiceOrder = order
+        return true
+    }
+
+    func canStepAiUsageService(_ service: AiUsageService, by offset: Int) -> Bool {
+        aiUsageStepTarget(service, by: offset) != nil
+    }
+
+    func stepAiUsageService(_ service: AiUsageService, by offset: Int) {
+        guard let target = aiUsageStepTarget(service, by: offset) else { return }
+        _ = moveAiUsageService(service, to: target)
+    }
+
+    private func aiUsageStepTarget(_ service: AiUsageService, by offset: Int) -> AiUsageService? {
+        guard let from = aiUsageServiceOrder.firstIndex(of: service),
+              aiUsageServiceOrder.indices.contains(from + offset) else { return nil }
+        return aiUsageServiceOrder[from + offset]
+    }
+
     @Published var hiddenProviderRawValues: Set<String> {
         didSet {
             defaults.set(Array(hiddenProviderRawValues).sorted(), forKey: Self.hiddenProvidersKey)
@@ -350,6 +391,11 @@ final class AppSettings: ObservableObject {
         self.hiddenProviderRawValues = Set(hiddenValues)
         self.hiddenAiUsageServices = Set((defaults.stringArray(forKey: "hiddenAiUsageServices") ?? [])
             .compactMap(AiUsageService.init(rawValue:)))
+        self.aiUsageLayout = defaults.string(forKey: "aiUsageLayout").flatMap(AiUsageLayout.init(rawValue:)) ?? .list
+        var seen = Set<AiUsageService>()
+        let savedOrder = (defaults.stringArray(forKey: "aiUsageServiceOrder") ?? []).compactMap(AiUsageService.init(rawValue:))
+        self.aiUsageServiceOrder = (savedOrder + AiUsageService.allCases).filter { seen.insert($0).inserted }
+        self.aiUsageSort = AiUsageSort(stored: defaults.stringArray(forKey: "aiUsageSort") ?? [])
         if defaults.object(forKey: Self.rememberLastSelectedProviderKey) == nil {
             self.rememberLastSelectedProvider = true
         } else {

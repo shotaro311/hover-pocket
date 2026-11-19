@@ -2,7 +2,6 @@ import Foundation
 
 struct AiUsageCopy {
     let language: AppLanguage
-    enum Level { case normal, warning, critical }
 
     func text(_ japanese: String, _ english: String) -> String {
         language == .japanese ? japanese : english
@@ -25,71 +24,87 @@ struct AiUsageCopy {
         }
     }
 
-    func level(_ percent: Double) -> Level {
-        if percent >= 90 { return .critical }
-        if percent >= 80 { return .warning }
-        return .normal
-    }
+    var remaining: String { text("残り", "Left") }
+    var unavailable: String { text("取得できません", "Unavailable") }
+    var signedOut: String { text("サインインしていません", "Signed out") }
 
     func percent(_ value: Double) -> String {
         formatNumber(value, decimals: 1) + "%"
     }
 
-    func windowLabel(_ window: AiUsageWindow) -> String {
-        let label: String = switch window.kind {
+    func column(_ column: AiUsageColumn) -> String {
+        switch column {
         case .session: text("5時間", "5-hour")
         case .weekly: text("1週間", "Weekly")
-        case .window where window.minutes >= 1440 && window.minutes % 1440 == 0:
-            text("\(window.minutes / 1440)日", "\(window.minutes / 1440)-day")
-        case .window where window.minutes >= 60:
-            text("\(Int((Double(window.minutes) / 60).rounded()))時間", "\(Int((Double(window.minutes) / 60).rounded()))-hour")
-        case .window: text("枠", "Window")
+        case .other: text("別枠", "Other")
         }
-        return window.model.map { $0 + " · " + label } ?? label
     }
 
-    func elapsed(_ window: AiUsageWindow, now: Date) -> Double? {
-        guard let reset = window.resetsAt else { return nil }
-        let duration = Double(window.minutes) * 60
-        let remaining = reset.timeIntervalSince(now)
-        guard remaining > 0, remaining <= duration else { return nil }
-        return 1 - remaining / duration
+    func windowLabel(_ window: AiUsageWindow) -> String {
+        if let model = window.model { return model }
+        if window.column != .other { return column(window.column) }
+        return durationLabel(window.minutes)
     }
 
-    func elapsedLabel(_ elapsed: Double) -> String {
-        let percent = Int((elapsed * 100).rounded())
-        return text("経過\(percent)%", "\(percent)% elapsed")
+    func durationLabel(_ duration: Int) -> String {
+        if duration == 300 { return column(.session) }
+        if duration == 10_080 { return column(.weekly) }
+        let days = duration / 1440
+        let hours = duration % 1440 / 60
+        let minutes = duration % 60
+        let parts = [
+            days > 0 ? text("\(days)日", "\(days)d") : nil,
+            hours > 0 ? text("\(hours)時間", "\(hours)h") : nil,
+            minutes > 0 ? text("\(minutes)分", "\(minutes)m") : nil
+        ].compactMap { $0 }
+        return parts.isEmpty ? text("枠", "Window") : parts.joined(separator: text("", " "))
     }
 
-    func reset(_ date: Date?, now: Date) -> String {
-        guard let date else { return text("リセット時刻は不明", "Reset time unknown") }
+    func reset(_ date: Date?, now: Date) -> String? {
+        guard let date else { return nil }
         let seconds = date.timeIntervalSince(now)
-        guard seconds > 0 else { return text("リセット済み（次の更新で反映）", "Reset (updates on next refresh)") }
-        let relative: String
+        guard seconds > 0 else { return text("リセット済み", "Reset") }
         if seconds >= 86_400 {
             let hours = Int(seconds / 3600)
             let days = hours / 24
             let remainder = hours % 24
-            relative = text("\(days)日" + (remainder > 0 ? "\(remainder)時間" : ""),
-                            "\(days)d" + (remainder > 0 ? " \(remainder)h" : ""))
-            let time = formattedDate(date, japanese: "M/d(EEE) HH:mm", english: "EEE M/d HH:mm")
-            return text("あと\(relative)でリセット（\(time)）", "Resets in \(relative) (\(time))")
+            return text("\(days)日" + (remainder > 0 ? "\(remainder)時間" : ""),
+                        "\(days)d" + (remainder > 0 ? " \(remainder)h" : ""))
         }
-        let minutes = Int(ceil(seconds / 60))
-        let hours = minutes / 60
-        let remainder = minutes % 60
-        if hours > 0 {
-            relative = text("\(hours)時間" + (remainder > 0 ? "\(remainder)分" : ""),
-                            "\(hours)h" + (remainder > 0 ? " \(remainder)m" : ""))
-        } else {
-            relative = text("\(minutes)分", "\(minutes)m")
+        let minutes = min(1439, Int(ceil(seconds / 60)))
+        return String(format: "%d:%02d", minutes / 60, minutes % 60)
+    }
+
+    func resetHelp(_ date: Date) -> String {
+        let time = formattedDate(date, japanese: "M/d(EEE) HH:mm", english: "EEE M/d HH:mm")
+        return text("\(time)にリセット", "Resets \(time)")
+    }
+
+    func meterAccessibility(_ quota: AiUsageQuota, now: Date) -> String {
+        let window = quota.window
+        let label = quota.fullName(self)
+        guard let value = window.remaining else { return "\(label) \(unavailable)" }
+        let percent = percent(value)
+        var result = text("\(label) 残り\(percent)", "\(label) \(percent) left")
+        if let date = window.resetsAt, let time = reset(date, now: now) {
+            result += date > now ? text("、あと\(time)でリセット", ", resets in \(time)") : text("、\(time)", ", \(time)")
         }
-        return text("あと\(relative)でリセット", "Resets in \(relative)")
+        return result
+    }
+
+    func updated(_ date: Date) -> String {
+        let time = formattedDate(date, japanese: "HH:mm", english: "HH:mm")
+        return text("\(time) 更新", "Updated \(time)")
     }
 
     func stale(_ date: Date) -> String {
-        let time = formattedDate(date, japanese: "M/d HH:mm", english: "M/d HH:mm")
-        return text("\(time) 時点の値", "Previous reading at \(time)")
+        let time = formattedDate(date, japanese: "HH:mm", english: "HH:mm")
+        return text("\(time) の値", "Value at \(time)")
+    }
+
+    func balanceExpiry(_ date: Date, now: Date) -> String {
+        let day = formattedDate(date, japanese: "M/d", english: "M/d")
+        return date > now ? text("\(day)まで", "Until \(day)") : text("期限切れ（\(day)）", "Expired (\(day))")
     }
 
     func balanceLabel(_ balance: AiUsageBalance) -> String {

@@ -24,7 +24,7 @@ enum AiUsageService: String, CaseIterable, Identifiable, Sendable {
 struct AiUsageWindow: Equatable, Sendable {
     let kind: Kind
     let model: String?
-    let percent: Double
+    let percent: Double?
     let resetsAt: Date?
     let minutes: Int
 
@@ -32,7 +32,7 @@ struct AiUsageWindow: Equatable, Sendable {
         case session, weekly, window
     }
 
-    init(model: String? = nil, percent: Double, resetsAt: Date? = nil, minutes: Int) {
+    init(model: String? = nil, percent: Double?, resetsAt: Date? = nil, minutes: Int) {
         self.kind = switch minutes {
         case 300: .session
         case 10_080: .weekly
@@ -80,6 +80,7 @@ struct AiUsageSnapshot: Equatable, Sendable {
     var fetchedAt: Date?
     var checkedAt: Date?
     var refreshing = false
+
     var stale: Bool {
         if case .failure = status { return reading != nil }
         return false
