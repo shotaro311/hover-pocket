@@ -192,6 +192,8 @@ production resolverは、固定先のexact binaryと準備済みcontrol-planeが
 
 ## Windows updates and release packaging
 
+`0.2.22`は、AI Usageを「サブスクの利用枠」と「クレジット・残高」の2つのセクションに分け、数字をApple風の書体（同梱のInter）で表示します。並び替えはセクションごとに保存し、つかんだときに画面が暗くなって並べ替えられなかった不具合を、ポインタ操作の並べ替えに替えて直しました（矢印キーでも動かせます）。[作業記録](../progress/2026-11/2026-11-19_hover-pocket-ai-usage-layout.md)。
+
 `0.2.21`は、AI Usageを「一覧」と「メーター」の2つの表示に作り替えます。数字は残りの割合で、残り70%以上を青、50%以上を緑、25%以上を黄、それ未満を赤で示します。一覧は列の見出しで残りの少ない順・多い順に並べ替え、サービスの順番は取っ手のドラッグと設定の上下ボタンで変えられます。メーターは車の計器のような表示で、枠が複数あるサービスは横に並べます。[設計書](../docs/design/2026-11-19_ai-usage-list-and-meter.md)、[作業記録](../progress/2026-11/2026-11-19_hover-pocket-ai-usage-layout.md)。
 
 `0.2.20`は、AI UsageにAntigravity CLI（agy）の利用枠を加えます。同じPCで常駐するGemini Peerが保存する値から、Geminiモデルの5時間枠・1週間枠とモデル名を表示します（Geminiアプリの枠とは別）。値は取得した時刻のものとして示し、5分より古い値、Gemini Peerの停止、読み直しの失敗は理由を添えて表示します。[作業記録](../progress/2026-11/2026-11-19_hover-pocket-ai-usage-antigravity.md)。
@@ -270,7 +272,7 @@ python3 script/verify_release_readback.py --windows-tag auto --windows-signing-g
 
 ## AI使用状況（AI Usage）
 
-パネルの「AI Usage」に、Codex・Claude・Gemini・Museの5時間枠・1週間枠・モデル別の枠（ClaudeのFableなど）と、Claude ConsoleのAPIクレジット・Codexのクレジット・Colabのコンピューティング ユニットの残高を表示します。Claude Consoleは別にサインインし、ColabはGeminiと同じGoogleのサインインを使います。サインインは設定の「AI」→「AI使用状況」で行います。Codexはチャットと同じChatGPTログインを使います。Antigravity（Antigravity CLIのGeminiモデルの5時間枠・1週間枠）は、同じPCで常駐するGemini Peer（`127.0.0.1:17848`）から読み、HoverPocketでのサインインはありません。値が5分より古いときと更新ボタンでは、Gemini Peerに読み直しを頼みます（agyの `/usage` を開くだけで、モデルへの依頼はしません）。Claude・Gemini・Museは［サインイン］で開く窓で本人がサインインし、ログイン状態は `%APPDATA%\HoverPocket\AiUsageWebView2` の中にサービスごとのプロファイルとして残り、サインアウトはそのサービスのプロファイルだけを消去します。サインイン窓には実際の接続先を常に表示し、通常のサインイン先以外では警告します。HoverPocketはパスワードを受け取らず、使用状況を読むために各サービスのページを画面に出さずに開き、パネルには使用率・リセット時刻・プラン名・枠の名前だけを表示します。取得はツールや設定のAI欄を表示したとき（2分以内の値は再利用、未サインインは30分ごとに再確認）、更新ボタン、サインイン・サインアウトの直後、表示をオンにした直後だけです。各サイトの非公開の仕組みを使うため、サイト側の変更で読めなくなることがあり、その場合は理由を表示して0%とは表示しません。取得方法は[CodexBar](https://github.com/steipete/CodexBar)（MIT、`ThirdParty/CodexBar-LICENSE.txt`）を参考にしました。
+パネルの「AI Usage」に、Codex・Claude・Gemini・Museの5時間枠・1週間枠・モデル別の枠（ClaudeのFableなど）と、Claude ConsoleのAPIクレジット・Codexのクレジット・Colabのコンピューティング ユニットの残高を表示します。Claude Consoleは別にサインインし、ColabはGeminiと同じGoogleのサインインを使います。サインインは設定の「AI」→「AI使用状況」で行います。Codexはチャットと同じChatGPTログインを使います。Antigravity（Antigravity CLIのGeminiモデルの5時間枠・1週間枠）は、同じPCで常駐するGemini Peer（`127.0.0.1:17848`）から読み、HoverPocketでのサインインはありません。値が5分より古いときと更新ボタンでは、Gemini Peerに読み直しを頼みます（agyの `/usage` を開くだけで、モデルへの依頼はしません）。Claude・Gemini・Museは［サインイン］で開く窓で本人がサインインし、ログイン状態は `%APPDATA%\HoverPocket\AiUsageWebView2` の中にサービスごとのプロファイルとして残り、サインアウトはそのサービスのプロファイルだけを消去します。サインイン窓には実際の接続先を常に表示し、通常のサインイン先以外では警告します。HoverPocketはパスワードを受け取らず、使用状況を読むために各サービスのページを画面に出さずに開き、パネルには使用率・リセット時刻・プラン名・枠の名前だけを表示します。取得はツールや設定のAI欄を表示したとき（2分以内の値は再利用、未サインインは30分ごとに再確認）、更新ボタン、サインイン・サインアウトの直後、表示をオンにした直後だけです。各サイトの非公開の仕組みを使うため、サイト側の変更で読めなくなることがあり、その場合は理由を表示して0%とは表示しません。取得方法は[CodexBar](https://github.com/steipete/CodexBar)（MIT、`ThirdParty/CodexBar-LICENSE.txt`）を参考にしました。数字の表示には書体[Inter](https://github.com/rsms/inter) 4.1（SIL Open Font License 1.1、`ui/fonts/InterVariable.woff2`、許諾書は `ThirdParty/Inter-LICENSE.txt`）を同梱しています。
 
 検証は `--verify ai-usage`（ネットワークを使わない。応答の解析、取得の規則、ブリッジ、隠しWebView2での読み取り、パネルと設定画面の実描画）です。Debugビルドの `--verify ai-usage-live` は実サイトを1回読み、`HOVERPOCKET_AI_USAGE_SIGNIN=claude,gemini,muse`（1つでも可）でサインイン窓を順に開き、`HOVERPOCKET_AI_USAGE_SIGNIN_SMOKE=1` で各サインイン窓の到達先を確かめます。保存場所は一時フォルダーの `HoverPocket\AiUsageLive` です。
 

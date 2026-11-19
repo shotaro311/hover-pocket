@@ -1,9 +1,12 @@
+using System.Runtime.InteropServices;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Windows;
 using HoverPocket.Shell.Bridge;
+using HoverPocket.Shell.Capture;
 using HoverPocket.Shell.Configuration;
 using HoverPocket.Shell.Settings;
+using HoverPocket.Shell.Windows;
 using Microsoft.Web.WebView2.Core;
 using Microsoft.Web.WebView2.Wpf;
 
@@ -760,28 +763,38 @@ internal sealed class AiUsageVerifier
         Check(normalized.ProviderOrder[^1] == "ai-usage" && normalized.ProviderVisibility["ai-usage"], "settings: existing users get the new tool at the end, visible");
         Check(normalized.AiUsageHiddenServices.SequenceEqual(["muse", "antigravity"]), "settings: hidden services keep only known ids");
         Check(normalized.AiUsageView == "list" && normalized.AiUsageSort is null
-            && normalized.AiUsageServiceOrder.SequenceEqual(AiUsageServiceIds.All), "settings: old settings default to list and the original service order");
+            && normalized.AiUsageServiceOrder.SequenceEqual(AiUsageServiceIds.All)
+            && normalized.AiUsageBalanceOrder.SequenceEqual(AiUsageServiceIds.All),
+            "settings: old settings default to list and the original order in both sections");
         var clone = normalized.Clone();
         clone.AiUsageHiddenServices.Add("codex");
         clone.AiUsageServiceOrder.Remove("codex");
-        Check(normalized.AiUsageServiceOrder.SequenceEqual(AiUsageServiceIds.All), "settings: clone copies the service order");
+        clone.AiUsageBalanceOrder.Remove("codex");
+        Check(normalized.AiUsageServiceOrder.SequenceEqual(AiUsageServiceIds.All)
+            && normalized.AiUsageBalanceOrder.SequenceEqual(AiUsageServiceIds.All), "settings: clone copies both service orders");
         Check(normalized.AiUsageHiddenServices.Count == 2, "settings: clone copies the hidden list");
         var store = UserSettingsStore.CreateTemporary("AiUsageSettingsVerify");
-        normalized.AiUsageServiceOrder = ["muse", "unknown", "muse", "gemini"];
+        normalized.AiUsageServiceOrder = ["muse", "unknown", "muse", "gemini", "colab", "codex"];
+        normalized.AiUsageBalanceOrder = [];
         normalized.AiUsageView = "invalid";
         normalized.AiUsageSort = new AiUsageListSort("session", "invalid");
         store.Save(normalized);
         var loaded = store.Load(providers.ProviderIds);
         Check(loaded.AiUsageHiddenServices.SequenceEqual(["muse", "antigravity"]), "settings: hidden services persist");
         Check(loaded.AiUsageView == "list" && loaded.AiUsageSort is null
-            && loaded.AiUsageServiceOrder.SequenceEqual(["muse", "gemini", "codex", "claude", "claude-api", "antigravity", "colab"]),
+            && loaded.AiUsageServiceOrder.SequenceEqual(["muse", "gemini", "colab", "codex", "claude", "claude-api", "antigravity"]),
             "settings: invalid preferences fall back and the saved order keeps hidden services, dropping unknown and duplicate ids");
+        Check(loaded.AiUsageBalanceOrder.SequenceEqual(loaded.AiUsageServiceOrder),
+            "settings: migrating a prior custom order retains the original relative order of balances");
+        loaded.AiUsageBalanceOrder = ["claude-api", "unknown", "claude-api", "colab"];
         loaded.AiUsageView = "meter";
         loaded.AiUsageSort = new AiUsageListSort("other", "desc");
         store.Save(loaded);
         var reopened = new UserSettingsStore(store.RootDirectory).Load(providers.ProviderIds);
         Check(reopened.AiUsageView == "meter" && reopened.AiUsageSort == new AiUsageListSort("other", "desc")
-            && reopened.AiUsageServiceOrder.SequenceEqual(loaded.AiUsageServiceOrder), "settings: meter, custom order and list sort survive a new store");
+            && reopened.AiUsageServiceOrder.SequenceEqual(loaded.AiUsageServiceOrder)
+            && reopened.AiUsageBalanceOrder.SequenceEqual(["claude-api", "colab", "codex", "claude", "gemini", "antigravity", "muse"]),
+            "settings: meter, list sort and both independent normalized orders survive a new store");
     }
 
     private async Task VerifyBridgeAndUiAsync(Action<string> log)
@@ -864,7 +877,16 @@ internal sealed class AiUsageVerifier
         Check(presentation["result"]?["view"]?.GetValue<string>() == "meter"
             && crossSurface["result"]?["sort"]?["direction"]?.GetValue<string>() == "desc"
             && published?["payload"]?["view"]?.GetValue<string>() == "meter", "bridge: panel saves presentation and broadcasts it to Settings");
-        var restored = await Call(settings, "aiUsage.setPresentation", new { view = "list", order = AiUsageServiceIds.All, sort = (object?)null });
+        var balancesFirst = await Call(settings, "aiUsage.setPresentation", new { balanceOrder = new[] { "colab", "unknown", "colab" } });
+        var balanceEvent = settingsEvents.Select(json => JsonNode.Parse(json)!).Last(node => node["event"]?.GetValue<string>() == "aiUsage.changed");
+        Check(balancesFirst["result"]?["order"]?.AsArray()[0]?.GetValue<string>() == "codex"
+            && balancesFirst["result"]?["balanceOrder"]?.AsArray().Count == 7
+            && balanceEvent["payload"]?["balanceOrder"]?.AsArray()[0]?.GetValue<string>() == "colab"
+            && (await Call(panel, "aiUsage.getState"))["result"]?["balanceOrder"]?.AsArray()[0]?.GetValue<string>() == "colab",
+            "bridge: Settings saves, normalizes and broadcasts only the balance order");
+        var restored = await Call(settings, "aiUsage.setPresentation", new {
+            view = "list", order = AiUsageServiceIds.All, balanceOrder = AiUsageServiceIds.All, sort = (object?)null
+        });
         Check(restored["result"]?["view"]?.GetValue<string>() == "list" && restored["result"]?["sort"] is null
             && (await Call(panel, "aiUsage.getState"))["result"]?["order"]?.AsArray().Count == 7, "bridge: Settings can save order and clear sort");
 
@@ -879,12 +901,21 @@ internal sealed class AiUsageVerifier
     private async Task VerifyPanelUiAsync(PanelBridgeController controller, UserSettingsStore store, Dictionary<string, AiUsageResult> readings, Action<string> log)
     {
         var minWidth = PanelSizeCatalog.ResizeLimits(0).MinWidth;
+        var nativeMouse = Environment.GetEnvironmentVariable("HOVERPOCKET_AI_USAGE_NATIVE_MOUSE") == "1";
+        var workArea = SystemParameters.WorkArea;
         var window = new Window
         {
-            Left = -20000, Top = -20000, Width = minWidth, Height = 520, ShowActivated = false, ShowInTaskbar = false,
-            WindowStartupLocation = WindowStartupLocation.Manual, WindowStyle = WindowStyle.None
+            Left = nativeMouse ? workArea.Left + (workArea.Width - minWidth) / 2 : -20000,
+            Top = nativeMouse ? workArea.Top + Math.Max(0, (workArea.Height - 520) / 2) : -20000,
+            Width = minWidth, Height = 520, ShowActivated = false, ShowInTaskbar = false, Topmost = nativeMouse,
+            WindowStartupLocation = WindowStartupLocation.Manual, WindowStyle = WindowStyle.None,
+            Background = System.Windows.Media.Brushes.Transparent, AllowsTransparency = true
         };
-        var web = new WebView2 { CreationProperties = new CoreWebView2CreationProperties { UserDataFolder = Path.Combine(store.RootDirectory, "PanelWebView") } };
+        var web = new PanelWebView
+        {
+            CreationProperties = new CoreWebView2CreationProperties { UserDataFolder = Path.Combine(store.RootDirectory, "PanelWebView") },
+            DefaultBackgroundColor = System.Drawing.Color.Transparent
+        };
         window.Content = web;
         IDisposable? attachment = null;
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(60));
@@ -923,7 +954,29 @@ internal sealed class AiUsageVerifier
                     all(selector) { return [...document.querySelectorAll(selector)]; },
                     one(selector) { return document.querySelector(selector); },
                     text(selector) { return this.one(selector)?.textContent.trim() ?? ''; },
-                    services() { return this.all('.hp-usage-service').map(n => n.dataset.service).join(','); },
+                    services(section = 'order') {
+                        return this.all('.hp-usage-section[data-section=' + section + '] .hp-usage-service').map(n => n.dataset.service).join(',');
+                    },
+                    grip(id, section = 'order') {
+                        return this.one('.hp-usage-section[data-section=' + section + '] [data-service=' + id + '] .hp-usage-handle');
+                    },
+                    center(node) {
+                        const rect = node.getBoundingClientRect();
+                        return { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 };
+                    },
+                    key(grip, key) {
+                        this.keyGrip = grip;
+                        grip.focus({preventScroll:true});
+                        grip.dispatchEvent(new KeyboardEvent('keydown', {bubbles:true, cancelable:true, key}));
+                    },
+                    sections() { return this.all('.hp-usage-section-title').map(n => n.textContent).join('|'); },
+                    typography(selector) {
+                        const numeric = this.one(selector + ' .hp-usage-numeric');
+                        if (!numeric) return false;
+                        const style = getComputedStyle(numeric);
+                        return style.fontFamily.startsWith('Inter,') && !/Consolas|monospace/i.test(style.fontFamily)
+                            && style.fontFeatureSettings.includes('"tnum"') && style.fontWeight === '500';
+                    },
                     values(service) { return this.all('[data-service=' + service + '] .hp-usage-value').map(n => n.textContent).join('|'); },
                     sort() { return this.one('.hp-usage-table [aria-sort]'); },
                     fit() {
@@ -995,22 +1048,44 @@ internal sealed class AiUsageVerifier
                             return opacity === expected;
                         });
                     },
-                    drag(from, to) {
-                        const source = this.one('.hp-usage-service[data-service=' + from + '] .hp-usage-handle');
-                        const target = this.one('.hp-usage-service[data-service=' + to + ']');
-                        const dataTransfer = new DataTransfer();
-                        const drag = (node, type) => node.dispatchEvent(new DragEvent(type, {bubbles:true, cancelable:true, dataTransfer}));
-                        drag(source, 'dragstart'); drag(target, 'dragover'); drag(target, 'drop'); drag(source, 'dragend');
+                    pointer(type, grip, point) {
+                        grip.dispatchEvent(new PointerEvent(type, {
+                            bubbles:true, cancelable:true, pointerId:51, pointerType:'mouse', isPrimary:true,
+                            button:type === 'pointermove' ? -1 : 0, buttons:type === 'pointerup' || type === 'pointercancel' ? 0 : 1,
+                            clientX:point.x, clientY:point.y
+                        }));
+                    },
+                    beginMove(from, to, section = 'order') {
+                        const grip = this.grip(from, section);
+                        const destination = this.grip(to, section);
+                        grip.closest('.hp-usage-section').scrollIntoView({block:'start'});
+                        const point = this.center(destination);
+                        // Synthetic events have no active system pointer. The optional native mouse test uses real capture.
+                        let captured = false;
+                        grip.setPointerCapture = id => { captured = id === 51; };
+                        try { this.pointer('pointerdown', grip, this.center(grip)); }
+                        finally { delete grip.setPointerCapture; }
+                        const item = grip.closest('.hp-usage-service');
+                        const lifted = getComputedStyle(item).outlineColor === 'rgb(90, 169, 255)' &&
+                            getComputedStyle(item).outlineStyle === 'solid' && Number(getComputedStyle(item).opacity) === 1;
+                        this.pointer('pointermove', grip, point);
+                        this.move = {grip, point};
+                        return captured && lifted && !grip.draggable && !grip.hasAttribute('draggable');
+                    },
+                    endMove(type = 'pointerup', outside = false) {
+                        const {grip, point} = this.move;
+                        this.pointer(type, grip, outside ? {x:-10, y:-10} : point);
                     }
                 };
                 """);
             const string defaultListOrder = "codex,claude,gemini,antigravity,muse";
             const string listAfterDrag = "claude,codex,gemini,antigravity,muse";
             const string listDragOrder = "claude,codex,claude-api,gemini,antigravity,colab,muse";
-            const string meterDragOrder = "muse,claude,codex,claude-api,gemini,antigravity,colab";
-            const string listAfterMeterDrag = "muse,claude,codex,gemini,antigravity";
-            const string settingsOrder = "claude,muse,codex,claude-api,gemini,antigravity,colab";
+            const string movedBalanceOrder = "claude-api,codex,colab";
+            const string savedBalanceOrder = "claude-api,claude,codex,gemini,antigravity,colab,muse";
+            const string settingsOrder = "codex,claude,gemini,muse,antigravity";
             string Ordered(string order) => $"usageVerify.services() === '{order}'";
+            string BalanceOrdered(string order) => $"usageVerify.services('balanceOrder') === '{order}'";
             await Select("ai-usage");
             await WaitFor($"!!usageVerify.one('.hp-usage-list') && {Ordered(defaultListOrder)} && usageVerify.values('claude') === '68%|70%|15%|25%'");
 
@@ -1047,18 +1122,39 @@ internal sealed class AiUsageVerifier
                 && !/更新|Max 5x|Gemini 4 Hydrogen|経過/.test(usageVerify.text('.hp-usage-body'))
                 && !usageVerify.one('.hp-usage-pace, .hp-usage-plan, .hp-usage-model')
                 """), "panel UI: Antigravity shows remaining percentages and only the header shows update time");
-            const string apiChip = ".hp-usage-chip[data-balance-service=claude-api]";
+            const string apiCard = ".hp-usage-balance[data-service=claude-api]";
             Check(await Js($"""
-                usageVerify.all('{apiChip}').length === 1
-                && usageVerify.text('{apiChip} .hp-usage-balance-amount') === '$112.34'
-                && ['API credit (Max)', '$100.00', '$12.34', '<$0.01', 'まで（あと'].every(s => usageVerify.one('{apiChip}').title.includes(s))
+                usageVerify.all('{apiCard}').length === 1
+                && usageVerify.text('{apiCard} .hp-usage-balance-amount') === '$112.34'
+                && ['API credit (Max)', '$100.00', '$12.34', '<$0.01', 'まで（あと'].every(s => usageVerify.one('{apiCard} .hp-usage-balance-reading').title.includes(s))
                 """), "panel UI: Claude API total preserves plan, bought credits, sub-cent precision and expiry in the tooltip");
+            const string sections = """
+                usageVerify.sections() === 'サブスクの利用枠|クレジット・残高'
+                && !usageVerify.one('[data-section=order] .hp-usage-balance, [data-section=balanceOrder] .hp-usage-meter')
+                && usageVerify.all('[data-section=order] [data-service=codex]').length === 1
+                && usageVerify.all('[data-section=balanceOrder] [data-service=codex]').length === 1
+                && usageVerify.all('.hp-usage-section-title').every(n => getComputedStyle(n).color === 'rgb(155, 166, 181)'
+                    && getComputedStyle(n, '::after').backgroundColor === 'rgba(255, 255, 255, 0.08)')
+                """;
+            Check(await Js(sections + """
+                && usageVerify.all('.hp-usage-balance[data-service=codex] .hp-usage-balance-amount').map(n => n.textContent).join('|')
+                    === '12,345.68 CR|無制限|読み取れません'
+                && usageVerify.text('.hp-usage-balance[data-service=colab] .hp-usage-balance-amount') === '87.6 CU'
+                && !usageVerify.one('[data-section=order] [data-service=colab], [data-section=order] [data-service=claude-api]')
+                """), "panel UI: separate plan and balance sections keep one Codex item each and preserve amount states");
+            await WaitFor("document.fonts.status === 'loaded'");
             Check(await Js("""
-                usageVerify.all('.hp-usage-chip[data-balance-service=codex] .hp-usage-balance-amount').map(n => n.textContent).join('|')
-                    === '12,345.68|無制限|読み取れません'
-                && usageVerify.text('.hp-usage-chip[data-balance-service=colab] .hp-usage-balance-amount') === '87.6'
-                && !usageVerify.one('.hp-usage-service[data-service=colab], .hp-usage-service[data-service=claude-api]')
-                """), "panel UI: balance-only services appear as chips only, preserving amounts and unavailable/unlimited states");
+                document.fonts.check('500 13px Inter', '94.9% $12,345.68')
+                && [...document.fonts].some(font => font.family === 'Inter' && font.status === 'loaded')
+                && ['.hp-usage-value', '.hp-usage-reset', '.hp-usage-updated', '.hp-usage-balance-amount'].every(s => usageVerify.typography(s))
+                && !getComputedStyle(usageVerify.one('.hp-usage-updated')).fontFamily.startsWith('Inter')
+                && !getComputedStyle(usageVerify.one('.hp-usage-section-title')).fontFamily.startsWith('Inter')
+                && usageVerify.all('.hp-usage-percent-sign, .hp-usage-balance-unit').every(unit => {
+                    const style = getComputedStyle(unit);
+                    return style.color === 'rgb(155, 166, 181)' &&
+                        parseFloat(style.fontSize) < parseFloat(getComputedStyle(unit.previousElementSibling).fontSize);
+                })
+                """), "panel UI: bundled Inter is loaded on numbers with tabular figures, 500 weight and smaller muted units");
             Check(await Js("""
                 usageVerify.all('.hp-usage-limit').every(limit => usageVerify.resetFits(limit))
                 && (() => {
@@ -1085,15 +1181,16 @@ internal sealed class AiUsageVerifier
                 """), "panel UI: crowded countdowns move below the bar and the full error still fits at the largest text size");
             Check(await Js("usageVerify.fit()"), "panel UI: list fits at the minimum panel width");
             Check(await Js("usageVerify.scrollingList()"), "panel UI: the list scrolls without a scrollbar and the opaque column header stays at the top");
-            await Capture(web, "panel");
+            await Capture(web.CoreWebView2, "panel");
             await web.ExecuteScriptAsync("usageVerify.one('.hp-usage-body').scrollTop = 10000");
             await Task.Delay(150, timeout.Token);
-            await Capture(web, "panel-bottom");
+            await Capture(web.CoreWebView2, "panel-bottom");
 
             await web.ExecuteScriptAsync("usageVerify.one('[data-sort-column=session]').click()");
             await WaitFor(Ordered("claude,codex,antigravity,gemini,muse"));
-            Check(await Js("usageVerify.sort()?.getAttribute('aria-sort') === 'ascending' && !usageVerify.one('.hp-usage-handle')"),
-                "panel UI: first session sort is ascending and hides dragging");
+            Check(await Js("usageVerify.sort()?.getAttribute('aria-sort') === 'ascending' && !usageVerify.one('[data-section=order] .hp-usage-handle')"
+                + " && !!usageVerify.grip('codex', 'balanceOrder') && " + BalanceOrdered("codex,claude-api,colab")),
+                "panel UI: ascending list sort hides only the plan handles and preserves the balance order");
             Check(await Js("usageVerify.reasonFits('muse')"), "panel UI: an error without values aligns with the session column even when sorted");
             await web.ExecuteScriptAsync("usageVerify.one('[data-sort-column=session]').click()");
             await WaitFor(Ordered("antigravity,codex,claude,gemini,muse"));
@@ -1108,15 +1205,54 @@ internal sealed class AiUsageVerifier
             await WaitFor($"!!usageVerify.one('.hp-usage-handle') && {Ordered(defaultListOrder)}");
             Check(await Js("!usageVerify.sort()"), "panel UI: Back to my order restores the custom order");
 
-            await web.ExecuteScriptAsync("usageVerify.drag('claude','codex')");
-            await WaitFor(Ordered(listAfterDrag));
-            Check(store.Load(ProviderRegistry.CreateDefault().ProviderIds).AiUsageServiceOrder.SequenceEqual(listDragOrder.Split(',')),
-                "panel UI: a list drag saves the new custom order");
+            var providerIds = ProviderRegistry.CreateDefault().ProviderIds;
+            foreach (var cancel in new[] { "Escape", "pointercancel", "outside", "pointerup" })
+            {
+                Check(await Js("usageVerify.beginMove('claude','codex') && " + Ordered(listAfterDrag)
+                    + " && usageVerify.grip('claude').getAttribute('aria-label') === 'Claudeを移動'"
+                    + " && document.activeElement === usageVerify.grip('claude')"
+                    + " && " + BalanceOrdered("codex,claude-api,colab")),
+                    $"panel UI: live pointer move reorders only plan rows and keeps focus ({cancel})");
+                Check(store.Load(providerIds).AiUsageServiceOrder.SequenceEqual(AiUsageServiceIds.All),
+                    $"panel UI: provisional order is never saved while the pointer is down ({cancel})");
+                if (cancel == "Escape") await web.ExecuteScriptAsync("usageVerify.key(usageVerify.move.grip, 'Escape')");
+                else if (cancel == "outside") await web.ExecuteScriptAsync("usageVerify.endMove('pointerup', true)");
+                else await web.ExecuteScriptAsync($"usageVerify.endMove('{cancel}')");
+                var expected = cancel == "pointerup" ? listAfterDrag : defaultListOrder;
+                var savedOrCancelled = cancel == "pointerup" ? " && !usageVerify.move.grip.isConnected" : "";
+                await WaitFor(Ordered(expected) + " && !usageVerify.one('.is-dragging')" + savedOrCancelled);
+                Check(store.Load(providerIds).AiUsageServiceOrder.SequenceEqual(
+                    cancel == "pointerup" ? listDragOrder.Split(',') : AiUsageServiceIds.All),
+                    $"panel UI: finish commits only a valid pointerup ({cancel})");
+            }
+
+            if (nativeMouse)
+            {
+                await VerifyNativePointerAsync(web, WaitFor, Ordered(defaultListOrder), log, timeout.Token);
+                await web.ExecuteScriptAsync("usageVerify.key(usageVerify.grip('claude'), 'ArrowUp')");
+                await WaitFor(Ordered(listAfterDrag) + " && !usageVerify.keyGrip.isConnected");
+            }
+            else
+            {
+                log("SKIP ai-usage native mouse (set HOVERPOCKET_AI_USAGE_NATIVE_MOUSE=1 on an interactive desktop)");
+            }
+
+            Check(await Js("usageVerify.beginMove('codex','claude-api','balanceOrder') && "
+                + BalanceOrdered(movedBalanceOrder) + " && " + Ordered(listAfterDrag)),
+                "panel UI: pointer moves a balance card without moving plan rows");
+            await web.ExecuteScriptAsync("usageVerify.endMove()");
+            await WaitFor(BalanceOrdered(movedBalanceOrder) + " && !usageVerify.move.grip.isConnected");
+            var balanceSaved = store.Load(providerIds);
+            Check(balanceSaved.AiUsageBalanceOrder.SequenceEqual(savedBalanceOrder.Split(','))
+                && balanceSaved.AiUsageServiceOrder.SequenceEqual(listDragOrder.Split(',')),
+                "panel UI: the balance pointerup saves only the balance order");
 
             await web.ExecuteScriptAsync("usageVerify.one('[data-sort-column=weekly]').click()");
             await WaitFor("usageVerify.sort()?.querySelector('[data-sort-column=weekly]') != null");
             await web.ExecuteScriptAsync("usageVerify.one('[data-view=meter]').click()");
-            await WaitFor($"!!usageVerify.one('.hp-usage-meter-grid') && {Ordered(listDragOrder)}");
+            await WaitFor($"!!usageVerify.one('.hp-usage-meter-grid') && {Ordered(listAfterDrag)} && {BalanceOrdered(movedBalanceOrder)}");
+            Check(await Js(sections + " && usageVerify.typography('.hp-usage-meter-number')"),
+                "panel UI: meter retains the same separate sections and renders its digits in Inter");
             Check(await Js("""
                 usageVerify.all('.hp-usage-meter').every(n => {
                     const svg = n.querySelector('svg');
@@ -1169,21 +1305,35 @@ internal sealed class AiUsageVerifier
                 """), "panel UI: meter balances keep units, expiry and detailed consumption without drawing gauges");
             Check(await Js("usageVerify.fit() && !/更新|Max 5x|Gemini 4 Hydrogen|経過/.test(usageVerify.text('.hp-usage-body'))"),
                 "panel UI: fixed-size meters wrap at minimum width and omit the previous card metadata");
-            await Capture(web, "panel-meter");
+            // Let the view switch finish its 120ms colour transition before the picture and the check.
+            await Task.Delay(300, timeout.Token);
+            Check(await Js("""
+                getComputedStyle(usageVerify.one('.hp-usage-header [aria-pressed=false]')).backgroundColor === 'rgba(0, 0, 0, 0)'
+                && getComputedStyle(usageVerify.one('.hp-usage-header [aria-pressed=true]')).backgroundColor !== 'rgba(0, 0, 0, 0)'
+                """), "panel UI: only the selected view is filled in the view switch");
+            await Capture(web.CoreWebView2, "panel-meter");
 
-            await web.ExecuteScriptAsync("usageVerify.drag('muse','claude')");
-            await WaitFor(Ordered(meterDragOrder));
+            await web.ExecuteScriptAsync("usageVerify.key(usageVerify.grip('codex'), 'ArrowUp')");
+            await WaitFor(Ordered(defaultListOrder) + " && !usageVerify.keyGrip.isConnected");
+            Check(await Js("document.activeElement === usageVerify.grip('codex') && " + BalanceOrdered(movedBalanceOrder)),
+                "panel UI: ArrowUp moves a meter group one position and retains handle focus");
+            await web.ExecuteScriptAsync("usageVerify.key(usageVerify.grip('codex', 'balanceOrder'), 'ArrowRight')");
+            await WaitFor(BalanceOrdered("claude-api,colab,codex") + " && !usageVerify.keyGrip.isConnected");
+            await web.ExecuteScriptAsync("usageVerify.key(usageVerify.grip('codex', 'balanceOrder'), 'ArrowLeft')");
+            await WaitFor(BalanceOrdered(movedBalanceOrder) + " && !usageVerify.keyGrip.isConnected");
             await Select("timer");
             await WaitFor("!usageVerify.one('.hp-usage')");
             await Select("ai-usage");
-            await WaitFor($"!!usageVerify.one('.hp-usage-meter-grid') && {Ordered(meterDragOrder)}");
-            var saved = new UserSettingsStore(store.RootDirectory).Load(ProviderRegistry.CreateDefault().ProviderIds);
+            await WaitFor($"!!usageVerify.one('.hp-usage-meter-grid') && {Ordered(defaultListOrder)} && {BalanceOrdered(movedBalanceOrder)}");
+            var saved = new UserSettingsStore(store.RootDirectory).Load(providerIds);
             Check(saved.AiUsageView == "meter" && saved.AiUsageSort == new AiUsageListSort("weekly", "asc")
-                && saved.AiUsageServiceOrder.SequenceEqual(meterDragOrder.Split(',')), "panel UI: reopen and disk readback preserve meter, sort and drag order");
+                && saved.AiUsageServiceOrder.SequenceEqual(AiUsageServiceIds.All)
+                && saved.AiUsageBalanceOrder.SequenceEqual(savedBalanceOrder.Split(',')),
+                "panel UI: reopen and disk readback preserve meter, sort and both orders");
             await web.ExecuteScriptAsync("usageVerify.one('[data-view=list]').click()");
             await WaitFor("usageVerify.sort()?.querySelector('[data-sort-column=weekly]') != null");
             await web.ExecuteScriptAsync("usageVerify.one('.hp-usage-sort-reset').click()");
-            await WaitFor($"!!usageVerify.one('.hp-usage-handle') && {Ordered(listAfterMeterDrag)}");
+            await WaitFor($"!!usageVerify.grip('codex') && {Ordered(defaultListOrder)} && {BalanceOrdered(movedBalanceOrder)}");
 
             var service = controller.AiUsageForVerify!;
             async Task ReadAntigravity(AiUsageResult result, bool newAccount = true)
@@ -1212,7 +1362,7 @@ internal sealed class AiUsageVerifier
                 """), "panel UI: a stopped peer shows the new guidance and dims only the old percentages and bars");
             await web.ExecuteScriptAsync("usageVerify.one('[data-service=antigravity]').scrollIntoView({block:'center'})");
             await Task.Delay(150, timeout.Token);
-            await Capture(web, "panel-antigravity-stopped");
+            await Capture(web.CoreWebView2, "panel-antigravity-stopped");
 
             await ReadAntigravity(AiUsageResult.StaleReading(new AiUsageReading("Gemini 4 Hydrogen (High)", [
                 new AiUsageWindow("antigravity:gemini-5h", "session", null, 0, DateTimeOffset.UtcNow.AddHours(2), 300, State: "unreadable"),
@@ -1235,8 +1385,8 @@ internal sealed class AiUsageVerifier
                     const gauges = [...card.querySelectorAll('.hp-usage-meter')];
                     const unreadable = gauges.filter(n => n.dataset.percent === '');
                     const opacity = (selector, expected) => usageVerify.haveOpacity(card, selector, expected);
-                    return opacity('.hp-usage-meter[data-percent]:not([data-percent=""]) .hp-usage-meter-number, .hp-usage-meter-value', 0.5)
-                        && opacity('.hp-usage-limit-name, .hp-usage-meter-detail, .hp-usage-reset, .hp-usage-needle, svg', 1)
+                    return opacity('.hp-usage-meter[data-percent]:not([data-percent=""]) .hp-usage-meter-number, .hp-usage-meter-value, .hp-usage-needle', 0.5)
+                        && opacity('.hp-usage-limit-name, .hp-usage-meter-detail, .hp-usage-reset, svg', 1)
                         && unreadable.length === 2
                         && unreadable.every(n => n.querySelector('.hp-usage-meter-number').textContent === '—'
                             && n.getAttribute('aria-label').includes('取得できません') && n.title.includes('取得できません')
@@ -1295,19 +1445,28 @@ internal sealed class AiUsageVerifier
 
             await ReadAntigravity(AntigravityReading(5.1, DateTimeOffset.UtcNow));
             service.BeginAccountChange("colab");
-            const string loadingColab = "usageVerify.text('[data-service=colab] .hp-usage-message') === '読み込み中…'";
+            const string loadingColab = "usageVerify.text('[data-section=balanceOrder] [data-service=colab] .hp-usage-message') === '読み込み中…'";
             await WaitFor(loadingColab);
-            Check(await Js(loadingColab + " && !usageVerify.one('.hp-usage-chip[data-balance-service=colab]')"),
-                "panel UI: a balance-only service still gets a row while awaiting its first reading");
+            Check(await Js(loadingColab + " && !usageVerify.one('[data-section=order] [data-service=colab], [data-service=colab] .hp-usage-balance-amount')"),
+                "panel UI: a balance-only service remains in the balance section while loading");
+            readings["colab"] = AiUsageResult.SignedOut();
             await service.RefreshAsync(["colab"], force: true);
-            await WaitFor(Ordered(listAfterMeterDrag));
+            await WaitFor("usageVerify.text('[data-section=balanceOrder] [data-service=colab]').includes('Geminiのサインインを使います')");
+            readings["colab"] = AiUsageResult.Failure(AiUsageErrorCodes.Changed);
+            await service.RefreshAsync(["colab"], force: true);
+            await WaitFor("!!usageVerify.one('[data-section=balanceOrder] [data-service=colab] .hp-usage-error')");
+            readings["colab"] = AiUsageResult.Success(new AiUsageReading(null, [], [new AiUsageBalance("computeUnits", null, 87.6m, "units", null, 0m)]));
+            await service.RefreshAsync(["colab"], force: true);
+            await WaitFor("usageVerify.text('[data-service=colab] .hp-usage-balance-amount') === '87.6 CU'");
             await VerifySettingsUiAsync(controller, store, log);
-            const string listSettingsOrder = "claude,muse,codex,gemini,antigravity";
-            await WaitFor(Ordered(listSettingsOrder));
-            Check(await Js(Ordered(listSettingsOrder)), "panel UI: Settings moves update the open list");
+            const string settingsBalanceOrder = "claude-api,colab,codex";
+            await WaitFor(Ordered(settingsOrder) + " && " + BalanceOrdered(settingsBalanceOrder));
+            Check(await Js(Ordered(settingsOrder) + " && " + BalanceOrdered(settingsBalanceOrder)),
+                "panel UI: Settings moves update both sections of the open list");
             await web.ExecuteScriptAsync("usageVerify.one('[data-view=meter]').click()");
-            await WaitFor($"!!usageVerify.one('.hp-usage-meter-grid') && {Ordered(settingsOrder)}");
-            Check(await Js(Ordered(settingsOrder)), "panel UI: the meter reflects the same Settings order");
+            await WaitFor($"!!usageVerify.one('.hp-usage-meter-grid') && {Ordered(settingsOrder)} && {BalanceOrdered(settingsBalanceOrder)}");
+            Check(await Js(sections + " && " + Ordered(settingsOrder) + " && " + BalanceOrdered(settingsBalanceOrder)),
+                "panel UI: meter reflects both Settings orders");
             log("PASS ai-usage panel UI rendered in WebView2");
         }
         finally
@@ -1318,6 +1477,71 @@ internal sealed class AiUsageVerifier
         }
     }
 
+    private static async Task VerifyNativePointerAsync(PanelWebView web, Func<string, Task> waitFor, string expectedOrder,
+        Action<string> log, CancellationToken token)
+    {
+        await web.ExecuteScriptAsync("""
+            window.nativeUsageDrag = { starts: 0, pointer: null, grip: usageVerify.grip('codex') };
+            document.addEventListener('dragstart', () => nativeUsageDrag.starts++, { once: true, capture: true });
+            nativeUsageDrag.grip.addEventListener('pointerdown', e => {
+                if (e.isTrusted) nativeUsageDrag.pointer = e.pointerId;
+            }, { once: true });
+            nativeUsageDrag.grip.closest('.hp-usage-section').scrollIntoView({block:'start'});
+            """);
+        var cssWidth = JsonSerializer.Deserialize<double>(await web.ExecuteScriptAsync("innerWidth"));
+        var ratio = web.ActualWidth / cssWidth;
+        async Task<System.Windows.Point> GripPoint(string id)
+        {
+            var position = JsonNode.Parse(await web.ExecuteScriptAsync($"usageVerify.center(usageVerify.grip('{id}'))"))!;
+            return web.PointToScreen(new System.Windows.Point(position["x"]!.GetValue<double>() * ratio,
+                position["y"]!.GetValue<double>() * ratio));
+        }
+
+        var start = await GripPoint("codex");
+        var end = await GripPoint("claude");
+        if (!GetCursorPos(out var previous)) throw new InvalidOperationException("Native AI Usage verify needs an interactive desktop.");
+        try
+        {
+            if (!SetCursorPos((int)start.X, (int)start.Y)) throw new InvalidOperationException("Native AI Usage verify could not move the cursor.");
+            await Task.Delay(80, token);
+            MouseEvent(0x0002, 0, 0, 0, 0);
+            await waitFor("nativeUsageDrag.pointer !== null && nativeUsageDrag.grip.hasPointerCapture(nativeUsageDrag.pointer)");
+            for (var step = 1; step <= 6; step++)
+            {
+                SetCursorPos((int)(start.X + (end.X - start.X) * step / 6), (int)(start.Y + (end.Y - start.Y) * step / 6));
+                await Task.Delay(40, token);
+            }
+            await waitFor(expectedOrder + """
+                 && nativeUsageDrag.starts === 0 && !!usageVerify.one('.is-dragging')
+                 && getComputedStyle(usageVerify.one('.is-dragging')).outlineColor === 'rgb(90, 169, 255)'
+                """);
+            var folder = Environment.GetEnvironmentVariable("HOVERPOCKET_AI_USAGE_SNAPSHOT_DIR");
+            if (!string.IsNullOrEmpty(folder))
+            {
+                Directory.CreateDirectory(folder);
+                var origin = web.PointToScreen(new System.Windows.Point());
+                var corner = web.PointToScreen(new System.Windows.Point(web.ActualWidth, web.ActualHeight));
+                var bounds = System.Drawing.Rectangle.FromLTRB((int)origin.X, (int)origin.Y, (int)corner.X, (int)corner.Y);
+                var snapshot = await Task.Run(() => ScreenshotSelectionWindow.CaptureDesktop(bounds), token);
+                await CaptureFiles.WritePngAsync(Path.Combine(folder, "ai-usage-native-pointer-held.png"), snapshot);
+            }
+            MouseEvent(0x0004, 0, 0, 0, 0);
+            await waitFor(expectedOrder + " && !nativeUsageDrag.grip.isConnected && nativeUsageDrag.starts === 0");
+            log("PASS ai-usage native mouse reordered the transparent panel without starting an OS drag");
+        }
+        finally
+        {
+            MouseEvent(0x0004, 0, 0, 0, 0);
+            SetCursorPos(previous.X, previous.Y);
+        }
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct NativePoint { public int X, Y; }
+    [DllImport("user32.dll")] private static extern bool GetCursorPos(out NativePoint point);
+    [DllImport("user32.dll")] private static extern bool SetCursorPos(int x, int y);
+    [DllImport("user32.dll", EntryPoint = "mouse_event")] private static extern void MouseEvent(uint flags, uint x, uint y, uint data, nuint extra);
+
     private async Task VerifySettingsUiAsync(PanelBridgeController controller, UserSettingsStore store, Action<string> log)
     {
         var window = new SettingsWindow(controller, false, Path.Combine(store.RootDirectory, "SettingsWebView"), false)
@@ -1327,7 +1551,7 @@ internal sealed class AiUsageVerifier
         {
             window.Show();
             while (window.WebViewForVerify?.CoreWebView2 is null
-                || await window.WebViewForVerify.ExecuteScriptAsync("document.querySelectorAll('.ai-usage-settings-row').length === 7") != "true")
+                || await window.WebViewForVerify.ExecuteScriptAsync("document.querySelectorAll('.ai-usage-settings-row').length === 8") != "true")
                 await Task.Delay(100, timeout.Token);
             var web = window.WebViewForVerify;
             await web.ExecuteScriptAsync("document.querySelector('[data-category=ai]').click(); document.querySelector('[data-ai-usage-settings]').scrollIntoView({block:'start'})");
@@ -1350,8 +1574,16 @@ internal sealed class AiUsageVerifier
                 + " && document.querySelector('[data-ai-usage-settings] [data-service=antigravity] .ai-usage-settings-state').textContent === 'Gemini Peerから取得 · Gemini 4 Hydrogen (High)'"
                 + " && document.querySelector('[data-ai-usage-settings] [data-service=antigravity]').textContent.includes('サインインは要りません')"),
                 "settings UI: Antigravity is read from the Gemini Peer, with no sign-in buttons");
-            const string order = "[...document.querySelectorAll('.ai-usage-settings-row')].map(n => n.dataset.service).join(',')";
-            Check(await Js(order + " === 'muse,claude,codex,claude-api,gemini,antigravity,colab'"), "settings UI: order matches the panel drag");
+            const string order = "[...document.querySelectorAll('.ai-usage-settings-section[data-section=order] .ai-usage-settings-row')].map(n => n.dataset.service).join(',')";
+            const string balanceOrder = "[...document.querySelectorAll('.ai-usage-settings-section[data-section=balanceOrder] .ai-usage-settings-row')].map(n => n.dataset.service).join(',')";
+            const string initialPlan = "codex,claude,gemini,antigravity,muse";
+            const string initialBalances = "claude-api,codex,colab";
+            Check(await Js(order + " === '" + initialPlan + "' && " + balanceOrder + " === '" + initialBalances + "'"),
+                "settings UI: each section matches its panel order");
+            async Task WaitForOrder(string expression, string ids)
+            {
+                while (!await Js(expression + " === '" + ids + "'")) await Task.Delay(100, timeout.Token);
+            }
             Check(await Js("""
                 [...document.querySelectorAll('.ai-usage-settings-row')].every(row => {
                     const toggle = row.querySelector('input[type=checkbox]').getBoundingClientRect();
@@ -1368,28 +1600,34 @@ internal sealed class AiUsageVerifier
                 })
                 """), "settings UI: small named arrow buttons sit beside the switch rather than with sign-in actions");
             var providerIds = ProviderRegistry.CreateDefault().ProviderIds;
-            var originalOrder = store.Load(providerIds).AiUsageServiceOrder;
+            var original = store.Load(providerIds);
             Check(await Js("""
                 (() => {
-                    const up = document.querySelector('.ai-usage-settings-row:first-child [data-move=up]');
-                    const down = document.querySelector('.ai-usage-settings-row:last-child [data-move=down]');
-                    up.click();
-                    down.click();
-                    return up.disabled && down.disabled
-                        && [up, down].every(button => Number(getComputedStyle(button).opacity) < 1);
+                    return [...document.querySelectorAll('.ai-usage-settings-section')].every(section => {
+                        const rows = [...section.querySelectorAll('.ai-usage-settings-row')];
+                        const up = rows[0].querySelector('[data-move=up]');
+                        const down = rows.at(-1).querySelector('[data-move=down]');
+                        up.click();
+                        down.click();
+                        return up.disabled && down.disabled
+                            && [up, down].every(button => Number(getComputedStyle(button).opacity) < 1);
+                    });
                 })()
-                """) && store.Load(providerIds).AiUsageServiceOrder.SequenceEqual(originalOrder),
+                """) && store.Load(providerIds).AiUsageServiceOrder.SequenceEqual(original.AiUsageServiceOrder)
+                && store.Load(providerIds).AiUsageBalanceOrder.SequenceEqual(original.AiUsageBalanceOrder),
                 "settings UI: end arrows are dimmed, disabled, and clicking them leaves the order unchanged");
-            await web.ExecuteScriptAsync("document.querySelector('.ai-usage-settings-row[data-service=codex] [data-move=up]').click()");
-            while (!await Js(order + " === 'muse,codex,claude,claude-api,gemini,antigravity,colab'")) await Task.Delay(100, timeout.Token);
-            Check(store.Load(providerIds).AiUsageServiceOrder.Take(3).SequenceEqual(["muse", "codex", "claude"]), "settings UI: Move up is saved");
-            await web.ExecuteScriptAsync("document.querySelector('.ai-usage-settings-row[data-service=codex] [data-move=down]').click()");
-            while (!await Js(order + " === 'muse,claude,codex,claude-api,gemini,antigravity,colab'")) await Task.Delay(100, timeout.Token);
-            await web.ExecuteScriptAsync("document.querySelector('.ai-usage-settings-row[data-service=muse] [data-move=down]').click()");
-            while (!await Js(order + " === 'claude,muse,codex,claude-api,gemini,antigravity,colab'")) await Task.Delay(100, timeout.Token);
-            Check(store.Load(providerIds).AiUsageServiceOrder.Take(3).SequenceEqual(["claude", "muse", "codex"]), "settings UI: Move down is saved");
+            await web.ExecuteScriptAsync("document.querySelector('[data-section=order] [data-service=muse] [data-move=up]').click()");
+            await WaitForOrder(order, "codex,claude,gemini,muse,antigravity");
+            var afterPlan = store.Load(providerIds);
+            Check(afterPlan.AiUsageServiceOrder.SequenceEqual(["codex", "claude", "claude-api", "gemini", "muse", "colab", "antigravity"])
+                && afterPlan.AiUsageBalanceOrder.SequenceEqual(original.AiUsageBalanceOrder), "settings UI: Move up saves only the plan order");
+            await web.ExecuteScriptAsync("document.querySelector('[data-section=balanceOrder] [data-service=codex] [data-move=down]').click()");
+            await WaitForOrder(balanceOrder, "claude-api,colab,codex");
+            var afterBalance = store.Load(providerIds);
+            Check(afterBalance.AiUsageBalanceOrder.SequenceEqual(["claude-api", "claude", "colab", "gemini", "antigravity", "codex", "muse"])
+                && afterBalance.AiUsageServiceOrder.SequenceEqual(afterPlan.AiUsageServiceOrder), "settings UI: Move down saves only the balance order");
             await Task.Delay(150, timeout.Token);
-            await Capture(web, "settings");
+            await Capture(web.CoreWebView2, "settings");
             log("PASS ai-usage Settings UI rendered in WebView2");
         }
         finally
@@ -1399,13 +1637,13 @@ internal sealed class AiUsageVerifier
         }
     }
 
-    private static async Task Capture(WebView2 web, string name)
+    private static async Task Capture(CoreWebView2 web, string name)
     {
         var folder = Environment.GetEnvironmentVariable("HOVERPOCKET_AI_USAGE_SNAPSHOT_DIR");
         if (string.IsNullOrEmpty(folder)) return;
         Directory.CreateDirectory(folder);
         await using var output = File.Create(Path.Combine(folder, $"ai-usage-{name}.png"));
-        await web.CoreWebView2.CapturePreviewAsync(CoreWebView2CapturePreviewImageFormat.Png, output);
+        await web.CapturePreviewAsync(CoreWebView2CapturePreviewImageFormat.Png, output);
     }
 
     private static string ResolveUiFolder()

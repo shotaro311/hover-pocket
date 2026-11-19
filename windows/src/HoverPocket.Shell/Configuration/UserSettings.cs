@@ -78,6 +78,8 @@ internal sealed class UserSettings
 
     public List<string> AiUsageServiceOrder { get; set; } = [];
 
+    public List<string> AiUsageBalanceOrder { get; set; } = [];
+
     public AiUsageListSort? AiUsageSort { get; set; }
 
     public UserSettings Clone()
@@ -117,6 +119,7 @@ internal sealed class UserSettings
             AiUsageHiddenServices = [.. AiUsageHiddenServices],
             AiUsageView = AiUsageView,
             AiUsageServiceOrder = [.. AiUsageServiceOrder],
+            AiUsageBalanceOrder = [.. AiUsageBalanceOrder],
             AiUsageSort = AiUsageSort
         };
     }

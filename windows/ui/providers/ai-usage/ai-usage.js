@@ -3,7 +3,30 @@ import { on } from "../../js/bridge.js";
 const COLUMNS = ["session", "weekly", "other"];
 const COLORS = { blue: "#5aa9ff", green: "#5fd08a", yellow: "#f5c35b", red: "#ff7c7c" };
 const SVG_NS = "http://www.w3.org/2000/svg";
-const DRAG_TYPE = "application/x-hoverpocket-ai-usage-service";
+const MOVE_KEYS = { ArrowUp: -1, ArrowLeft: -1, ArrowDown: 1, ArrowRight: 1 };
+
+export function aiUsageSectionTitle(orderKey, english) {
+  if (orderKey === "balanceOrder") return english ? "Credits and balances" : "クレジット・残高";
+  return english ? "Plan limits" : "サブスクの利用枠";
+}
+
+export function aiUsageBalanceName(service, english) {
+  if (service.id === "codex") return english ? "Codex credits" : "Codex クレジット";
+  return service.name;
+}
+
+export function aiUsageSectionServices(usage, orderKey, forPanel = false) {
+  const byId = new Map((usage?.services ?? []).map((service) => [service.id, service]));
+  return (usage?.[orderKey] ?? [...byId.keys()]).map((id) => byId.get(id)).filter((service) => {
+    if (!service || (forPanel && !service.visible)) return false;
+    const balanceOnly = service.id === "claude-api" || service.id === "colab";
+    if (orderKey === "balanceOrder") {
+      return service.balances?.length || balanceOnly ||
+        (service.id === "codex" && (!forPanel || service.status !== "ok"));
+    }
+    return !balanceOnly && (!forPanel || service.windows.length || service.status !== "ok");
+  });
+}
 
 function element(tag, className, text) {
   const node = document.createElement(tag);
@@ -111,6 +134,11 @@ export function renderAiUsageProvider({ container, state, request, iconSvg }) {
   paint();
   void request("aiUsage.getState", { refresh: true }).then(accept).catch(() => paint(true));
 
+  function numberText(text) {
+    const parts = text.split(/(\d+(?::\d+)?)/);
+    return parts.map((part, index) => index % 2 ? element("span", "hp-usage-numeric", part) : part);
+  }
+
   function accept(payload) {
     usage = payload;
     if (!saving) paint();
@@ -122,7 +150,7 @@ export function renderAiUsageProvider({ container, state, request, iconSvg }) {
   }
 
   async function save(params) {
-    if (saving || !usage) return;
+    if (saving || drag || !usage) return;
     saving = true;
     saveError.hidden = true;
     try {
@@ -151,17 +179,20 @@ export function renderAiUsageProvider({ container, state, request, iconSvg }) {
       .filter(Number.isFinite));
     if (Number.isFinite(next)) expiryTimer = window.setTimeout(() => paint(), Math.max(0, next - Date.now()) + 50);
 
-    const byId = new Map((usage?.services ?? []).map((service) => [service.id, service]));
-    const services = (usage?.order ?? [...byId.keys()]).map((id) => byId.get(id)).filter((service) => service?.visible)
-      .map((service) => isExpired(service) ? { ...service, status: "error", stale: true, errorCode: "stale" } : service);
+    const services = (usage?.services ?? []).filter((service) => service.visible);
+    const withFreshness = (service) => isExpired(service) ? { ...service, status: "error", stale: true, errorCode: "stale" } : service;
     const view = usage?.view === "meter" ? "meter" : "list";
     listMode.setAttribute("aria-pressed", String(view === "list"));
     meterMode.setAttribute("aria-pressed", String(view === "meter"));
     listMode.disabled = meterMode.disabled = !usage;
-    const latest = services.filter((service) => service.status === "ok")
+    const latest = services.filter((service) => service.status === "ok" && !isExpired(service))
       .map((service) => Date.parse(service.fetchedAt)).filter(Number.isFinite);
-    updated.textContent = services.some((service) => service.refreshing) ? tx("更新中…", "Updating…")
-      : latest.length ? tx(`${timeFormat.format(Math.max(...latest))} 更新`, `Updated ${timeFormat.format(Math.max(...latest))}`) : "";
+    updated.replaceChildren();
+    if (services.some((service) => service.refreshing)) updated.textContent = tx("更新中…", "Updating…");
+    else if (latest.length) {
+      const time = timeFormat.format(Math.max(...latest));
+      updated.append(...numberText(tx(`${time} 更新`, `Updated ${time}`)));
+    }
 
     const focused = body.contains(document.activeElement) ? document.activeElement.dataset.focus : null;
     const scrollTop = body.scrollTop;
@@ -174,7 +205,11 @@ export function renderAiUsageProvider({ container, state, request, iconSvg }) {
       empty.append(settingsButton());
       body.replaceChildren(empty);
     } else {
-      body.replaceChildren(view === "meter" ? meterView(services) : listView(services, usage.sort));
+      const plans = aiUsageSectionServices(usage, "order", true).map(withFreshness);
+      const balances = aiUsageSectionServices(usage, "balanceOrder", true).map(withFreshness);
+      body.replaceChildren();
+      if (plans.length) body.append(usageSection("order", view === "meter" ? meterView(plans) : listView(plans, usage.sort)));
+      if (balances.length) body.append(usageSection("balanceOrder", balanceView(balances)));
     }
     body.scrollTop = scrollTop;
     if (focused) {
@@ -183,9 +218,15 @@ export function renderAiUsageProvider({ container, state, request, iconSvg }) {
     }
   }
 
+  function usageSection(orderKey, content) {
+    const section = element("section", "hp-usage-section");
+    section.dataset.section = orderKey;
+    section.append(element("h3", "hp-usage-section-title", aiUsageSectionTitle(orderKey, english)), content);
+    return section;
+  }
+
   function listView(services, sort) {
-    const section = element("div", "hp-usage-list");
-    const table = element("table", "hp-usage-table");
+    const table = element("table", "hp-usage-table hp-usage-list");
     table.setAttribute("aria-label", "AI Usage");
     const columns = element("colgroup");
     if (!sort) columns.append(element("col", "hp-usage-handle-column"));
@@ -221,9 +262,7 @@ export function renderAiUsageProvider({ container, state, request, iconSvg }) {
       headings.append(th);
     }
     head.append(headings);
-    const chips = element("div", "hp-usage-chips");
-    const rowServices = services.filter((service) => service.windows.length || service.status !== "ok");
-    const ordered = sort ? sortedServices(rowServices, sort) : rowServices;
+    const ordered = sort ? sortedServices(services, sort) : services;
     table.append(columns, head);
     for (const service of ordered) {
       const group = element("tbody", "hp-usage-service");
@@ -231,7 +270,7 @@ export function renderAiUsageProvider({ container, state, request, iconSvg }) {
       const row = element("tr");
       if (!sort) {
         const slot = element("td");
-        slot.append(handle(group, service));
+        slot.append(handle(group, service.name, "order"));
         row.append(slot);
       }
       const label = element("th");
@@ -239,7 +278,7 @@ export function renderAiUsageProvider({ container, state, request, iconSvg }) {
       label.append(serviceName(service));
       row.append(label);
       const showReason = service.status === "error" && (service.stale || !service.windows.length);
-      const status = showReason ? null : serviceMessage(service);
+      const status = showReason ? null : serviceMessage(service, service.windows.length);
       if (status || (showReason && !service.windows.length)) {
         const cell = element("td");
         cell.colSpan = COLUMNS.length;
@@ -268,12 +307,7 @@ export function renderAiUsageProvider({ container, state, request, iconSvg }) {
       }
       table.append(group);
     }
-    for (const service of services) {
-      for (const balance of balancesFor(service)) chips.append(balanceDisplay(service, balance, false));
-    }
-    if (ordered.length) section.append(table);
-    section.append(chips);
-    return section;
+    return table;
   }
 
   function sortedServices(services, sort) {
@@ -294,13 +328,15 @@ export function renderAiUsageProvider({ container, state, request, iconSvg }) {
     node.classList.toggle("is-stale", Boolean(service.stale));
   }
 
-  function serviceName(service) {
-    const line = element("div", "hp-usage-service-name");
-    line.append(element("span", "", service.name));
+  function serviceName(service, balanceName) {
+    const line = element("div", balanceName ? "hp-usage-balance-heading" : "hp-usage-service-name");
+    line.append(element("span", balanceName ? "hp-usage-balance-label" : "", balanceName ?? service.name));
     const fetched = Date.parse(service.fetchedAt);
     if (service.stale && Number.isFinite(fetched)) {
       const time = timeFormat.format(fetched);
-      line.append(element("span", "hp-usage-old", tx(`${time} の値`, `As of ${time}`)));
+      const stamp = element("span", "hp-usage-old");
+      stamp.append(...numberText(tx(`${time} の値`, `As of ${time}`)));
+      line.append(stamp);
     }
     return line;
   }
@@ -313,7 +349,7 @@ export function renderAiUsageProvider({ container, state, request, iconSvg }) {
     return node;
   }
 
-  function serviceMessage(service) {
+  function serviceMessage(service, hasValues) {
     if (service.status === "signedOut") {
       const shared = usage.services.find((item) => item.id === service.sharedWith)?.name;
       const text = shared
@@ -323,7 +359,7 @@ export function renderAiUsageProvider({ container, state, request, iconSvg }) {
       node.append(element("span", "", text), settingsButton());
       return node;
     }
-    if (service.windows.length || service.balances?.length) return null;
+    if (hasValues) return null;
     if (service.status === "error") return service.stale ? null : reason(service);
     return element("p", "hp-usage-message", service.refreshing || service.status === "idle"
       ? tx("読み込み中…", "Loading…")
@@ -335,59 +371,119 @@ export function renderAiUsageProvider({ container, state, request, iconSvg }) {
       () => { void request("aiUsage.openSettings").catch(() => {}); });
   }
 
-  function handle(target, service) {
-    const grip = element("span", "hp-usage-handle", "⠿");
-    grip.title = tx(`${service.name}をドラッグして移動`, `Drag to move ${service.name}`);
-    grip.draggable = true;
-    grip.ondragstart = (event) => {
-      if (saving) { event.preventDefault(); return; }
-      drag = { id: service.id, target: null };
-      event.dataTransfer.setData(DRAG_TYPE, service.id);
-      event.dataTransfer.effectAllowed = "move";
-      event.dataTransfer.setDragImage(target, 10, 12);
-      target.classList.add("is-dragging");
-    };
-    grip.ondragend = () => {
-      if (!drag) return;
-      clearDrag();
-      if (deferredPaint) paint();
-    };
-    target.ondragover = (event) => {
-      if (!drag || drag.id === service.id || !event.dataTransfer.types.includes(DRAG_TYPE)) return;
-      event.preventDefault();
-      event.dataTransfer.dropEffect = "move";
-      drag.target?.classList.remove("is-drop-target");
-      drag.target = target;
-      target.classList.add("is-drop-target");
-    };
-    target.ondragleave = (event) => {
-      if (event.relatedTarget instanceof Node && target.contains(event.relatedTarget)) return;
-      target.classList.remove("is-drop-target");
-    };
-    target.ondrop = (event) => {
-      if (!drag || drag.id === service.id || event.dataTransfer.getData(DRAG_TYPE) !== drag.id) return;
-      event.preventDefault();
-      const source = drag.id;
-      clearDrag();
-      const order = usage.order;
-      const renderedIds = new Set([...body.querySelectorAll(".hp-usage-service")].map((node) => node.dataset.service));
-      const renderedOrder = order.filter((id) => renderedIds.has(id));
-      const from = renderedOrder.indexOf(source);
-      const to = renderedOrder.indexOf(service.id);
-      if (from !== -1 && to !== -1) {
-        renderedOrder.splice(from, 1);
-        renderedOrder.splice(to, 0, source);
-        let index = 0;
-        void save({ order: order.map((id) => renderedIds.has(id) ? renderedOrder[index++] : id) });
+  function reorderItems(parent) {
+    return [...parent.children].filter((item) => item.matches(".hp-usage-service"));
+  }
+
+  function saveOrder(orderKey, items, baseOrder = usage[orderKey]) {
+    const ids = items.map((item) => item.dataset.service);
+    const rendered = new Set(ids);
+    let i = 0;
+    const next = baseOrder.map((id) => rendered.has(id) ? ids[i++] : id);
+    if (next.some((id, index) => id !== baseOrder[index])) void save({ [orderKey]: next });
+    else if (deferredPaint) paint();
+  }
+
+  function handle(item, name, orderKey) {
+    const grip = element("button", "hp-usage-handle", "⠿");
+    grip.type = "button";
+    grip.title = tx(`${name}を移動`, `Move ${name}`);
+    grip.setAttribute("aria-label", grip.title);
+    grip.dataset.focus = `${orderKey}:${item.dataset.service}`;
+    grip.onpointerdown = (event) => {
+      if (drag || saving || !event.isPrimary || event.button !== 0) return;
+      try {
+        grip.setPointerCapture(event.pointerId);
+      } catch (error) {
+        if (error.name === "NotFoundError") return;
+        throw error;
       }
-      if (deferredPaint) paint();
+      grip.focus({ preventScroll: true });
+      const items = reorderItems(item.parentElement);
+      drag = { item, grip, items, orderKey, pointerId: event.pointerId, order: usage[orderKey],
+        x: event.clientX, y: event.clientY };
+      item.classList.add("is-dragging");
+      event.preventDefault();
+    };
+    grip.onpointermove = (event) => {
+      if (drag?.grip !== grip || drag.pointerId !== event.pointerId) return;
+      const { clientX: x, clientY: y } = event;
+      const dx = x - drag.x;
+      const dy = y - drag.y;
+      drag.x = x;
+      drag.y = y;
+      if (!dx && !dy) return;
+      const over = document.elementFromPoint(x, y)?.closest(".hp-usage-service");
+      if (!over || over === item || over.parentElement !== item.parentElement) return;
+
+      const items = reorderItems(item.parentElement);
+      const from = items.indexOf(item);
+      const to = items.indexOf(over);
+      const rect = over.getBoundingClientRect();
+      const source = item.getBoundingClientRect();
+      const sameRow = rect.top < source.bottom && rect.bottom > source.top;
+      const direction = sameRow ? dx : dy;
+      if ((to - from) * direction <= 0) return;
+
+      // Move the siblings instead of disconnecting the handle that owns pointer capture.
+      moveItem(item, items, to);
+    };
+    grip.onpointerup = (event) => {
+      if (drag?.grip !== grip || drag.pointerId !== event.pointerId) return;
+      const hit = document.elementFromPoint(event.clientX, event.clientY);
+      const section = hit?.closest(".hp-usage-section");
+      finishDrag(Boolean(hit?.closest(".hp-panel")) && (!section || section.dataset.section === orderKey));
+    };
+    grip.onpointercancel = grip.onlostpointercapture = (event) => {
+      if (drag?.grip === grip && drag.pointerId === event.pointerId) finishDrag(false);
+    };
+    grip.onblur = () => {
+      if (drag?.grip === grip) finishDrag(false);
+    };
+    grip.onkeydown = (event) => {
+      if (event.key === "Escape" && drag?.grip === grip) {
+        event.preventDefault();
+        event.stopPropagation();
+        finishDrag(false);
+        return;
+      }
+      const offset = MOVE_KEYS[event.key];
+      if (typeof offset !== "number" || drag || saving) return;
+      event.preventDefault();
+      const items = reorderItems(item.parentElement);
+      const from = items.indexOf(item);
+      const to = from + offset;
+      if (to < 0 || to >= items.length) return;
+      moveItem(item, items, to);
+      grip.scrollIntoView({ block: "nearest" });
+      saveOrder(orderKey, reorderItems(item.parentElement));
     };
     return grip;
   }
 
-  function clearDrag() {
+  function moveItem(item, items, to) {
+    const from = items.indexOf(item);
+    if (from < to) {
+      for (const sibling of items.slice(from + 1, to + 1)) item.before(sibling);
+    } else {
+      for (const sibling of items.slice(to, from).reverse()) item.after(sibling);
+    }
+  }
+
+  function finishDrag(commit) {
+    if (!drag) return;
+    const { item, grip, pointerId, items, order, orderKey } = drag;
     drag = null;
-    body.querySelectorAll(".is-dragging, .is-drop-target").forEach((node) => node.classList.remove("is-dragging", "is-drop-target"));
+    if (grip.hasPointerCapture(pointerId)) grip.releasePointerCapture(pointerId);
+    item.classList.remove("is-dragging");
+    if (!item.parentElement) return;
+    const current = reorderItems(item.parentElement);
+    if (commit && usage[orderKey].every((id, i) => id === order[i])) {
+      saveOrder(orderKey, current, order);
+    } else {
+      moveItem(item, current, items.indexOf(item));
+      if (deferredPaint) paint();
+    }
   }
 
   function windowName(limit) {
@@ -433,8 +529,9 @@ export function renderAiUsageProvider({ container, state, request, iconSvg }) {
       return node;
     }
     node.style.setProperty("--usage-color", colorFor(value));
-    const percent = `${formatPercent(value)}%`;
-    left.append(element("span", "hp-usage-value", percent));
+    const number = element("span", "hp-usage-value");
+    number.append(element("span", "hp-usage-numeric", formatPercent(value)), element("span", "hp-usage-percent-sign", "%"));
+    left.append(number);
     line.append(resetLabel(limit));
     const bar = element("div", "hp-usage-bar");
     bar.setAttribute("role", "meter");
@@ -455,16 +552,15 @@ export function renderAiUsageProvider({ container, state, request, iconSvg }) {
       const card = element("article", "hp-usage-card hp-usage-service");
       setService(card, service);
       const head = element("header");
-      head.append(handle(card, service), serviceName(service));
+      head.append(handle(card, service.name, "order"), serviceName(service));
       card.append(head);
       if (service.stale && service.status === "error") card.append(reason(service));
-      const status = serviceMessage(service);
+      const status = serviceMessage(service, service.windows.length);
       if (status) card.append(status);
       const meters = element("div", "hp-usage-meters");
       for (const column of COLUMNS) {
         for (const limit of columnEntries(service, column)) meters.append(meter(service, limit));
       }
-      for (const balance of balancesFor(service)) meters.append(balanceDisplay(service, balance, true));
       if (meters.childElementCount) card.append(meters);
       cards.append(card);
     }
@@ -493,11 +589,11 @@ export function renderAiUsageProvider({ container, state, request, iconSvg }) {
     }
     const center = element("div", "hp-usage-meter-center");
     center.append(element("span", "hp-usage-meter-caption", tx("残り", "left")));
-    const number = element("span", "hp-usage-meter-number", value === null ? "—" : formatPercent(value));
+    const number = element("span", "hp-usage-meter-number", value === null ? "—" : undefined);
     if (value !== null) {
       const color = colorFor(value);
       number.style.color = color;
-      number.append(element("span", "hp-usage-percent-sign", "%"));
+      number.append(element("span", "hp-usage-numeric", formatPercent(value)), element("span", "hp-usage-percent-sign", "%"));
       if (value > 0) svg.append(arc(46, 0, value, {
         class: "hp-usage-meter-value", stroke: color, "stroke-width": 5, "stroke-dasharray": "2.6 1.3",
       }));
@@ -548,13 +644,13 @@ export function renderAiUsageProvider({ container, state, request, iconSvg }) {
     }
     if (remainingMs < 86_400_000) {
       const total = Math.min(1439, Math.ceil(remainingMs / 60_000));
-      label.textContent = `${Math.floor(total / 60)}:${String(total % 60).padStart(2, "0")}`;
+      label.replaceChildren(...numberText(`${Math.floor(total / 60)}:${String(total % 60).padStart(2, "0")}`));
       return;
     }
     const total = Math.floor(remainingMs / 3_600_000);
     const days = Math.floor(total / 24);
     const hours = total % 24;
-    label.textContent = hours ? tx(`${days}日${hours}時間`, `${days}d ${hours}h`) : tx(`${days}日`, `${days}d`);
+    label.replaceChildren(...numberText(hours ? tx(`${days}日${hours}時間`, `${days}d ${hours}h`) : tx(`${days}日`, `${days}d`)));
   }
 
   function updateMeterName(node) {
@@ -588,16 +684,37 @@ export function renderAiUsageProvider({ container, state, request, iconSvg }) {
     return formatAmount(balance.amount, balance.unit);
   }
 
-  function balanceDisplay(service, balance, meterView) {
-    const box = element("div", meterView ? "hp-usage-balance hp-usage-odometer" : "hp-usage-balance hp-usage-chip");
-    box.dataset.balanceService = service.id;
-    box.classList.toggle("is-stale", Boolean(service.stale));
-    const credit = tx("クレジット", "Credits");
-    const label = meterView ? balance.unit === "units" ? tx("ユニット", "Units") : credit
-      : service.id === "codex" ? tx("Codexクレジット", "Codex credits") : service.name;
-    const unit = meterView && !balance.state ? { credits: " CR", units: " CU" }[balance.unit] ?? "" : "";
-    box.append(element("span", "hp-usage-balance-label", label),
-      element("span", "hp-usage-balance-amount", balanceAmount(balance) + unit));
+  function balanceView(services) {
+    const cards = element("div", "hp-usage-balance-grid");
+    for (const service of services) {
+      const card = element("article", "hp-usage-card hp-usage-balance hp-usage-service");
+      setService(card, service);
+      const name = aiUsageBalanceName(service, english);
+      const head = element("header");
+      head.append(handle(card, name, "balanceOrder"), serviceName(service, name));
+      card.append(head);
+      const balances = balancesFor(service);
+      for (const balance of balances) card.append(balanceDisplay(balance));
+      if (service.id === "codex" && balances.length) card.append(element("span", "hp-usage-balance-detail",
+        tx("サブスクの枠を超えた分に使う", "Used after plan limits")));
+      if (service.stale && service.status === "error") card.append(reason(service));
+      const status = serviceMessage(service, balances.length);
+      if (status) card.append(status);
+      cards.append(card);
+    }
+    return cards;
+  }
+
+  function balanceDisplay(balance) {
+    const box = element("div", "hp-usage-balance-reading");
+    const amount = element("span", "hp-usage-balance-amount");
+    if (balance.state) amount.textContent = balanceAmount(balance);
+    else {
+      amount.append(element("span", "hp-usage-numeric", balanceAmount(balance)));
+      const unit = { credits: "CR", units: "CU" }[balance.unit];
+      if (unit) amount.append(" ", element("span", "hp-usage-balance-unit", unit));
+    }
+    box.append(amount);
     if (balance.breakdown) {
       box.title = balance.breakdown.map((item) => {
         const label = item.kind === "purchasedCredit" ? tx("購入したクレジット", "Purchased credits")
@@ -606,12 +723,8 @@ export function renderAiUsageProvider({ container, state, request, iconSvg }) {
         return [label, balanceAmount(item), expires].filter(Boolean).join(" · ");
       }).join("\n");
     }
-    if (!balance.state && balance.unit === "units") {
-      const detail = computeDetail(balance);
-      box.title = detail;
-      if (meterView) box.append(element("span", "hp-usage-balance-detail", detail));
-    }
-    if (meterView && balance.expiresAt) {
+    if (!balance.state && balance.unit === "units") box.append(element("span", "hp-usage-balance-detail", computeDetail(balance)));
+    if (balance.expiresAt) {
       const detail = element("span", "hp-usage-balance-detail");
       detail.dataset.expiresAt = balance.expiresAt;
       updateExpiry(detail);
@@ -684,6 +797,7 @@ export function renderAiUsageProvider({ container, state, request, iconSvg }) {
     refresh,
     dispose() {
       disposed = true;
+      finishDrag(false);
       offChanged();
       window.clearInterval(clock);
       window.clearTimeout(expiryTimer);

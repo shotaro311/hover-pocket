@@ -5,6 +5,10 @@ updated_by: claude
 status: production-macos-0.2.18; production-windows-0.2.20
 ---
 
+## 2026-11-19 AI Usageの改訂（Windows 0.2.22・macOS 0.2.19）
+
+- 本番0.2.21を見たユーザーの指摘を受け、AI Usageを「サブスクの利用枠」と「クレジット・残高」のセクションに分け、数字をApple風の書体（WindowsはInter、macOSはSF Pro）にし、並び替えで画面が真っ暗になって並べ替えられなかった不具合を、ポインタ操作の並び替えに替えて直した。Windows `--verify ai-usage` 226項目（実際のマウスでの並び替えを含む）とCI相当の一式、macOS 205項目が合格。Codex（Astra / high）の実画面のデザインレビューは2回目で指摘なし。配信はユーザーの承認（「両方配信する」）で進める。[作業記録](2026-11/2026-11-19_hover-pocket-ai-usage-layout.md)。
+
 ## 2026-11-19 AI Usageの表示の作り替え（Windows 0.2.21・macOS 0.2.19）
 
 - ユーザーの「見にくい、ごちゃっとして見える、並び替えも」を受け、AI Usageを「一覧」と「メーター」の切り替えに作り替えた。数字は残りの割合と4色（70%以上青、50%以上緑、25%以上黄、それ未満赤）、一覧は列の見出しで並べ替え、メーターは高級車のタコメーター風、順番はドラッグと設定の上下ボタン。設計はClaude、実装はCodex（Windowsはこの PC、macOSはMacのCodex）。[設計書](../docs/design/2026-11-19_ai-usage-list-and-meter.md)、[作業記録](2026-11/2026-11-19_hover-pocket-ai-usage-layout.md)。

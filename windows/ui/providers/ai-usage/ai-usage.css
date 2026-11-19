@@ -1,3 +1,10 @@
+@font-face {
+  font-family: "Inter";
+  src: url("../../fonts/InterVariable.woff2") format("woff2");
+  font-weight: 100 900;
+  font-display: block;
+}
+
 .hp-panel:has(.hp-usage) > .hp-header > :is([data-provider-title], [data-refresh]) {
   display: none;
 }
@@ -31,7 +38,12 @@
   margin-left: auto;
   color: var(--hp-muted);
   font-size: calc(11px * var(--hp-text-scale));
-  font-variant-numeric: tabular-nums;
+}
+
+.hp-usage-numeric {
+  font-family: "Inter", sans-serif;
+  font-feature-settings: "tnum";
+  font-weight: 500;
 }
 
 .hp-usage-body {
@@ -41,6 +53,23 @@
   scrollbar-width: none;
 }
 .hp-usage-body::-webkit-scrollbar { display: none; }
+
+.hp-usage-section + .hp-usage-section { margin-top: 14px; }
+.hp-usage-section-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 6px;
+  color: #9ba6b5;
+  font-size: calc(12px * var(--hp-text-scale));
+  font-weight: 500;
+}
+.hp-usage-section-title::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: rgba(255, 255, 255, 0.08);
+}
 
 .hp-usage-table {
   width: 100%;
@@ -59,6 +88,8 @@
   vertical-align: middle;
   border-bottom: 1px solid var(--hp-line);
 }
+/* Rows line up at the top, so the first "other" window reads level with the 5-hour and weekly values. */
+.hp-usage-table tbody :is(th, td) { vertical-align: top; }
 .hp-usage-table thead {
   position: sticky;
   top: 0;
@@ -100,13 +131,22 @@
   place-items: center;
   width: 15px;
   height: 24px;
+  padding: 0;
+  border: 0;
+  background: transparent;
   color: var(--hp-muted);
   font-family: "Segoe UI Symbol", sans-serif;
   font-size: 17px;
   cursor: grab;
+  touch-action: none;
 }
-.hp-usage-service.is-dragging { opacity: 0.5; }
-.hp-usage-service.is-drop-target { outline: 1px solid var(--hp-accent); outline-offset: -1px; }
+.hp-usage-service.is-dragging {
+  outline: 1px solid #5aa9ff;
+  outline-offset: -1px;
+  background: rgba(90, 169, 255, 0.08);
+  user-select: none;
+}
+.hp-usage-service.is-dragging .hp-usage-handle { cursor: grabbing; }
 
 .hp-usage-limit + .hp-usage-limit { margin-top: 5px; }
 .hp-usage-limit-top, .hp-usage-limit-left {
@@ -140,7 +180,7 @@
   font-size: calc(11px * var(--hp-text-scale));
 }
 .hp-usage-reset, .hp-usage-unavailable, .hp-usage-placeholder { color: var(--hp-muted); }
-.hp-usage-reset { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.hp-usage-reset { white-space: nowrap; }
 .hp-usage-limit-top .hp-usage-reset { flex: none; max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
 .hp-usage-reset:empty { display: none; }
 .hp-usage-unavailable { overflow-wrap: anywhere; }
@@ -148,8 +188,7 @@
   flex: none;
   color: var(--usage-color);
   font-size: calc(13px * var(--hp-text-scale));
-  font-weight: 650;
-  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 .hp-usage-bar {
   /* Keep the full-width bar under the value even when the reset text wraps. */
@@ -166,15 +205,15 @@
   border-radius: inherit;
   background: var(--usage-color);
 }
-.is-stale :is(.hp-usage-value, .hp-usage-bar, .hp-usage-meter-number:has(.hp-usage-percent-sign), .hp-usage-meter-value),
+.is-stale :is(.hp-usage-value, .hp-usage-bar, .hp-usage-meter-number:has(.hp-usage-percent-sign), .hp-usage-meter-value, .hp-usage-needle),
 .hp-usage-balance.is-stale .hp-usage-balance-amount { opacity: 0.5; }
 
-.hp-usage-meter-grid, .hp-usage-meters, .hp-usage-chips {
+.hp-usage-meter-grid, .hp-usage-meters, .hp-usage-balance-grid {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
 }
-.hp-usage-meter-grid { align-items: start; }
+.hp-usage-meter-grid, .hp-usage-balance-grid { align-items: start; }
 .hp-usage-meters { gap: 4px; align-items: center; }
 .hp-usage-card {
   box-sizing: border-box;
@@ -203,8 +242,15 @@
 }
 .hp-usage-meter-center { top: 36px; }
 .hp-usage-meter-caption { color: #697386; font-size: 11px; }
-.hp-usage-meter-number { font-size: 22px; font-weight: 650; font-variant-numeric: tabular-nums; }
-.hp-usage-percent-sign { font-size: 12px; }
+.hp-usage-meter-number { font-size: 23px; white-space: nowrap; }
+.hp-usage-percent-sign, .hp-usage-balance-unit {
+  color: #9ba6b5;
+  font-size: 0.75em;
+  font-weight: 500;
+}
+.hp-usage-meter-number .hp-usage-percent-sign, .hp-usage-balance-unit { font-size: 0.52em; }
+.hp-usage-meter-number .hp-usage-numeric,
+.hp-usage-balance-amount .hp-usage-numeric { letter-spacing: -0.02em; }
 .hp-usage-meter-foot { top: 76px; }
 .hp-usage-meter-foot .hp-usage-limit-name {
   max-width: 60px;
@@ -220,26 +266,21 @@
 }
 .hp-usage-meter-detail .hp-usage-reset { color: inherit; font-size: inherit; }
 
-.hp-usage-chips { margin-top: 8px; }
-.hp-usage-chip, .hp-usage-odometer {
-  display: inline-flex;
-  align-items: baseline;
-  min-width: 0;
-  max-width: 100%;
-  border: 1px solid var(--hp-line);
-  border-radius: 6px;
+.hp-usage-balance {
+  display: grid;
+  gap: 3px;
+  min-width: min(170px, 100%);
+  overflow-wrap: anywhere;
 }
-.hp-usage-chip { gap: 5px; padding: 3px 7px; }
-.hp-usage-odometer {
-  flex-direction: column;
-  align-items: center;
-  gap: 2px;
-  padding: 6px 8px;
-  text-align: center;
+.hp-usage-balance-reading { display: grid; gap: 2px; min-width: 0; }
+.hp-usage-balance-heading { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 6px; }
+.hp-usage-balance-label { color: #9ba6b5; font-size: calc(12px * var(--hp-text-scale)); }
+.hp-usage-balance-detail, .hp-usage-balance-amount { color: var(--hp-muted); font-size: calc(11px * var(--hp-text-scale)); }
+.hp-usage-balance-amount:has(.hp-usage-numeric) {
+  color: var(--hp-text);
+  font-size: calc(27px * var(--hp-text-scale));
+  line-height: 1.15;
 }
-.hp-usage-balance-label, .hp-usage-balance-detail { color: var(--hp-muted); font-size: calc(11px * var(--hp-text-scale)); }
-.hp-usage-balance-amount { overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
-.hp-usage-odometer .hp-usage-balance-amount { font: 600 calc(16px * var(--hp-text-scale)) Consolas, monospace; }
 
 .hp-usage-message {
   display: flex;
@@ -276,3 +317,7 @@
   cursor: pointer;
 }
 .hp-usage-action:hover { background: rgba(255, 255, 255, 0.1); }
+
+/* The view switch shows the selected view clearly, whatever the focus or hover state of the other button. */
+.hp-usage-header .hp-size-switch .hp-size-button[aria-pressed="false"] { color: var(--hp-muted); background: transparent; }
+.hp-usage-header .hp-size-switch .hp-size-button[aria-pressed="true"] { color: var(--hp-text); background: rgba(105, 167, 255, 0.32); }

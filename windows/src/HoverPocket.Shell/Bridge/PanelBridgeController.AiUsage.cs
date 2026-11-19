@@ -40,6 +40,7 @@ internal sealed partial class PanelBridgeController
             services = usage?.Services ?? [],
             view = settings.AiUsageView,
             order = settings.AiUsageServiceOrder,
+            balanceOrder = settings.AiUsageBalanceOrder,
             sort = settings.AiUsageSort
         };
     }
@@ -118,9 +119,9 @@ internal sealed partial class PanelBridgeController
             if (value.TryGetProperty("view", out var view))
                 updated.AiUsageView = view.ValueKind == JsonValueKind.String ? view.GetString()! : "list";
             if (value.TryGetProperty("order", out var order))
-                updated.AiUsageServiceOrder = order.ValueKind == JsonValueKind.Array
-                    ? order.EnumerateArray().Where(item => item.ValueKind == JsonValueKind.String).Select(item => item.GetString()!).ToList()
-                    : [];
+                updated.AiUsageServiceOrder = ReadAiUsageOrder(order);
+            if (value.TryGetProperty("balanceOrder", out var balanceOrder))
+                updated.AiUsageBalanceOrder = ReadAiUsageOrder(balanceOrder);
             if (value.TryGetProperty("sort", out var sort))
             {
                 updated.AiUsageSort = sort.ValueKind == JsonValueKind.Object
@@ -183,6 +184,14 @@ internal sealed partial class PanelBridgeController
             token.ThrowIfCancellationRequested();
             return BuildAiUsageState();
         });
+    }
+
+    private static List<string> ReadAiUsageOrder(JsonElement order)
+    {
+        var ids = order.ValueKind == JsonValueKind.Array
+            ? order.EnumerateArray().Where(item => item.ValueKind == JsonValueKind.String).Select(item => item.GetString()!).ToList()
+            : [];
+        return ids.Count > 0 ? ids : [.. AiUsageServiceIds.All];
     }
 
     private static string ReadAiUsageService(JsonElement? parameters)

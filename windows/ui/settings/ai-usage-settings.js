@@ -1,3 +1,5 @@
+import { aiUsageBalanceName, aiUsageSectionServices, aiUsageSectionTitle } from "../providers/ai-usage/ai-usage.js";
+
 /**
  * Settings › AI › AI usage: which services the panel shows and the sign-in for each.
  * Claude, Gemini and Muse open a HoverPocket sign-in window; Codex reuses the chat's ChatGPT login.
@@ -44,17 +46,20 @@ export function createAiUsageSettings(root, request, on) {
     }
   }
 
-  async function move(service, offset) {
+  async function move(service, orderKey, offset) {
     if (reordering) return;
-    const order = [...usage.order];
+    const order = [...usage[orderKey]];
+    const section = aiUsageSectionServices(usage, orderKey);
+    const index = section.findIndex((item) => item.id === service);
+    const other = section[index + offset];
+    if (index < 0 || !other) return;
     const from = order.indexOf(service);
-    const to = from + offset;
-    if (from < 0 || to < 0 || to >= order.length) return;
+    const to = order.indexOf(other.id);
     [order[from], order[to]] = [order[to], order[from]];
     reordering = true;
     find("status").textContent = "";
     try {
-      usage = await request("aiUsage.setPresentation", { order });
+      usage = await request("aiUsage.setPresentation", { [orderKey]: order });
     } catch {
       find("status").textContent = tx("変更を保存できませんでした。", "Could not save the change.");
     } finally {
@@ -73,19 +78,30 @@ export function createAiUsageSettings(root, request, on) {
       "Claude, Claude Console, Gemini and Muse sign in inside a HoverPocket window; Codex signs in on OpenAI's page in your usual browser (one login shared with chat and voice). HoverPocket never receives your password. Each session stays in its own HoverPocket-only profile on this PC; Colab uses Gemini's Google sign-in. HoverPocket opens each service's pages off screen to read the remaining percentages, reset times, limit names, balances, expiry dates and hourly consumption shown in the panel. Antigravity is read from the Gemini Peer running on this PC.");
     const list = find("list");
     const active = document.activeElement;
-    const focusRow = list.contains(active) && active.dataset.move ? active.closest("[data-service]").dataset.service : null;
+    const focusRow = list.contains(active) && active.dataset.move ? active.closest("[data-service]") : null;
+    const focusSection = focusRow?.parentElement.dataset.section;
     const focusDirection = focusRow ? active.dataset.move : null;
-    const byId = new Map((usage?.services ?? []).map((service) => [service.id, service]));
-    const services = (usage?.order ?? [...byId.keys()]).map((id) => byId.get(id)).filter(Boolean);
     list.replaceChildren();
-    services.forEach((service, index) => list.append(row(service, index, services.length)));
-    if (focusRow) {
-      const item = [...list.children].find((node) => node.dataset.service === focusRow);
-      (item?.querySelector(`[data-move="${focusDirection}"]:enabled`) ?? item?.querySelector("[data-move]:enabled"))?.focus();
+    for (const orderKey of ["order", "balanceOrder"]) {
+      const services = aiUsageSectionServices(usage, orderKey);
+      if (!services.length) continue;
+      const section = document.createElement("section");
+      section.className = "ai-usage-settings-section";
+      section.dataset.section = orderKey;
+      const heading = document.createElement("h3");
+      heading.className = "ai-usage-settings-section-title";
+      heading.textContent = aiUsageSectionTitle(orderKey, english);
+      section.append(heading);
+      services.forEach((service, index) => section.append(row(service, orderKey, index, services.length)));
+      list.append(section);
+      if (focusSection === orderKey) {
+        const item = [...section.children].find((node) => node.dataset.service === focusRow.dataset.service);
+        (item?.querySelector(`[data-move="${focusDirection}"]:enabled`) ?? item?.querySelector("[data-move]:enabled"))?.focus();
+      }
     }
   }
 
-  function row(service, index, count) {
+  function row(service, orderKey, index, count) {
     const item = document.createElement("div");
     item.className = "ai-usage-settings-row";
     item.dataset.service = service.id;
@@ -96,26 +112,34 @@ export function createAiUsageSettings(root, request, on) {
     toggle.className = "toggle-row";
     const name = document.createElement("label");
     name.className = "provider-title";
-    name.textContent = service.name;
+    const codexCreditRow = orderKey === "balanceOrder" && service.id === "codex";
+    const serviceName = orderKey === "balanceOrder" ? aiUsageBalanceName(service, english) : service.name;
+    name.textContent = serviceName;
     const visible = document.createElement("input");
-    visible.id = `ai-usage-visible-${service.id}`;
+    visible.id = `ai-usage-visible-${orderKey}-${service.id}`;
     name.htmlFor = visible.id;
     visible.type = "checkbox";
     visible.checked = service.visible;
     visible.disabled = busy.has(service.id);
-    visible.setAttribute("aria-label", tx(`${service.name}をパネルに表示`, `Show ${service.name} in the panel`));
+    const visibilityLabel = service.id === "codex"
+      ? tx("Codexの利用枠とクレジットをパネルに表示", "Show Codex limits and credits in the panel")
+      : tx(`${serviceName}をパネルに表示`, `Show ${serviceName} in the panel`);
+    visible.setAttribute("aria-label", visibilityLabel);
+    if (service.id === "codex") visible.title = visibilityLabel;
     visible.onchange = () => act(service.id, "visible", "aiUsage.setVisible", { visible: visible.checked });
     toggle.append(visible);
     const moves = document.createElement("div");
     moves.className = "ai-usage-settings-moves";
     moves.append(
-      moveButton(service.id, "up", -1, "↑", tx("上へ", "Move up"), index === 0),
-      moveButton(service.id, "down", 1, "↓", tx("下へ", "Move down"), index === count - 1));
+      moveButton(service.id, orderKey, "up", -1, "↑", tx("上へ", "Move up"), index === 0),
+      moveButton(service.id, orderKey, "down", 1, "↓", tx("下へ", "Move down"), index === count - 1));
     heading.append(name, moves, toggle);
 
     const status = document.createElement("span");
     status.className = "settings-status ai-usage-settings-state";
     status.textContent = statusText(service);
+    item.append(heading, status);
+    if (codexCreditRow) return item;
 
     const buttons = document.createElement("div");
     buttons.className = "settings-button-row";
@@ -137,7 +161,6 @@ export function createAiUsageSettings(root, request, on) {
         pending === "signOut" ? tx("サインアウト中…", "Signing out…") : tx("サインアウト", "Sign out"),
         () => act(service.id, "signOut", "aiUsage.signOut"), Boolean(pending)));
     }
-    item.append(heading, status);
     if (buttons.childElementCount) item.append(buttons);
 
     const hint = serviceHint(service.id);
@@ -186,8 +209,8 @@ export function createAiUsageSettings(root, request, on) {
     return node;
   }
 
-  function moveButton(service, direction, offset, arrow, label, disabled) {
-    const node = button(arrow, () => void move(service, offset), disabled);
+  function moveButton(service, orderKey, direction, offset, arrow, label, disabled) {
+    const node = button(arrow, () => void move(service, orderKey, offset), disabled);
     node.dataset.move = direction;
     node.setAttribute("aria-label", label);
     node.title = label;

@@ -116,6 +116,12 @@ internal sealed class UserSettingsStore
         }
     }
 
+    private static List<string> NormalizeAiUsageOrder(List<string> order) => order
+        .Where(Providers.AiUsage.AiUsageServiceIds.IsKnown)
+        .Concat(Providers.AiUsage.AiUsageServiceIds.All)
+        .Distinct(StringComparer.Ordinal)
+        .ToList();
+
     private void TrySave(UserSettings settings)
     {
         try
@@ -187,11 +193,10 @@ internal sealed class UserSettingsStore
             .Distinct(StringComparer.Ordinal)
             .ToList();
         settings.AiUsageView = settings.AiUsageView == "meter" ? "meter" : "list";
-        settings.AiUsageServiceOrder = (settings.AiUsageServiceOrder ?? [])
-            .Where(Providers.AiUsage.AiUsageServiceIds.IsKnown)
-            .Concat(Providers.AiUsage.AiUsageServiceIds.All)
-            .Distinct(StringComparer.Ordinal)
-            .ToList();
+        settings.AiUsageServiceOrder = NormalizeAiUsageOrder(settings.AiUsageServiceOrder ?? []);
+        // Older settings used the plan order for balances too.
+        settings.AiUsageBalanceOrder = NormalizeAiUsageOrder(settings.AiUsageBalanceOrder is { Count: > 0 }
+            ? settings.AiUsageBalanceOrder : settings.AiUsageServiceOrder);
         if (settings.AiUsageSort is not { Column: "session" or "weekly" or "other", Direction: "asc" or "desc" })
             settings.AiUsageSort = null;
         var known = providerIds.ToHashSet(StringComparer.OrdinalIgnoreCase);
