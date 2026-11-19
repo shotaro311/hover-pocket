@@ -19,11 +19,30 @@ internal sealed partial class PanelBridgeController
             Path.Combine(_settingsStore.RootDirectory, "CodexVoice"),
             Path.Combine(_settingsStore.RootDirectory, "AiUsageWebView2"),
             readerOverride);
-        _aiUsage.Changed += (_, _) => _ = PostEventOnUiThreadAsync("aiUsage.changed", BuildAiUsageState());
+        _aiUsage.Changed += (_, _) => _ = PublishAiUsageStateAsync();
     }
 
-    private object BuildAiUsageState() =>
-        _aiUsage?.BuildState(CurrentSettings.AiUsageHiddenServices) ?? new { refreshing = false, services = Array.Empty<object>() };
+    private Task PublishAiUsageStateAsync()
+    {
+        var dispatcher = System.Windows.Application.Current?.Dispatcher;
+        return dispatcher is null || dispatcher.CheckAccess()
+            ? PostEventAsync("aiUsage.changed", BuildAiUsageState())
+            : dispatcher.InvokeAsync(() => PostEventAsync("aiUsage.changed", BuildAiUsageState())).Task.Unwrap();
+    }
+
+    private object BuildAiUsageState()
+    {
+        var settings = CurrentSettings;
+        var usage = _aiUsage?.BuildState(settings.AiUsageHiddenServices);
+        return new
+        {
+            refreshing = usage?.Refreshing ?? false,
+            services = usage?.Services ?? [],
+            view = settings.AiUsageView,
+            order = settings.AiUsageServiceOrder,
+            sort = settings.AiUsageSort
+        };
+    }
 
     private IReadOnlyCollection<string> VisibleAiUsageServices() =>
         AiUsageServiceIds.All.Where(id => !CurrentSettings.AiUsageHiddenServices.Contains(id, StringComparer.Ordinal)).ToArray();
@@ -89,6 +108,30 @@ internal sealed partial class PanelBridgeController
                     : VisibleAiUsageServices();
             _ = RefreshAiUsageInBackground(services, force: true);
             return Task.FromResult<object?>(BuildAiUsageState());
+        });
+
+        register("aiUsage.setPresentation", async (parameters, token) =>
+        {
+            if (parameters is not { ValueKind: JsonValueKind.Object } value)
+                throw new ArgumentException("ai_usage_presentation_invalid");
+            var updated = CurrentSettings.Clone();
+            if (value.TryGetProperty("view", out var view))
+                updated.AiUsageView = view.ValueKind == JsonValueKind.String ? view.GetString()! : "list";
+            if (value.TryGetProperty("order", out var order))
+                updated.AiUsageServiceOrder = order.ValueKind == JsonValueKind.Array
+                    ? order.EnumerateArray().Where(item => item.ValueKind == JsonValueKind.String).Select(item => item.GetString()!).ToList()
+                    : [];
+            if (value.TryGetProperty("sort", out var sort))
+            {
+                updated.AiUsageSort = sort.ValueKind == JsonValueKind.Object
+                    && sort.TryGetProperty("column", out var column) && column.ValueKind == JsonValueKind.String
+                    && sort.TryGetProperty("direction", out var direction) && direction.ValueKind == JsonValueKind.String
+                    ? new AiUsageListSort(column.GetString()!, direction.GetString()!) : null;
+            }
+            token.ThrowIfCancellationRequested();
+            SaveSettings(updated);
+            await PostEventAsync("aiUsage.changed", BuildAiUsageState());
+            return BuildAiUsageState();
         });
 
         if (surface == BridgeSurface.Panel)

@@ -6,12 +6,13 @@
 export function createAiUsageSettings(root, request, on) {
   let usage = null;
   let english = false;
+  let reordering = false;
   const busy = new Map();
   root.innerHTML = `<h2 data-title></h2><p class="settings-note" data-note></p><div class="ai-usage-settings-list" data-list></div><p class="settings-note" data-privacy></p><p class="settings-status" role="status" data-status></p>`;
   const find = (name) => root.querySelector(`[data-${name}]`);
   const tx = (ja, en) => (english ? en : ja);
 
-  on("aiUsage.changed", (payload) => { usage = payload; paint(); });
+  on("aiUsage.changed", (payload) => { usage = payload; if (!reordering) paint(); });
   // Show the last known state at once, but contact the services only while this section is on screen
   // (Settings shows one category at a time by toggling `hidden`).
   void load(false);
@@ -43,36 +44,74 @@ export function createAiUsageSettings(root, request, on) {
     }
   }
 
+  async function move(service, offset) {
+    if (reordering) return;
+    const order = [...usage.order];
+    const from = order.indexOf(service);
+    const to = from + offset;
+    if (from < 0 || to < 0 || to >= order.length) return;
+    [order[from], order[to]] = [order[to], order[from]];
+    reordering = true;
+    find("status").textContent = "";
+    try {
+      usage = await request("aiUsage.setPresentation", { order });
+    } catch {
+      find("status").textContent = tx("変更を保存できませんでした。", "Could not save the change.");
+    } finally {
+      reordering = false;
+      paint();
+    }
+  }
+
   function paint() {
     find("title").textContent = tx("AI使用状況", "AI usage");
     find("note").textContent = tx(
-      "パネルの「AI Usage」に、5時間・1週間・モデル別（ClaudeのFableなど）の使用率を表示します。表示するサービスを選び、サインインが要るものはサインインしてください。",
-      "The AI Usage tool shows five-hour, weekly, and model-specific limits (such as Claude's Fable). Choose services and sign in where needed.");
+      "パネルの「AI Usage」に、5時間・1週間・モデル別（ClaudeのFableなど）の残りを表示します。表示するサービスと順番を選び、必要に応じてサインインしてください。",
+      "The AI Usage tool shows what remains in five-hour, weekly, and model-specific limits (such as Claude's Fable). Choose and order services, then sign in where needed.");
     find("privacy").textContent = tx(
-      "Claude・Claude Console・Gemini・MuseはHoverPocketの窓で、Codexは普段のブラウザーでOpenAIのログイン画面からサインインします（チャット・音声と共通の1つのログイン）。パスワードはHoverPocketに渡りません。ログイン状態はこのPCのHoverPocket専用の保存場所にサービスごとに残り、ColabだけはGeminiと同じGoogleのログインを使います。使用状況を読むために各サービスのページを画面に出さずに開き、パネルには使用率・リセット時刻・プラン名・枠の名前と、残高・期限・1時間あたりの消費だけを表示します。Antigravityは、このPCで動くGemini Peerから読みます（この欄でHoverPocketが接続するのはGemini Peerだけです）。",
-      "Claude, Claude Console, Gemini and Muse sign in inside a HoverPocket window; Codex signs in on OpenAI's page in your usual browser (one login shared with the chat and voice). HoverPocket never receives your password. Each session stays in its own HoverPocket-only profile on this PC; Colab alone uses Gemini's Google sign-in. To read usage, HoverPocket opens each service's pages off screen, and the panel shows only percentages, reset times, plan and limit names, balances, expiry dates and hourly consumption. Antigravity is read from the Gemini Peer running on this PC (for it, HoverPocket connects only to the Gemini Peer).");
+      "Claude・Claude Console・Gemini・MuseはHoverPocketの窓で、Codexは普段のブラウザーでOpenAIのログイン画面からサインインします（チャット・音声と共通の1つのログイン）。パスワードはHoverPocketに渡りません。ログイン状態はこのPCのHoverPocket専用の保存場所にサービスごとに残り、ColabだけはGeminiと同じGoogleのログインを使います。使用状況を読むために各サービスのページを画面に出さずに開き、パネルには残りの割合・リセット時刻・枠の名前と、残高・期限・1時間あたりの消費を表示します。Antigravityは、このPCで動くGemini Peerから読みます（この欄でHoverPocketが接続するのはGemini Peerだけです）。",
+      "Claude, Claude Console, Gemini and Muse sign in inside a HoverPocket window; Codex signs in on OpenAI's page in your usual browser (one login shared with chat and voice). HoverPocket never receives your password. Each session stays in its own HoverPocket-only profile on this PC; Colab uses Gemini's Google sign-in. HoverPocket opens each service's pages off screen to read the remaining percentages, reset times, limit names, balances, expiry dates and hourly consumption shown in the panel. Antigravity is read from the Gemini Peer running on this PC.");
     const list = find("list");
+    const active = document.activeElement;
+    const focusRow = list.contains(active) && active.dataset.move ? active.closest("[data-service]").dataset.service : null;
+    const focusDirection = focusRow ? active.dataset.move : null;
+    const byId = new Map((usage?.services ?? []).map((service) => [service.id, service]));
+    const services = (usage?.order ?? [...byId.keys()]).map((id) => byId.get(id)).filter(Boolean);
     list.replaceChildren();
-    for (const service of usage?.services ?? []) list.append(row(service));
+    services.forEach((service, index) => list.append(row(service, index, services.length)));
+    if (focusRow) {
+      const item = [...list.children].find((node) => node.dataset.service === focusRow);
+      (item?.querySelector(`[data-move="${focusDirection}"]:enabled`) ?? item?.querySelector("[data-move]:enabled"))?.focus();
+    }
   }
 
-  function row(service) {
+  function row(service, index, count) {
     const item = document.createElement("div");
     item.className = "ai-usage-settings-row";
     item.dataset.service = service.id;
 
-    const toggle = document.createElement("label");
+    const heading = document.createElement("div");
+    heading.className = "ai-usage-settings-heading";
+    const toggle = document.createElement("div");
     toggle.className = "toggle-row";
-    const name = document.createElement("span");
+    const name = document.createElement("label");
     name.className = "provider-title";
     name.textContent = service.name;
     const visible = document.createElement("input");
+    visible.id = `ai-usage-visible-${service.id}`;
+    name.htmlFor = visible.id;
     visible.type = "checkbox";
     visible.checked = service.visible;
     visible.disabled = busy.has(service.id);
     visible.setAttribute("aria-label", tx(`${service.name}をパネルに表示`, `Show ${service.name} in the panel`));
     visible.onchange = () => act(service.id, "visible", "aiUsage.setVisible", { visible: visible.checked });
-    toggle.append(name, visible);
+    toggle.append(visible);
+    const moves = document.createElement("div");
+    moves.className = "ai-usage-settings-moves";
+    moves.append(
+      moveButton(service.id, "up", -1, "↑", tx("上へ", "Move up"), index === 0),
+      moveButton(service.id, "down", 1, "↓", tx("下へ", "Move down"), index === count - 1));
+    heading.append(name, moves, toggle);
 
     const status = document.createElement("span");
     status.className = "settings-status ai-usage-settings-state";
@@ -98,7 +137,8 @@ export function createAiUsageSettings(root, request, on) {
         pending === "signOut" ? tx("サインアウト中…", "Signing out…") : tx("サインアウト", "Sign out"),
         () => act(service.id, "signOut", "aiUsage.signOut"), Boolean(pending)));
     }
-    item.append(toggle, status, buttons);
+    item.append(heading, status);
+    if (buttons.childElementCount) item.append(buttons);
 
     const hint = serviceHint(service.id);
     if (hint) {
@@ -143,6 +183,14 @@ export function createAiUsageSettings(root, request, on) {
     node.textContent = text;
     node.disabled = disabled;
     node.onclick = onClick;
+    return node;
+  }
+
+  function moveButton(service, direction, offset, arrow, label, disabled) {
+    const node = button(arrow, () => void move(service, offset), disabled);
+    node.dataset.move = direction;
+    node.setAttribute("aria-label", label);
+    node.title = label;
     return node;
   }
 

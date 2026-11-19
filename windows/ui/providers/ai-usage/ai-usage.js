@@ -1,252 +1,645 @@
 import { on } from "../../js/bridge.js";
 
-const SERVICE_MARKS = { codex: "Cx", claude: "Cl", "claude-api": "CA", gemini: "Ge", antigravity: "AG", colab: "Co", muse: "Mu" };
+const COLUMNS = ["session", "weekly", "other"];
+const COLORS = { blue: "#5aa9ff", green: "#5fd08a", yellow: "#f5c35b", red: "#ff7c7c" };
+const SVG_NS = "http://www.w3.org/2000/svg";
+const DRAG_TYPE = "application/x-hoverpocket-ai-usage-service";
 
-/**
- * Lists each AI service's usage windows (five-hour, weekly, model-scoped weekly) as bars.
- * Data comes from C# through `aiUsage.getState` and `aiUsage.changed`; sign-in lives in Settings.
- * @param {{ container: HTMLElement, state: any, request: (method: string, params?: any) => Promise<any> }} context
- */
-export function renderAiUsageProvider({ container, state, request }) {
+function element(tag, className, text) {
+  const node = document.createElement(tag);
+  if (className) node.className = className;
+  if (text !== undefined) node.textContent = text;
+  return node;
+}
+
+function button(className, text, action) {
+  const node = element("button", className, text);
+  node.type = "button";
+  node.onclick = action;
+  return node;
+}
+
+function svgElement(tag, attributes = {}) {
+  const node = document.createElementNS(SVG_NS, tag);
+  for (const [name, value] of Object.entries(attributes)) node.setAttribute(name, value);
+  return node;
+}
+
+function point(radius, percent) {
+  const radians = (135 + percent * 2.7) * Math.PI / 180;
+  return [58 + radius * Math.cos(radians), 54 + radius * Math.sin(radians)];
+}
+
+function arc(radius, start, end, attributes) {
+  return svgElement("path", {
+    d: `M ${point(radius, start).join(" ")} A ${radius} ${radius} 0 ${end - start > 200 / 3 ? 1 : 0} 1 ${point(radius, end).join(" ")}`,
+    ...attributes,
+  });
+}
+
+function radialLine(percent, inner, outer, attributes) {
+  const [x1, y1] = point(inner, percent);
+  const [x2, y2] = point(outer, percent);
+  return svgElement("line", { x1, y1, x2, y2, ...attributes });
+}
+
+function columnFor(limit) {
+  if (!limit.model && limit.kind === "session" && limit.windowMinutes === 300) return "session";
+  if (!limit.model && limit.kind === "weekly") return "weekly";
+  return "other";
+}
+
+function remaining(limit) {
+  return limit.state !== "unreadable" && Number.isFinite(limit.usedPercent) && limit.usedPercent >= 0
+    ? 100 - Math.min(100, limit.usedPercent) : null;
+}
+
+function colorFor(value) {
+  return COLORS[value >= 70 ? "blue" : value >= 50 ? "green" : value >= 25 ? "yellow" : "red"];
+}
+
+function formatPercent(value) {
+  return Number.isInteger(value) ? String(value) : value.toFixed(1);
+}
+
+/** Shows the saved readings as a table or as gauges. Acquisition stays on the existing bridge path. */
+export function renderAiUsageProvider({ container, state, request, iconSvg }) {
   const english = state?.settings?.language === "en";
   const tx = (ja, en) => (english ? en : ja);
-  const root = document.createElement("div");
-  root.className = "hp-usage";
+  const names = { session: tx("5時間", "5-hour"), weekly: tx("1週間", "Weekly"), other: tx("別枠", "Other") };
+  const root = element("div", "hp-usage");
+  const header = element("header", "hp-usage-header");
+  const title = element("h2", "", "AI Usage");
+  const modes = element("div", "hp-size-switch");
+  modes.setAttribute("role", "group");
+  modes.setAttribute("aria-label", tx("表示の種類", "View"));
+  const listMode = button("hp-size-button", tx("一覧", "List"), () => void save({ view: "list" }));
+  const meterMode = button("hp-size-button", tx("メーター", "Meter"), () => void save({ view: "meter" }));
+  listMode.dataset.view = "list";
+  meterMode.dataset.view = "meter";
+  modes.append(listMode, meterMode);
+  const updated = element("span", "hp-usage-updated");
+  updated.setAttribute("role", "status");
+  const refreshButton = button("hp-icon-button hp-usage-refresh", "", () => void refresh());
+  refreshButton.innerHTML = iconSvg("refresh");
+  refreshButton.title = tx("更新", "Refresh");
+  refreshButton.setAttribute("aria-label", refreshButton.title);
+  header.append(title, modes, updated, refreshButton);
+  const saveError = element("p", "hp-usage-error hp-usage-save-error");
+  saveError.setAttribute("role", "status");
+  saveError.hidden = true;
+  const body = element("div", "hp-usage-body");
+  root.append(header, saveError, body);
   container.append(root);
+
   let usage = null;
   let disposed = false;
-
-  const offChanged = on("aiUsage.changed", (payload) => { usage = payload; paint(); });
-  // Times move on without new data; update them in place so buttons under the pointer are not rebuilt.
-  const clock = window.setInterval(tick, 30_000);
-  void request("aiUsage.getState", { refresh: true }).then((payload) => { usage = payload; paint(); }).catch(() => paint(true));
-
-  // A saved reading shown as current (Antigravity) turns old at `freshUntil`, even with no new data.
+  let saving = false;
+  let drag = null;
+  let deferredPaint = false;
   let paintedExpired = "";
-  function isExpired(service) {
-    const until = service.freshUntil ? Date.parse(service.freshUntil) : NaN;
-    return service.status === "ok" && !Number.isNaN(until) && Date.now() >= until;
-  }
-  function expiredIds() {
-    return (usage?.services ?? []).filter((service) => service.visible && isExpired(service)).map((service) => service.id).join(",");
+  let expiryTimer = 0;
+  const timeFormat = new Intl.DateTimeFormat(english ? "en-US" : "ja-JP", {
+    hour: "2-digit", minute: "2-digit", hourCycle: "h23",
+  });
+  const columnEntries = (service, column) => service.windows.filter((limit) => columnFor(limit) === column);
+  const isExpired = (service) => service.status === "ok" && Date.now() >= Date.parse(service.freshUntil);
+  const expiredIds = () => (usage?.services ?? []).filter((service) => service.visible && isExpired(service)).map((service) => service.id).join(",");
+
+  const offChanged = on("aiUsage.changed", accept);
+  const clock = window.setInterval(tick, 30_000);
+  paint();
+  void request("aiUsage.getState", { refresh: true }).then(accept).catch(() => paint(true));
+
+  function accept(payload) {
+    usage = payload;
+    if (!saving) paint();
   }
 
-  // Repaint right when the next shown-as-current reading turns old, not up to 30 seconds later.
-  let expiryTimer = 0;
-  function scheduleExpiry() {
-    window.clearTimeout(expiryTimer);
-    const next = Math.min(...(usage?.services ?? [])
-      .filter((service) => service.visible && service.status === "ok" && service.freshUntil && !isExpired(service))
-      .map((service) => Date.parse(service.freshUntil))
-      .filter((until) => !Number.isNaN(until)));
-    if (Number.isFinite(next)) expiryTimer = window.setTimeout(() => paint(), Math.max(0, next - Date.now()) + 50);
+  async function refresh(options) {
+    const call = options?.panelOpened ? request("aiUsage.getState", { refresh: true }) : request("aiUsage.refresh");
+    await call.then(accept).catch(() => {});
+  }
+
+  async function save(params) {
+    if (saving || !usage) return;
+    saving = true;
+    saveError.hidden = true;
+    try {
+      accept(await request("aiUsage.setPresentation", params));
+    } catch {
+      saveError.textContent = tx("変更を保存できませんでした。", "Could not save the change.");
+      saveError.hidden = false;
+    } finally {
+      saving = false;
+      paint();
+    }
   }
 
   function paint(failed = false) {
     if (disposed) return;
+    if (drag) {
+      deferredPaint = true;
+      return;
+    }
+    deferredPaint = false;
     paintedExpired = expiredIds();
-    scheduleExpiry();
-    const services = (usage?.services ?? []).filter((service) => service.visible)
-      .map((service) => (isExpired(service) ? { ...service, status: "error", stale: true, errorCode: "stale" } : service));
+    window.clearTimeout(expiryTimer);
+    const next = Math.min(...(usage?.services ?? [])
+      .filter((service) => service.visible && service.status === "ok" && !isExpired(service))
+      .map((service) => Date.parse(service.freshUntil))
+      .filter(Number.isFinite));
+    if (Number.isFinite(next)) expiryTimer = window.setTimeout(() => paint(), Math.max(0, next - Date.now()) + 50);
+
+    const byId = new Map((usage?.services ?? []).map((service) => [service.id, service]));
+    const services = (usage?.order ?? [...byId.keys()]).map((id) => byId.get(id)).filter((service) => service?.visible)
+      .map((service) => isExpired(service) ? { ...service, status: "error", stale: true, errorCode: "stale" } : service);
+    const view = usage?.view === "meter" ? "meter" : "list";
+    listMode.setAttribute("aria-pressed", String(view === "list"));
+    meterMode.setAttribute("aria-pressed", String(view === "meter"));
+    listMode.disabled = meterMode.disabled = !usage;
+    const latest = services.filter((service) => service.status === "ok")
+      .map((service) => Date.parse(service.fetchedAt)).filter(Number.isFinite);
+    updated.textContent = services.some((service) => service.refreshing) ? tx("更新中…", "Updating…")
+      : latest.length ? tx(`${timeFormat.format(Math.max(...latest))} 更新`, `Updated ${timeFormat.format(Math.max(...latest))}`) : "";
+
+    const focused = body.contains(document.activeElement) ? document.activeElement.dataset.focus : null;
+    const scrollTop = body.scrollTop;
     if (!usage) {
-      root.replaceChildren(message(failed
+      body.replaceChildren(element("p", "hp-usage-message", failed
         ? tx("使用状況を読み込めませんでした。", "Could not load usage.")
         : tx("読み込み中…", "Loading…")));
-      return;
-    }
-    if (services.length === 0) {
-      const empty = message(tx("表示するサービスがありません。設定のAIで選べます。", "No services shown. Choose them in Settings › AI."));
-      empty.append(settingsButton(tx("設定を開く", "Open Settings")));
-      root.replaceChildren(empty);
-      return;
-    }
-    const grid = document.createElement("div");
-    grid.className = "hp-usage-grid";
-    grid.dataset.count = String(services.length);
-    for (const service of services) grid.append(card(service));
-    root.replaceChildren(grid);
-  }
-
-  function card(service) {
-    const article = document.createElement("article");
-    article.className = "hp-usage-card";
-    article.dataset.service = service.id;
-    article.dataset.status = service.status;
-
-    const head = document.createElement("header");
-    head.className = "hp-usage-head";
-    const mark = document.createElement("span");
-    mark.className = "hp-usage-mark";
-    mark.textContent = SERVICE_MARKS[service.id] ?? service.name.slice(0, 2);
-    mark.setAttribute("aria-hidden", "true");
-    const name = document.createElement("h2");
-    name.className = "hp-usage-name";
-    name.textContent = service.name;
-    head.append(mark, name);
-    // For the Gemini Peer card the "plan" is the model agy ran (a long name), shown on its own line.
-    const showsModel = service.signIn === "peer";
-    if (service.plan && !showsModel) {
-      const plan = document.createElement("span");
-      plan.className = "hp-usage-plan";
-      plan.textContent = service.plan;
-      plan.title = service.plan;
-      head.append(plan);
-    }
-    const meta = document.createElement("span");
-    meta.className = "hp-usage-meta";
-    meta.textContent = metaText(service);
-    if (service.stale || service.status === "error") meta.classList.add("is-warning");
-    head.append(meta);
-    article.append(head);
-    if (service.plan && showsModel) {
-      const model = document.createElement("p");
-      model.className = "hp-usage-model";
-      model.textContent = tx(`モデル: ${service.plan}`, `Model: ${service.plan}`);
-      article.append(model);
-    }
-
-    if (service.status === "signedOut") {
-      const shared = (usage?.services ?? []).find((item) => item.id === service.sharedWith)?.name;
-      const body = message(service.signIn === "codex"
-        ? tx("ChatGPTにログインしていません。", "Not signed in to ChatGPT.")
-        : shared
-          ? tx(`${shared}のサインインを使います。サインインしていません。`, `Uses the ${shared} sign-in, which is signed out.`)
-          : tx("サインインしていません。", "Not signed in."));
-      body.append(settingsButton(tx("設定でサインイン", "Sign in from Settings")));
-      article.append(body);
-      return article;
-    }
-
-    if (service.windows.length > 0) {
-      const list = document.createElement("ul");
-      list.className = "hp-usage-rows";
-      for (const limit of service.windows) {
-        const item = row(limit, service.stale);
-        if (item) list.append(item);
-      }
-      article.append(list);
-    }
-
-    const balances = service.balances ?? [];
-    if (balances.length > 0) {
-      const list = document.createElement("ul");
-      list.className = "hp-usage-rows hp-usage-balances";
-      for (const balance of balances) {
-        const item = balanceRow(balance, service.stale);
-        if (item) list.append(item);
-      }
-      article.append(list);
-    }
-
-    if (service.status === "error") {
-      const error = document.createElement("p");
-      error.className = "hp-usage-error";
-      const keepsLast = service.stale && service.errorCode !== "stale" && service.errorCode !== "noValues";
-      error.textContent = (keepsLast ? tx("前回の値を表示中。", "Showing the last reading. ") : "") + errorText(service.errorCode);
-      article.append(error);
-    } else if (service.windows.length === 0 && balances.length === 0) {
-      article.append(message(service.refreshing || service.status === "idle"
-        ? tx("読み込み中…", "Loading…")
-        : tx("表示できる枠がありません。", "No usage windows reported.")));
-    }
-    return article;
-  }
-
-  function row(limit, stale) {
-    // A window the service reports without a value is shown as unavailable, never as 0%.
-    const unreadable = limit.state === "unreadable";
-    const raw = typeof limit.usedPercent === "number" ? limit.usedPercent : NaN;
-    if (!unreadable && (!Number.isFinite(raw) || raw < 0)) return null;
-    const used = unreadable ? 0 : Math.min(100, raw);
-    const item = document.createElement("li");
-    item.className = "hp-usage-row";
-    item.dataset.kind = limit.kind ?? "";
-    item.dataset.minutes = String(limit.windowMinutes ?? "");
-    item.dataset.resetsAt = limit.resetsAt ?? "";
-    item.dataset.level = unreadable ? "warn" : used >= 90 ? "high" : used >= 80 ? "warn" : "normal";
-    if (unreadable) item.classList.add("is-unreadable");
-    if (stale) item.classList.add("is-stale");
-
-    const top = document.createElement("div");
-    top.className = "hp-usage-row-top";
-    const label = document.createElement("span");
-    label.className = "hp-usage-label";
-    label.textContent = windowLabel(limit);
-    const value = document.createElement("span");
-    value.className = "hp-usage-value";
-    value.textContent = unreadable ? tx("取得できません", "Unavailable") : `${formatPercent(used)}%`;
-    top.append(label, value);
-
-    const bar = document.createElement("div");
-    bar.className = "hp-usage-bar";
-    if (unreadable) {
-      // No value to measure: assistive technology reads the "unavailable" text instead of a meter.
-      bar.setAttribute("aria-hidden", "true");
+    } else if (!services.length) {
+      const empty = element("div", "hp-usage-message", tx("表示するサービスがありません。設定のAIで選べます。", "No services shown. Choose them in Settings › AI."));
+      empty.append(settingsButton());
+      body.replaceChildren(empty);
     } else {
-      bar.setAttribute("role", "meter");
-      bar.setAttribute("aria-valuemin", "0");
-      bar.setAttribute("aria-valuemax", "100");
-      bar.setAttribute("aria-valuenow", String(used));
-      bar.setAttribute("aria-label", `${label.textContent} ${value.textContent}`);
-      const fill = document.createElement("span");
-      fill.className = "hp-usage-fill";
-      fill.style.width = `${used}%`;
-      bar.append(fill);
+      body.replaceChildren(view === "meter" ? meterView(services) : listView(services, usage.sort));
     }
-    const pace = document.createElement("span");
-    pace.className = "hp-usage-pace";
-    bar.append(pace);
-
-    const reset = document.createElement("div");
-    reset.className = "hp-usage-reset";
-    item.append(top, bar, reset);
-    updateTimes(item);
-    return item;
-  }
-
-  /** A balance (credits or compute units) has no limit, so it is shown as an amount, not a bar. */
-  function balanceRow(balance, stale) {
-    const amount = typeof balance.amount === "number" ? balance.amount : NaN;
-    if (!balance.state && (!Number.isFinite(amount) || amount < 0)) return null;
-    const item = document.createElement("li");
-    item.className = "hp-usage-row hp-usage-balance";
-    item.dataset.kind = balance.kind ?? "";
-    item.dataset.balance = JSON.stringify(balance);
-    if (stale) item.classList.add("is-stale");
-    if (balance.state === "unreadable") item.dataset.level = "warn";
-    const top = document.createElement("div");
-    top.className = "hp-usage-row-top";
-    const label = document.createElement("span");
-    label.className = "hp-usage-label";
-    label.textContent = balanceLabel(balance);
-    const value = document.createElement("span");
-    value.className = "hp-usage-value";
-    value.textContent = balance.state === "unlimited" ? tx("無制限", "Unlimited")
-      : balance.state === "unreadable" ? tx("読み取れません", "Unreadable")
-      : formatAmount(amount, balance.unit);
-    top.append(label, value);
-    const detail = document.createElement("div");
-    detail.className = "hp-usage-reset";
-    item.append(top, detail);
-    updateBalance(item);
-    return item;
-  }
-
-  function updateBalance(item) {
-    const balance = JSON.parse(item.dataset.balance);
-    const detail = item.querySelector(".hp-usage-reset");
-    detail.textContent = balance.state ? "" : balanceDetail(balance, balance.amount);
-    detail.hidden = detail.textContent === "";
-  }
-
-  function balanceLabel(balance) {
-    switch (balance.kind) {
-      case "planCredit": return balance.label || tx("プラン特典のクレジット", "Plan credits");
-      case "purchasedCredit": return tx("購入したクレジット", "Purchased credits");
-      case "codexCredits": return tx("Codexクレジット", "Codex credits");
-      case "computeUnits": return tx("コンピューティング ユニット", "Compute units");
-      default: return balance.label || tx("残高", "Balance");
+    body.scrollTop = scrollTop;
+    if (focused) {
+      const target = [...body.querySelectorAll("[data-focus]")].find((node) => node.dataset.focus === focused);
+      (target ?? body.querySelector("[data-sort-column]"))?.focus({ preventScroll: true });
     }
+  }
+
+  function listView(services, sort) {
+    const section = element("div", "hp-usage-list");
+    const table = element("table", "hp-usage-table");
+    table.setAttribute("aria-label", "AI Usage");
+    const columns = element("colgroup");
+    if (!sort) columns.append(element("col", "hp-usage-handle-column"));
+    columns.append(element("col", "hp-usage-name-column"));
+    for (const column of COLUMNS) columns.append(element("col", `hp-usage-${column}-column`));
+    const head = element("thead");
+    const headings = element("tr");
+    if (!sort) headings.append(element("td"));
+    const name = element("th");
+    name.scope = "col";
+    if (sort) {
+      const reset = button("hp-usage-sort-reset", tx("自分の順に戻す", "Back to my order"), () => void save({ sort: null }));
+      reset.dataset.focus = "sort-reset";
+      name.append(reset);
+    } else {
+      name.textContent = tx("残り", "Left");
+    }
+    headings.append(name);
+    for (const column of COLUMNS) {
+      const th = element("th");
+      th.scope = "col";
+      const direction = sort?.column === column ? sort.direction : null;
+      if (direction) th.setAttribute("aria-sort", direction === "asc" ? "ascending" : "descending");
+      const toggle = button("hp-usage-sort", names[column], () => void save({
+        sort: { column, direction: direction === "asc" ? "desc" : "asc" },
+      }));
+      toggle.dataset.sortColumn = column;
+      toggle.dataset.focus = column;
+      const arrow = element("span", "hp-usage-sort-arrow", direction === "asc" ? "↑" : direction === "desc" ? "↓" : "↕");
+      arrow.setAttribute("aria-hidden", "true");
+      toggle.append(arrow);
+      th.append(toggle);
+      headings.append(th);
+    }
+    head.append(headings);
+    const chips = element("div", "hp-usage-chips");
+    const rowServices = services.filter((service) => service.windows.length || service.status !== "ok");
+    const ordered = sort ? sortedServices(rowServices, sort) : rowServices;
+    table.append(columns, head);
+    for (const service of ordered) {
+      const group = element("tbody", "hp-usage-service");
+      setService(group, service);
+      const row = element("tr");
+      if (!sort) {
+        const slot = element("td");
+        slot.append(handle(group, service));
+        row.append(slot);
+      }
+      const label = element("th");
+      label.scope = "row";
+      label.append(serviceName(service));
+      row.append(label);
+      const showReason = service.status === "error" && (service.stale || !service.windows.length);
+      const status = showReason ? null : serviceMessage(service);
+      if (status || (showReason && !service.windows.length)) {
+        const cell = element("td");
+        cell.colSpan = COLUMNS.length;
+        if (status) cell.append(status);
+        row.append(cell);
+      } else {
+        for (const column of COLUMNS) {
+          const cell = element("td");
+          cell.dataset.column = column;
+          const limits = columnEntries(service, column);
+          if (!limits.length) cell.append(element("span", "hp-usage-placeholder", "—"));
+          for (const limit of limits) cell.append(listLimit(service, limit, column));
+          row.append(cell);
+        }
+      }
+      group.append(row);
+      if (showReason) {
+        const details = element("tr", "hp-usage-reason-row");
+        const spacer = element("td");
+        spacer.colSpan = sort ? 1 : 2;
+        const cell = element("td");
+        cell.colSpan = COLUMNS.length;
+        cell.append(reason(service));
+        details.append(spacer, cell);
+        group.append(details);
+      }
+      table.append(group);
+    }
+    for (const service of services) {
+      for (const balance of balancesFor(service)) chips.append(balanceDisplay(service, balance, false));
+    }
+    if (ordered.length) section.append(table);
+    section.append(chips);
+    return section;
+  }
+
+  function sortedServices(services, sort) {
+    function value(service) {
+      return Math.min(...columnEntries(service, sort.column).map((limit) => remaining(limit) ?? Infinity));
+    }
+    return services.map((service) => ({ service, value: value(service) })).sort((a, b) => {
+      if (a.value === b.value) return 0;
+      if (!Number.isFinite(a.value)) return 1;
+      if (!Number.isFinite(b.value)) return -1;
+      return (a.value - b.value) * (sort.direction === "asc" ? 1 : -1);
+    }).map(({ service }) => service);
+  }
+
+  function setService(node, service) {
+    node.dataset.service = service.id;
+    node.dataset.status = service.status;
+    node.classList.toggle("is-stale", Boolean(service.stale));
+  }
+
+  function serviceName(service) {
+    const line = element("div", "hp-usage-service-name");
+    line.append(element("span", "", service.name));
+    const fetched = Date.parse(service.fetchedAt);
+    if (service.stale && Number.isFinite(fetched)) {
+      const time = timeFormat.format(fetched);
+      line.append(element("span", "hp-usage-old", tx(`${time} の値`, `As of ${time}`)));
+    }
+    return line;
+  }
+
+  function reason(service) {
+    const keepsLast = service.stale && service.errorCode !== "stale" && service.errorCode !== "noValues";
+    const text = (keepsLast ? tx("前回の値を表示中。", "Showing the last reading. ") : "") + errorText(service.errorCode);
+    const node = element("p", "hp-usage-error", text);
+    node.title = text;
+    return node;
+  }
+
+  function serviceMessage(service) {
+    if (service.status === "signedOut") {
+      const shared = usage.services.find((item) => item.id === service.sharedWith)?.name;
+      const text = shared
+        ? tx(`${shared}のサインインを使います。サインインしていません。`, `Uses the ${shared} sign-in, which is signed out.`)
+        : tx("サインインしていません", "Not signed in");
+      const node = element("div", "hp-usage-message");
+      node.append(element("span", "", text), settingsButton());
+      return node;
+    }
+    if (service.windows.length || service.balances?.length) return null;
+    if (service.status === "error") return service.stale ? null : reason(service);
+    return element("p", "hp-usage-message", service.refreshing || service.status === "idle"
+      ? tx("読み込み中…", "Loading…")
+      : tx("表示できる枠がありません。", "No usage windows reported."));
+  }
+
+  function settingsButton() {
+    return button("hp-usage-action", tx("設定を開く", "Open Settings"),
+      () => { void request("aiUsage.openSettings").catch(() => {}); });
+  }
+
+  function handle(target, service) {
+    const grip = element("span", "hp-usage-handle", "⠿");
+    grip.title = tx(`${service.name}をドラッグして移動`, `Drag to move ${service.name}`);
+    grip.draggable = true;
+    grip.ondragstart = (event) => {
+      if (saving) { event.preventDefault(); return; }
+      drag = { id: service.id, target: null };
+      event.dataTransfer.setData(DRAG_TYPE, service.id);
+      event.dataTransfer.effectAllowed = "move";
+      event.dataTransfer.setDragImage(target, 10, 12);
+      target.classList.add("is-dragging");
+    };
+    grip.ondragend = () => {
+      if (!drag) return;
+      clearDrag();
+      if (deferredPaint) paint();
+    };
+    target.ondragover = (event) => {
+      if (!drag || drag.id === service.id || !event.dataTransfer.types.includes(DRAG_TYPE)) return;
+      event.preventDefault();
+      event.dataTransfer.dropEffect = "move";
+      drag.target?.classList.remove("is-drop-target");
+      drag.target = target;
+      target.classList.add("is-drop-target");
+    };
+    target.ondragleave = (event) => {
+      if (event.relatedTarget instanceof Node && target.contains(event.relatedTarget)) return;
+      target.classList.remove("is-drop-target");
+    };
+    target.ondrop = (event) => {
+      if (!drag || drag.id === service.id || event.dataTransfer.getData(DRAG_TYPE) !== drag.id) return;
+      event.preventDefault();
+      const source = drag.id;
+      clearDrag();
+      const order = usage.order;
+      const renderedIds = new Set([...body.querySelectorAll(".hp-usage-service")].map((node) => node.dataset.service));
+      const renderedOrder = order.filter((id) => renderedIds.has(id));
+      const from = renderedOrder.indexOf(source);
+      const to = renderedOrder.indexOf(service.id);
+      if (from !== -1 && to !== -1) {
+        renderedOrder.splice(from, 1);
+        renderedOrder.splice(to, 0, source);
+        let index = 0;
+        void save({ order: order.map((id) => renderedIds.has(id) ? renderedOrder[index++] : id) });
+      }
+      if (deferredPaint) paint();
+    };
+    return grip;
+  }
+
+  function clearDrag() {
+    drag = null;
+    body.querySelectorAll(".is-dragging, .is-drop-target").forEach((node) => node.classList.remove("is-dragging", "is-drop-target"));
+  }
+
+  function windowName(limit) {
+    const column = columnFor(limit);
+    if (column !== "other") return names[column];
+    const minutes = Number(limit.windowMinutes) || 0;
+    if (minutes >= 1440 && minutes % 1440 === 0) return tx(`${minutes / 1440}日`, `${minutes / 1440}-day`);
+    if (minutes >= 60 && minutes % 60 === 0) return tx(`${minutes / 60}時間`, `${minutes / 60}-hour`);
+    return minutes > 0 ? tx(`${minutes}分`, `${minutes}-minute`) : tx("枠", "Window");
+  }
+
+  function repeatedWindowDuration(service, limit) {
+    if (!limit.model || !service.windows.some((other) => other !== limit && other.model === limit.model)) return "";
+    if (limit.windowMinutes === 10080) return tx("1週間", "1 week");
+    if (limit.windowMinutes === 300) return tx("5時間", "5 hours");
+    return windowName(limit);
+  }
+
+  function windowLabel(service, limit) {
+    const label = element("span", "hp-usage-limit-name");
+    const duration = repeatedWindowDuration(service, limit);
+    if (duration) {
+      label.append(element("span", "hp-usage-window-model", limit.model),
+        element("span", "hp-usage-window-duration", ` ${duration}`));
+    } else {
+      label.textContent = limit.model || windowName(limit);
+    }
+    label.title = label.textContent;
+    return label;
+  }
+
+  function listLimit(service, limit, column) {
+    const node = element("div", "hp-usage-limit");
+    const line = element("div", "hp-usage-limit-top");
+    const left = element("span", "hp-usage-limit-left");
+    const label = windowLabel(service, limit);
+    if (column === "other") left.append(label);
+    line.append(left);
+    node.append(line);
+    const value = remaining(limit);
+    if (value === null) {
+      left.append(element("span", "hp-usage-unavailable", tx("取得できません", "Unavailable")));
+      return node;
+    }
+    node.style.setProperty("--usage-color", colorFor(value));
+    const percent = `${formatPercent(value)}%`;
+    left.append(element("span", "hp-usage-value", percent));
+    line.append(resetLabel(limit));
+    const bar = element("div", "hp-usage-bar");
+    bar.setAttribute("role", "meter");
+    bar.setAttribute("aria-valuemin", "0");
+    bar.setAttribute("aria-valuemax", "100");
+    bar.setAttribute("aria-valuenow", String(value));
+    bar.setAttribute("aria-label", label.title);
+    const fill = element("span", "hp-usage-fill");
+    fill.style.width = `${value}%`;
+    bar.append(fill);
+    left.append(bar);
+    return node;
+  }
+
+  function meterView(services) {
+    const cards = element("div", "hp-usage-meter-grid");
+    for (const service of services) {
+      const card = element("article", "hp-usage-card hp-usage-service");
+      setService(card, service);
+      const head = element("header");
+      head.append(handle(card, service), serviceName(service));
+      card.append(head);
+      if (service.stale && service.status === "error") card.append(reason(service));
+      const status = serviceMessage(service);
+      if (status) card.append(status);
+      const meters = element("div", "hp-usage-meters");
+      for (const column of COLUMNS) {
+        for (const limit of columnEntries(service, column)) meters.append(meter(service, limit));
+      }
+      for (const balance of balancesFor(service)) meters.append(balanceDisplay(service, balance, true));
+      if (meters.childElementCount) card.append(meters);
+      cards.append(card);
+    }
+    return cards;
+  }
+
+  function meter(service, limit) {
+    const node = element("div", "hp-usage-meter");
+    const label = element("span", "hp-usage-limit-name", limit.model || windowName(limit));
+    const duration = repeatedWindowDuration(service, limit);
+    const name = duration ? `${label.textContent} ${duration}` : label.textContent;
+    const value = remaining(limit);
+    const svg = svgElement("svg", { width: 116, height: 100, viewBox: "0 0 116 100", "aria-hidden": "true", fill: "none" });
+    svg.append(arc(46, 0, 100, { stroke: "#161b22", "stroke-width": 5 }));
+    if (value !== null) {
+      const bands = [[0, 25, COLORS.red], [25, 50, COLORS.yellow], [50, 70, COLORS.green], [70, 100, COLORS.blue]];
+      for (const [start, end, color] of bands) {
+        svg.append(arc(51, start + Number(start !== 0) * 0.6, end - Number(end !== 100) * 0.6, {
+          stroke: color, "stroke-width": 1.6, opacity: 0.45,
+        }));
+      }
+    }
+    for (let i = 0; i <= 100; i += 5) {
+      const major = i % 25 === 0;
+      svg.append(radialLine(i, major ? 37.5 : 39.5, 42, { stroke: major ? "#8a94a6" : "#343b46" }));
+    }
+    const center = element("div", "hp-usage-meter-center");
+    center.append(element("span", "hp-usage-meter-caption", tx("残り", "left")));
+    const number = element("span", "hp-usage-meter-number", value === null ? "—" : formatPercent(value));
+    if (value !== null) {
+      const color = colorFor(value);
+      number.style.color = color;
+      number.append(element("span", "hp-usage-percent-sign", "%"));
+      if (value > 0) svg.append(arc(46, 0, value, {
+        class: "hp-usage-meter-value", stroke: color, "stroke-width": 5, "stroke-dasharray": "2.6 1.3",
+      }));
+      svg.append(radialLine(value, 37, 52, {
+        class: "hp-usage-needle", stroke: "white", "stroke-width": 2, "stroke-linecap": "round",
+      }));
+    }
+    center.append(number);
+    const foot = element("div", "hp-usage-meter-foot");
+    foot.append(label);
+    const reset = value === null ? null : resetLabel(limit);
+    if (duration || reset?.textContent) {
+      const detail = element("div", "hp-usage-meter-detail", duration);
+      if (reset?.textContent) {
+        if (duration) detail.append(" · ");
+        detail.append(reset);
+      }
+      foot.append(detail);
+    }
+    node.title = value === null ? tx(`${name} 取得できません`, `${name} unavailable`) : name;
+    node.append(svg, center, foot);
+    node.setAttribute("role", "img");
+    node.dataset.label = name;
+    node.dataset.percent = value === null ? "" : `${formatPercent(value)}%`;
+    updateMeterName(node);
+    return node;
+  }
+
+  function resetLabel(limit) {
+    const label = element("span", "hp-usage-reset");
+    const date = new Date(limit.resetsAt ?? NaN);
+    if (!Number.isNaN(date.getTime())) {
+      label.dataset.resetsAt = date.toISOString();
+      const day = new Intl.DateTimeFormat(english ? "en-US" : "ja-JP", { weekday: "short" }).format(date);
+      const monthDay = new Intl.DateTimeFormat(english ? "en-US" : "ja-JP", { month: "numeric", day: "numeric" }).format(date);
+      const time = timeFormat.format(date);
+      label.title = tx(`${monthDay}(${day}) ${time}にリセット`, `Resets ${day} ${monthDay} ${time}`);
+      updateReset(label);
+    }
+    return label;
+  }
+
+  function updateReset(label) {
+    const remainingMs = Date.parse(label.dataset.resetsAt) - Date.now();
+    if (remainingMs <= 0) {
+      label.textContent = tx("リセット済み", "Reset");
+      return;
+    }
+    if (remainingMs < 86_400_000) {
+      const total = Math.min(1439, Math.ceil(remainingMs / 60_000));
+      label.textContent = `${Math.floor(total / 60)}:${String(total % 60).padStart(2, "0")}`;
+      return;
+    }
+    const total = Math.floor(remainingMs / 3_600_000);
+    const days = Math.floor(total / 24);
+    const hours = total % 24;
+    label.textContent = hours ? tx(`${days}日${hours}時間`, `${days}d ${hours}h`) : tx(`${days}日`, `${days}d`);
+  }
+
+  function updateMeterName(node) {
+    const { label, percent } = node.dataset;
+    const reset = node.querySelector(".hp-usage-reset")?.textContent;
+    const value = percent ? tx(`残り${percent}`, `${percent} left`) : tx("取得できません", "Unavailable");
+    const resetText = reset === tx("リセット済み", "Reset") ? reset : tx(`あと${reset}でリセット`, `resets in ${reset}`);
+    node.setAttribute("aria-label", `${label} ${value}${reset ? tx(`、${resetText}`, `, ${resetText}`) : ""}`);
+  }
+
+  function tick() {
+    if (disposed) return;
+    if (usage && expiredIds() !== paintedExpired) paint();
+    body.querySelectorAll("[data-resets-at]").forEach(updateReset);
+    body.querySelectorAll(".hp-usage-meter").forEach(updateMeterName);
+    body.querySelectorAll("[data-expires-at]").forEach(updateExpiry);
+  }
+
+  function balancesFor(service) {
+    const balances = (service.balances ?? []).filter((balance) => balance.state || (Number.isFinite(balance.amount) && balance.amount >= 0));
+    if (service.id !== "claude-api") return balances;
+    const amounts = balances.filter((balance) => !balance.state);
+    if (!amounts.length) return balances;
+    const expiresAt = amounts.map((balance) => balance.expiresAt).filter(Boolean).sort((a, b) => Date.parse(a) - Date.parse(b))[0];
+    return [{ unit: "usd", amount: amounts.reduce((total, balance) => total + balance.amount, 0), expiresAt, breakdown: balances }];
+  }
+
+  function balanceAmount(balance) {
+    if (balance.state === "unlimited") return tx("無制限", "Unlimited");
+    if (balance.state === "unreadable") return tx("読み取れません", "Unreadable");
+    return formatAmount(balance.amount, balance.unit);
+  }
+
+  function balanceDisplay(service, balance, meterView) {
+    const box = element("div", meterView ? "hp-usage-balance hp-usage-odometer" : "hp-usage-balance hp-usage-chip");
+    box.dataset.balanceService = service.id;
+    box.classList.toggle("is-stale", Boolean(service.stale));
+    const credit = tx("クレジット", "Credits");
+    const label = meterView ? balance.unit === "units" ? tx("ユニット", "Units") : credit
+      : service.id === "codex" ? tx("Codexクレジット", "Codex credits") : service.name;
+    const unit = meterView && !balance.state ? { credits: " CR", units: " CU" }[balance.unit] ?? "" : "";
+    box.append(element("span", "hp-usage-balance-label", label),
+      element("span", "hp-usage-balance-amount", balanceAmount(balance) + unit));
+    if (balance.breakdown) {
+      box.title = balance.breakdown.map((item) => {
+        const label = item.kind === "purchasedCredit" ? tx("購入したクレジット", "Purchased credits")
+          : item.label || tx("プラン特典のクレジット", "Plan credits");
+        const expires = expiryText(item.expiresAt, true);
+        return [label, balanceAmount(item), expires].filter(Boolean).join(" · ");
+      }).join("\n");
+    }
+    if (!balance.state && balance.unit === "units") {
+      const detail = computeDetail(balance);
+      box.title = detail;
+      if (meterView) box.append(element("span", "hp-usage-balance-detail", detail));
+    }
+    if (meterView && balance.expiresAt) {
+      const detail = element("span", "hp-usage-balance-detail");
+      detail.dataset.expiresAt = balance.expiresAt;
+      updateExpiry(detail);
+      box.append(detail);
+    }
+    return box;
+  }
+
+  function updateExpiry(node) {
+    node.textContent = expiryText(node.dataset.expiresAt, false);
+  }
+
+  function expiryText(expiresAt, detailed) {
+    const expires = Date.parse(expiresAt);
+    if (!Number.isFinite(expires)) return "";
+    const date = new Intl.DateTimeFormat(english ? "en-US" : "ja-JP", { month: "numeric", day: "numeric" }).format(expires);
+    const remaining = expires - Date.now();
+    if (remaining <= 0) return tx(`${date}に失効`, `Expired ${date}`);
+    const days = Math.ceil(remaining / 86_400_000);
+    return detailed ? tx(`${date}まで（あと${days}日）`, `Until ${date} (${days} days)`) : tx(`${date}まで`, `Until ${date}`);
+  }
+
+  function computeDetail(balance) {
+    const { amount, perHour } = balance;
+    if (!Number.isFinite(perHour)) return tx("消費量は不明", "Rate unknown");
+    if (perHour === 0) return tx("いまは消費していません", "Not consuming now");
+    const hours = Math.floor(amount / perHour);
+    return tx(`消費 ${formatRate(perHour)}/時間 · 約${hours}時間分`, `${formatRate(perHour)}/hour · about ${hours} hours left`);
   }
 
   // A positive amount below the shown precision reads "<0.1" or "<$0.01", never zero.
@@ -269,102 +662,6 @@ export function renderAiUsageProvider({ container, state, request }) {
     return new Intl.NumberFormat(english ? "en-US" : "ja-JP", { maximumFractionDigits: 2 }).format(perHour);
   }
 
-  function balanceDetail(balance, amount) {
-    if (balance.unit === "units") {
-      const perHour = typeof balance.perHour === "number" && Number.isFinite(balance.perHour) ? balance.perHour : null;
-      if (perHour === null) return tx("消費量は不明", "Rate unknown");
-      if (perHour === 0) return tx("いまは消費していません", "Not consuming now");
-      const hours = Math.floor(amount / perHour);
-      return tx(`消費 ${formatRate(perHour)}/時間 · 約${hours}時間分`, `${formatRate(perHour)}/hour · about ${hours} hours left`);
-    }
-    const expires = balance.expiresAt ? Date.parse(balance.expiresAt) : NaN;
-    if (Number.isNaN(expires)) return "";
-    const formatted = new Intl.DateTimeFormat(english ? "en-US" : "ja-JP", { month: "numeric", day: "numeric", weekday: "short" }).format(new Date(expires));
-    const remaining = expires - Date.now();
-    if (remaining <= 0) return tx(`${formatted}に失効`, `Expired ${formatted}`);
-    const days = Math.ceil(remaining / 86_400_000);
-    return tx(`${formatted}まで（あと${days}日）`, `Until ${formatted} (${days} days)`);
-  }
-
-  function updateTimes(item) {
-    const limit = { kind: item.dataset.kind, windowMinutes: Number(item.dataset.minutes) || null, resetsAt: item.dataset.resetsAt || null };
-    const elapsed = elapsedPercent(limit);
-    const pace = item.querySelector(".hp-usage-pace");
-    pace.hidden = elapsed === null;
-    if (elapsed !== null) {
-      pace.style.left = `${elapsed}%`;
-      pace.title = tx(`時間の経過 ${Math.round(elapsed)}%`, `${Math.round(elapsed)}% of the window elapsed`);
-    }
-    item.querySelector(".hp-usage-reset").textContent = resetText(limit, elapsed);
-  }
-
-  function tick() {
-    if (disposed) return;
-    if (usage && expiredIds() !== paintedExpired) {
-      paint();
-      return;
-    }
-    root.querySelectorAll(".hp-usage-row:not(.hp-usage-balance)").forEach(updateTimes);
-    root.querySelectorAll(".hp-usage-balance").forEach(updateBalance);
-  }
-
-  function windowLabel(limit) {
-    const minutes = Number(limit.windowMinutes) || 0;
-    let base;
-    if (limit.kind === "session" && (minutes === 300 || minutes === 0)) base = tx("5時間", "5-hour");
-    else if (limit.kind === "weekly") base = tx("1週間", "Weekly");
-    else if (minutes >= 1440 && minutes % 1440 === 0) base = tx(`${minutes / 1440}日`, `${minutes / 1440}-day`);
-    else if (minutes >= 60) base = tx(`${Math.round(minutes / 60)}時間`, `${Math.round(minutes / 60)}-hour`);
-    else base = tx("枠", "Window");
-    return limit.model ? `${limit.model} · ${base}` : base;
-  }
-
-  function elapsedPercent(limit) {
-    const minutes = Number(limit.windowMinutes) || 0;
-    const resetsAt = limit.resetsAt ? Date.parse(limit.resetsAt) : NaN;
-    if (!minutes || Number.isNaN(resetsAt)) return null;
-    const remaining = resetsAt - Date.now();
-    if (remaining <= 0 || remaining > minutes * 60_000) return null;
-    return Math.max(0, Math.min(100, 100 - (remaining / (minutes * 60_000)) * 100));
-  }
-
-  function resetText(limit, elapsed) {
-    const resetsAt = limit.resetsAt ? Date.parse(limit.resetsAt) : NaN;
-    if (Number.isNaN(resetsAt)) return tx("リセット時刻は不明", "Reset time unknown");
-    const remaining = resetsAt - Date.now();
-    let text;
-    if (remaining <= 0) text = tx("リセット済み（次の更新で反映）", "Reset (updates on next refresh)");
-    else if (remaining < 24 * 3_600_000) {
-      const total = Math.max(1, Math.ceil(remaining / 60_000));
-      const hours = Math.floor(total / 60);
-      const minutes = total % 60;
-      text = hours === 0
-        ? tx(`あと${minutes}分でリセット`, `Resets in ${minutes}m`)
-        : minutes === 0
-          ? tx(`あと${hours}時間でリセット`, `Resets in ${hours}h`)
-          : tx(`あと${hours}時間${minutes}分でリセット`, `Resets in ${hours}h ${minutes}m`);
-    } else {
-      const totalHours = Math.floor(remaining / 3_600_000);
-      const days = Math.floor(totalHours / 24);
-      const hours = totalHours % 24;
-      const formatted = new Intl.DateTimeFormat(english ? "en-US" : "ja-JP", {
-        month: "numeric", day: "numeric", weekday: "short", hour: "2-digit", minute: "2-digit"
-      }).format(new Date(resetsAt));
-      const left = hours === 0 ? tx(`${days}日`, `${days}d`) : tx(`${days}日${hours}時間`, `${days}d ${hours}h`);
-      text = tx(`あと${left}でリセット（${formatted}）`, `Resets in ${left} (${formatted})`);
-    }
-    if (elapsed !== null && limit.kind === "weekly") text += tx(` · 経過${Math.round(elapsed)}%`, ` · ${Math.round(elapsed)}% elapsed`);
-    return text;
-  }
-
-  function metaText(service) {
-    if (service.refreshing) return tx("更新中…", "Updating…");
-    if (!service.fetchedAt) return "";
-    const time = new Intl.DateTimeFormat(english ? "en-US" : "ja-JP", { hour: "2-digit", minute: "2-digit" })
-      .format(new Date(service.fetchedAt));
-    return service.stale ? tx(`${time} の値`, `As of ${time}`) : tx(`${time} 更新`, `Updated ${time}`);
-  }
-
   function errorText(code) {
     switch (code) {
       case "codexMissing": return tx("Codexが見つかりません。Codexアプリを入れると表示できます。", "Codex was not found. Install the Codex app to show it.");
@@ -374,7 +671,7 @@ export function renderAiUsageProvider({ container, state, request }) {
       case "unavailable": return tx("いまは取得できません。少し待って更新してください。", "Usage is unavailable right now. Try again later.");
       case "noAccess": return tx("このアカウントでは請求情報を見る権限がありません。", "This account cannot view billing.");
       case "ambiguous": return tx("Consoleの組織が複数あり、どれかを特定できません。", "Several Console organizations; cannot tell which one.");
-      case "peerMissing": return tx("Gemini Peerが動いていません。起動すると表示できます。", "Gemini Peer is not running. Start it to show this.");
+      case "peerMissing": return tx("Gemini Peerを起動すると最新の値を取得できます。", "Start Gemini Peer to get the latest values.");
       case "peerFailed": return tx("Gemini Peerが利用枠を読み直せませんでした。agyのログインとステータス表示の設定を確認してください。", "Gemini Peer could not re-read the limits. Check the agy sign-in and status line setup.");
       case "stale": return tx("古い値です（読み直せていません）。少し待って更新してください。", "This reading is old and was not renewed. Try again shortly.");
       case "noSnapshot": return tx("Gemini Peerにまだ利用枠の記録がありません。少し待って更新してください。", "Gemini Peer has no reading yet. Try again shortly.");
@@ -383,34 +680,8 @@ export function renderAiUsageProvider({ container, state, request }) {
     }
   }
 
-  function formatPercent(value) {
-    return Number.isInteger(value) ? String(value) : value.toFixed(1);
-  }
-
-  function message(text) {
-    const node = document.createElement("div");
-    node.className = "hp-usage-message";
-    const paragraph = document.createElement("p");
-    paragraph.textContent = text;
-    node.append(paragraph);
-    return node;
-  }
-
-  function settingsButton(text) {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = "hp-usage-action";
-    button.textContent = text;
-    button.onclick = () => { void request("aiUsage.openSettings").catch(() => {}); };
-    return button;
-  }
-
   return {
-    // Opening the panel reuses readings younger than two minutes; the header button always re-reads.
-    refresh(options) {
-      const call = options?.panelOpened ? request("aiUsage.getState", { refresh: true }) : request("aiUsage.refresh");
-      return call.then((payload) => { usage = payload; paint(); }).catch(() => {});
-    },
+    refresh,
     dispose() {
       disposed = true;
       offChanged();

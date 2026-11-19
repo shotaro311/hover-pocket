@@ -186,6 +186,14 @@ internal sealed class UserSettingsStore
             .Where(Providers.AiUsage.AiUsageServiceIds.IsKnown)
             .Distinct(StringComparer.Ordinal)
             .ToList();
+        settings.AiUsageView = settings.AiUsageView == "meter" ? "meter" : "list";
+        settings.AiUsageServiceOrder = (settings.AiUsageServiceOrder ?? [])
+            .Where(Providers.AiUsage.AiUsageServiceIds.IsKnown)
+            .Concat(Providers.AiUsage.AiUsageServiceIds.All)
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+        if (settings.AiUsageSort is not { Column: "session" or "weekly" or "other", Direction: "asc" or "desc" })
+            settings.AiUsageSort = null;
         var known = providerIds.ToHashSet(StringComparer.OrdinalIgnoreCase);
         var order = settings.ProviderOrder
             .Where(id => known.Contains(id))

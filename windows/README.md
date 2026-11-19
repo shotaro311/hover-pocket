@@ -192,6 +192,8 @@ production resolverは、固定先のexact binaryと準備済みcontrol-planeが
 
 ## Windows updates and release packaging
 
+`0.2.21`は、AI Usageを「一覧」と「メーター」の2つの表示に作り替えます。数字は残りの割合で、残り70%以上を青、50%以上を緑、25%以上を黄、それ未満を赤で示します。一覧は列の見出しで残りの少ない順・多い順に並べ替え、サービスの順番は取っ手のドラッグと設定の上下ボタンで変えられます。メーターは車の計器のような表示で、枠が複数あるサービスは横に並べます。[設計書](../docs/design/2026-11-19_ai-usage-list-and-meter.md)、[作業記録](../progress/2026-11/2026-11-19_hover-pocket-ai-usage-layout.md)。
+
 `0.2.20`は、AI UsageにAntigravity CLI（agy）の利用枠を加えます。同じPCで常駐するGemini Peerが保存する値から、Geminiモデルの5時間枠・1週間枠とモデル名を表示します（Geminiアプリの枠とは別）。値は取得した時刻のものとして示し、5分より古い値、Gemini Peerの停止、読み直しの失敗は理由を添えて表示します。[作業記録](../progress/2026-11/2026-11-19_hover-pocket-ai-usage-antigravity.md)。
 
 `0.2.19`は、AI Usageに残高を加えます。Claude ConsoleのAPIクレジット（プラン特典と購入分、期限）、Codexのクレジット、Colabのコンピューティング ユニットを表示します。あわせて、チャット・音声・AI Usageで共通のChatGPTログインを、どこでログインしてもチャットの「ログインが必要です」がすぐ消えるようにしました。[作業記録](../progress/2026-11/2026-11-18_hover-pocket-ai-usage-balances.md)。

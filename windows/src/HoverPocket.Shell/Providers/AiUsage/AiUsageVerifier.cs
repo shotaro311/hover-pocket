@@ -759,12 +759,29 @@ internal sealed class AiUsageVerifier
         var normalized = UserSettingsStore.Normalize(old, providers.ProviderIds);
         Check(normalized.ProviderOrder[^1] == "ai-usage" && normalized.ProviderVisibility["ai-usage"], "settings: existing users get the new tool at the end, visible");
         Check(normalized.AiUsageHiddenServices.SequenceEqual(["muse", "antigravity"]), "settings: hidden services keep only known ids");
+        Check(normalized.AiUsageView == "list" && normalized.AiUsageSort is null
+            && normalized.AiUsageServiceOrder.SequenceEqual(AiUsageServiceIds.All), "settings: old settings default to list and the original service order");
         var clone = normalized.Clone();
         clone.AiUsageHiddenServices.Add("codex");
+        clone.AiUsageServiceOrder.Remove("codex");
+        Check(normalized.AiUsageServiceOrder.SequenceEqual(AiUsageServiceIds.All), "settings: clone copies the service order");
         Check(normalized.AiUsageHiddenServices.Count == 2, "settings: clone copies the hidden list");
         var store = UserSettingsStore.CreateTemporary("AiUsageSettingsVerify");
+        normalized.AiUsageServiceOrder = ["muse", "unknown", "muse", "gemini"];
+        normalized.AiUsageView = "invalid";
+        normalized.AiUsageSort = new AiUsageListSort("session", "invalid");
         store.Save(normalized);
-        Check(store.Load(providers.ProviderIds).AiUsageHiddenServices.SequenceEqual(["muse", "antigravity"]), "settings: hidden services persist");
+        var loaded = store.Load(providers.ProviderIds);
+        Check(loaded.AiUsageHiddenServices.SequenceEqual(["muse", "antigravity"]), "settings: hidden services persist");
+        Check(loaded.AiUsageView == "list" && loaded.AiUsageSort is null
+            && loaded.AiUsageServiceOrder.SequenceEqual(["muse", "gemini", "codex", "claude", "claude-api", "antigravity", "colab"]),
+            "settings: invalid preferences fall back and the saved order keeps hidden services, dropping unknown and duplicate ids");
+        loaded.AiUsageView = "meter";
+        loaded.AiUsageSort = new AiUsageListSort("other", "desc");
+        store.Save(loaded);
+        var reopened = new UserSettingsStore(store.RootDirectory).Load(providers.ProviderIds);
+        Check(reopened.AiUsageView == "meter" && reopened.AiUsageSort == new AiUsageListSort("other", "desc")
+            && reopened.AiUsageServiceOrder.SequenceEqual(loaded.AiUsageServiceOrder), "settings: meter, custom order and list sort survive a new store");
     }
 
     private async Task VerifyBridgeAndUiAsync(Action<string> log)
@@ -777,11 +794,13 @@ internal sealed class AiUsageVerifier
             ["codex"] = AiUsageResult.Success(new AiUsageReading("Pro", [
                 new AiUsageWindow("codex:codex:primary", "session", null, 12, now.AddHours(3).AddMinutes(12), 300),
                 new AiUsageWindow("codex:codex:secondary", "weekly", null, 47, now.AddDays(4), 10080),
-                new AiUsageWindow("codex:spark:primary", "session", "GPT-5.3-Codex-Spark", 3, now.AddHours(2), 300)])),
+                new AiUsageWindow("codex:spark:primary", "session", "GPT-5.3-Codex-Spark", 3, now.AddHours(2), 300),
+                new AiUsageWindow("codex:spark:weekly", "weekly", "GPT-5.3-Codex-Spark", 95, now.AddDays(4), 10080)])),
             ["claude"] = AiUsageResult.Success(new AiUsageReading("Max 5x", [
                 new AiUsageWindow("claude:session", "session", null, 32, now.AddMinutes(55), 300),
                 new AiUsageWindow("claude:weekly_all", "weekly", null, 30, now.AddDays(5), 10080),
-                new AiUsageWindow("claude:weekly_scoped:Fable", "weekly", "Fable", 85, now.AddDays(5), 10080)])),
+                new AiUsageWindow("claude:weekly_scoped:Fable", "weekly", "Fable", 85, now.AddDays(5), 10080),
+                new AiUsageWindow("claude:3day", "session", null, 75, now.AddDays(2), 4320)])),
             ["claude-api"] = AiUsageResult.Success(new AiUsageReading(null, [], [
                 new AiUsageBalance("planCredit", "API credit (Max)", 100m, "usd", now.AddDays(24)),
                 new AiUsageBalance("purchasedCredit", null, 12.34m, "usd", now.AddDays(26)),
@@ -838,8 +857,18 @@ internal sealed class AiUsageVerifier
         Check(focus.Length == 1 && focus[0]["payload"]?["category"]?.GetValue<string>() == "ai" && afterFocus["result"]?["openSettingsCategory"] is null,
             "bridge: a loaded Settings page switches to AI without leaving a pending jump");
 
+        settingsEvents.Clear();
+        var presentation = await Call(panel, "aiUsage.setPresentation", new { view = "meter", sort = new { column = "weekly", direction = "desc" } });
+        var crossSurface = await Call(settings, "aiUsage.getState");
+        var published = settingsEvents.Select(json => JsonNode.Parse(json)!).LastOrDefault(node => node["event"]?.GetValue<string>() == "aiUsage.changed");
+        Check(presentation["result"]?["view"]?.GetValue<string>() == "meter"
+            && crossSurface["result"]?["sort"]?["direction"]?.GetValue<string>() == "desc"
+            && published?["payload"]?["view"]?.GetValue<string>() == "meter", "bridge: panel saves presentation and broadcasts it to Settings");
+        var restored = await Call(settings, "aiUsage.setPresentation", new { view = "list", order = AiUsageServiceIds.All, sort = (object?)null });
+        Check(restored["result"]?["view"]?.GetValue<string>() == "list" && restored["result"]?["sort"] is null
+            && (await Call(panel, "aiUsage.getState"))["result"]?["order"]?.AsArray().Count == 7, "bridge: Settings can save order and clear sort");
+
         await VerifyPanelUiAsync(controller, store, readings, log);
-        await VerifySettingsUiAsync(controller, store, log);
 
         var hidden = await Call(settings, "aiUsage.setVisible", new { service = "muse", visible = false });
         Check(hidden["result"]?["services"]?.AsArray().Single(node => node!["id"]!.GetValue<string>() == "muse")?["visible"]?.GetValue<bool>() == false
@@ -849,15 +878,16 @@ internal sealed class AiUsageVerifier
 
     private async Task VerifyPanelUiAsync(PanelBridgeController controller, UserSettingsStore store, Dictionary<string, AiUsageResult> readings, Action<string> log)
     {
+        var minWidth = PanelSizeCatalog.ResizeLimits(0).MinWidth;
         var window = new Window
         {
-            Left = -20000, Top = -20000, Width = 680, Height = 520, ShowActivated = false, ShowInTaskbar = false,
+            Left = -20000, Top = -20000, Width = minWidth, Height = 520, ShowActivated = false, ShowInTaskbar = false,
             WindowStartupLocation = WindowStartupLocation.Manual, WindowStyle = WindowStyle.None
         };
         var web = new WebView2 { CreationProperties = new CoreWebView2CreationProperties { UserDataFolder = Path.Combine(store.RootDirectory, "PanelWebView") } };
         window.Content = web;
         IDisposable? attachment = null;
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(60));
         try
         {
             window.Show();
@@ -867,128 +897,417 @@ internal sealed class AiUsageVerifier
             web.CoreWebView2.WebMessageReceived += async (_, args) => await dispatcher.HandleRawMessageAsync(args.TryGetWebMessageAsString());
             web.CoreWebView2.SetVirtualHostNameToFolderMapping("app.hoverpocket.local", ResolveUiFolder(), CoreWebView2HostResourceAccessKind.DenyCors);
             web.CoreWebView2.Navigate("https://app.hoverpocket.local/index.html");
-            while (await web.ExecuteScriptAsync("!!document.querySelector('[data-provider-icons] button')") != "true")
-                await Task.Delay(100, timeout.Token);
-            await dispatcher.ProcessRawMessageAsync("""{"id":"select","method":"provider.select","params":{"id":"ai-usage"}}""");
-            await dispatcher.PostEventAsync("state.changed", controller.BuildState(BridgeSurface.Panel));
-            while (await web.ExecuteScriptAsync("document.querySelectorAll('.hp-usage-card').length === 7") != "true")
-                await Task.Delay(100, timeout.Token);
             async Task<bool> Js(string expression) => await web.ExecuteScriptAsync(expression) == "true";
-            Check(await Js("document.querySelector('[data-provider-title]').textContent === 'AI Usage'"), "panel UI: title");
-            Check(await Js("[...document.querySelectorAll('[data-service=claude] .hp-usage-label')].map(n => n.textContent).join('|') === '5時間|1週間|Fable · 1週間'"),
-                "panel UI: Claude rows are 5-hour, weekly, and Fable weekly");
-            Check(await Js("document.querySelectorAll('[data-service=claude] .hp-usage-row')[2].dataset.level === 'warn'"), "panel UI: 85% is highlighted");
-            Check(await Js("document.querySelector('[data-service=claude] .hp-usage-plan').textContent === 'Max 5x'"), "panel UI: plan badge");
-            Check(await Js("[...document.querySelectorAll('[data-service=codex] .hp-usage-label')].some(n => n.textContent === 'GPT-5.3-Codex-Spark · 5時間')"),
-                "panel UI: Codex model bucket");
-            Check(await Js("document.querySelector('[data-service=claude] .hp-usage-reset').textContent.includes('分でリセット')"), "panel UI: relative reset under a day");
-            Check(await Js("/あと\\d+日(\\d+時間)?でリセット（/.test(document.querySelectorAll('[data-service=claude] .hp-usage-reset')[1].textContent)"),
-                "panel UI: weekly reset shows the days left and the date");
-            Check(await Js("document.querySelectorAll('[data-service=codex] .hp-usage-pace').length >= 2"), "panel UI: elapsed-time markers");
-            Check(await Js("!!document.querySelector('[data-service=gemini] .hp-usage-action') && document.querySelector('[data-service=gemini]').textContent.includes('サインインしていません')"),
-                "panel UI: signed-out card points to Settings");
-            Check(await Js("document.querySelector('[data-service=muse] .hp-usage-error')?.textContent.includes('読み取れませんでした') && !document.querySelector('[data-service=muse] .hp-usage-row')"),
-                "panel UI: error card shows a reason and no 0% bar");
-            Check(await Js("document.querySelector('[data-service=\"claude-api\"]').textContent.includes('API credit (Max)') && document.querySelector('[data-service=\"claude-api\"]').textContent.includes('$100.00') && document.querySelector('[data-service=\"claude-api\"]').textContent.includes('$12.34')"),
-                "panel UI: Claude API plan grant and purchased credits");
-            Check(await Js("[...document.querySelectorAll('[data-service=\"claude-api\"] .hp-usage-value')].some(n => n.textContent === '<$0.01')"),
-                "panel UI: a tiny positive credit reads <$0.01, not $0.00");
-            Check(await Js("/まで（あと\\d+日）/.test(document.querySelector('[data-service=\"claude-api\"] .hp-usage-balance .hp-usage-reset').textContent)"), "panel UI: credit expiry with days left");
-            Check(await Js("document.querySelector('[data-service=colab]').textContent.includes('87.6') && document.querySelector('[data-service=colab]').textContent.includes('いまは消費していません')"),
-                "panel UI: Colab compute units and rate");
-            Check(await Js("document.querySelector('[data-service=codex] .hp-usage-balance')?.textContent.includes('12,345.68')"), "panel UI: Codex credit count");
-            Check(await Js("[...document.querySelectorAll('[data-service=codex] .hp-usage-balance .hp-usage-value')].map(n => n.textContent).join('|') === '12,345.68|無制限|読み取れません'"),
-                "panel UI: unlimited and unreadable credits are shown as such, never 0");
-            Check(await Js("!document.querySelector('[data-service=colab] .hp-usage-bar') && !document.querySelector('[data-service=\"claude-api\"] .hp-usage-bar')"), "panel UI: balances are amounts, not bars");
-            Check(await Js("[...document.querySelectorAll('[data-service=antigravity] .hp-usage-label')].map(n => n.textContent).join('|') === '5時間|1週間'"
-                + " && [...document.querySelectorAll('[data-service=antigravity] .hp-usage-value')].map(n => n.textContent).join('|') === '0%|5.1%'"),
-                "panel UI: Antigravity five-hour and weekly rows with used percentages");
-            Check(await Js("document.querySelector('[data-service=antigravity] .hp-usage-mark').textContent === 'AG'"
-                + " && document.querySelector('[data-service=antigravity] .hp-usage-model').textContent === 'モデル: Gemini 4 Hydrogen (High)'"
-                + " && !document.querySelector('[data-service=antigravity] .hp-usage-plan')"
-                + " && document.querySelector('[data-service=antigravity] .hp-usage-meta').textContent.endsWith('更新')"),
-                "panel UI: Antigravity mark, model name and capture time");
-            Check(await Js("document.querySelector('.hp-usage').scrollWidth <= document.querySelector('.hp-usage').clientWidth"), "panel UI: no horizontal overflow");
+            async Task WaitFor(string expression)
+            {
+                try
+                {
+                    while (!await Js(expression)) await Task.Delay(100, timeout.Token);
+                }
+                catch (OperationCanceledException)
+                {
+                    throw new InvalidOperationException($"AI Usage DOM condition did not appear: {expression}");
+                }
+            }
+            async Task ChangePanelState(string method, object parameters)
+            {
+                var raw = JsonSerializer.Serialize(new { id = "verify", method, @params = parameters });
+                await dispatcher.ProcessRawMessageAsync(raw);
+                await dispatcher.PostEventAsync("state.changed", controller.BuildState(BridgeSurface.Panel));
+            }
+            Task Select(string id) => ChangePanelState("provider.select", new { id });
+
+            await WaitFor("!!document.querySelector('[data-provider-icons] button')");
+            await web.ExecuteScriptAsync("""
+                window.usageVerify = {
+                    all(selector) { return [...document.querySelectorAll(selector)]; },
+                    one(selector) { return document.querySelector(selector); },
+                    text(selector) { return this.one(selector)?.textContent.trim() ?? ''; },
+                    services() { return this.all('.hp-usage-service').map(n => n.dataset.service).join(','); },
+                    values(service) { return this.all('[data-service=' + service + '] .hp-usage-value').map(n => n.textContent).join('|'); },
+                    sort() { return this.one('.hp-usage-table [aria-sort]'); },
+                    fit() {
+                        return ['.hp-usage', '.hp-usage-body', '.hp-provider', '.hp-panel'].every(selector => {
+                            const n = this.one(selector);
+                            return n.scrollWidth <= n.clientWidth;
+                        });
+                    },
+                    resetFits(limit) {
+                        const value = limit.querySelector('.hp-usage-value');
+                        const reset = limit.querySelector('.hp-usage-reset:not(:empty)');
+                        if (!value || !reset) return true;
+                        const rect = node => {
+                            const text = document.createRange();
+                            text.selectNodeContents(node);
+                            return text.getBoundingClientRect();
+                        };
+                        const number = rect(value);
+                        const time = rect(reset);
+                        const bar = limit.querySelector('.hp-usage-bar').getBoundingClientRect();
+                        const cell = limit.getBoundingClientRect();
+                        const belowBar = reset.getBoundingClientRect().top >= bar.bottom;
+                        return number.left >= cell.left - 0.1 && number.right <= cell.right + 0.1
+                            && time.left >= cell.left - 0.1 && time.right <= cell.right + 0.1
+                            && getComputedStyle(reset).textOverflow !== 'ellipsis'
+                            && (belowBar || time.left - number.right >= 5.9);
+                    },
+                    reasonFits(service) {
+                        const group = this.one('tbody[data-service=' + service + ']');
+                        const reason = group?.querySelector('.hp-usage-reason-row .hp-usage-error');
+                        if (!reason) return false;
+                        const style = getComputedStyle(reason);
+                        const session = this.one('[data-sort-column=session]').closest('th');
+                        const rect = reason.getBoundingClientRect();
+                        const left = session.getBoundingClientRect().left + parseFloat(getComputedStyle(session).paddingLeft);
+                        const right = group.getBoundingClientRect().right - parseFloat(getComputedStyle(reason.closest('td')).paddingRight);
+                        return !group.querySelector('th .hp-usage-error')
+                            && reason.closest('tr') === group.lastElementChild
+                            && Math.abs(rect.left - left) < 0.1 && Math.abs(rect.right - right) < 0.1
+                            && style.whiteSpace === 'normal' && style.textOverflow === 'clip'
+                            && reason.scrollWidth <= reason.clientWidth && reason.scrollHeight <= reason.clientHeight
+                            && reason.clientHeight <= 2 * parseFloat(style.lineHeight) + 1;
+                    },
+                    scrollingList() {
+                        const body = this.one('.hp-usage-body');
+                        const head = this.one('.hp-usage-table thead');
+                        const top = body.scrollTop;
+                        try {
+                            body.style.maxHeight = '100px';
+                            body.scrollTop = head.offsetHeight + 8;
+                            const headingStyle = getComputedStyle(head);
+                            return body.scrollTop > 0 && body.scrollHeight > body.clientHeight
+                                && body.offsetWidth === body.clientWidth && getComputedStyle(body).scrollbarWidth === 'none'
+                                && headingStyle.position === 'sticky'
+                                && headingStyle.backgroundColor === getComputedStyle(body.closest('.hp-provider')).backgroundColor
+                                && Math.abs(head.getBoundingClientRect().top - body.getBoundingClientRect().top) < 1;
+                        } finally {
+                            body.style.maxHeight = '';
+                            body.scrollTop = top;
+                        }
+                    },
+                    haveOpacity(root, selector, expected) {
+                        const nodes = [...root.querySelectorAll(selector)];
+                        return nodes.length > 0 && nodes.every(node => {
+                            let opacity = 1;
+                            for (let n = node; n !== root.parentElement; n = n.parentElement) {
+                                opacity *= Number(getComputedStyle(n).opacity);
+                            }
+                            return opacity === expected;
+                        });
+                    },
+                    drag(from, to) {
+                        const source = this.one('.hp-usage-service[data-service=' + from + '] .hp-usage-handle');
+                        const target = this.one('.hp-usage-service[data-service=' + to + ']');
+                        const dataTransfer = new DataTransfer();
+                        const drag = (node, type) => node.dispatchEvent(new DragEvent(type, {bubbles:true, cancelable:true, dataTransfer}));
+                        drag(source, 'dragstart'); drag(target, 'dragover'); drag(target, 'drop'); drag(source, 'dragend');
+                    }
+                };
+                """);
+            const string defaultListOrder = "codex,claude,gemini,antigravity,muse";
+            const string listAfterDrag = "claude,codex,gemini,antigravity,muse";
+            const string listDragOrder = "claude,codex,claude-api,gemini,antigravity,colab,muse";
+            const string meterDragOrder = "muse,claude,codex,claude-api,gemini,antigravity,colab";
+            const string listAfterMeterDrag = "muse,claude,codex,gemini,antigravity";
+            const string settingsOrder = "claude,muse,codex,claude-api,gemini,antigravity,colab";
+            string Ordered(string order) => $"usageVerify.services() === '{order}'";
+            await Select("ai-usage");
+            await WaitFor($"!!usageVerify.one('.hp-usage-list') && {Ordered(defaultListOrder)} && usageVerify.values('claude') === '68%|70%|15%|25%'");
+
+            Check(await Js("usageVerify.text('.hp-usage-header h2') === 'AI Usage' && usageVerify.one('[data-view=list]').getAttribute('aria-pressed') === 'true'"), "panel UI: title and list default");
+            Check(await Js("""
+                usageVerify.all('[data-service=claude] .hp-usage-fill').map(n => n.style.width).join('|') === '68%|70%|15%|25%'
+                && usageVerify.all('[data-service=claude] .hp-usage-value').map(n => getComputedStyle(n).color).join('|')
+                   === 'rgb(95, 208, 138)|rgb(90, 169, 255)|rgb(255, 124, 124)|rgb(245, 195, 91)'
+                && usageVerify.all('[data-service=claude] .hp-usage-fill').every(n =>
+                    getComputedStyle(n).backgroundColor === getComputedStyle(n.closest('.hp-usage-limit').querySelector('.hp-usage-value')).color)
+                """), "panel UI: list numbers and bar widths show remaining quota in all four threshold colors");
+            Check(await Js("""
+                usageVerify.all('[data-service=claude] [data-column=other] .hp-usage-limit-name').map(n => n.textContent).join('|') === 'Fable|3日'
+                && usageVerify.all('[data-service=codex] [data-column=other] .hp-usage-limit-name').map(n => n.title).join('|')
+                    === 'GPT-5.3-Codex-Spark 5時間|GPT-5.3-Codex-Spark 1週間'
+                && usageVerify.all('[data-service=codex] [data-column=other] .hp-usage-limit-name').every(n => n.textContent === n.title)
+                && usageVerify.all('[data-service=codex] [data-column=other] .hp-usage-window-model').some(n =>
+                    n.scrollWidth > n.clientWidth && getComputedStyle(n).textOverflow === 'ellipsis')
+                && /^0:\d{2}$/.test(usageVerify.text('[data-service=claude] [data-column=session] .hp-usage-reset'))
+                && usageVerify.all('[data-service=claude] [data-column=other] .hp-usage-reset').every(n =>
+                    /^\d+日(\d+時間)?$/.test(n.textContent) && /\d+\/\d+\(.+\) \d{2}:\d{2}にリセット/.test(n.title))
+                """), "panel UI: model-specific and nonstandard limits stack with names, short countdowns and exact reset tooltips");
+            Check(await Js("""
+                usageVerify.text('[data-service=gemini] .hp-usage-action') === '設定を開く'
+                && usageVerify.text('[data-service=gemini]').includes('サインインしていません')
+                && !usageVerify.one('[data-service=gemini] .hp-usage-bar')
+                && usageVerify.text('[data-service=muse] .hp-usage-error') === '使用状況の応答を読み取れませんでした（サービス側の変更の可能性があります）。'
+                && usageVerify.reasonFits('muse')
+                && !usageVerify.one('[data-service=muse] .hp-usage-bar')
+                """), "panel UI: signed-out and error rows keep their guidance without percentage bars");
+            Check(await Js("""
+                usageVerify.values('antigravity') === '100%|94.9%'
+                && usageVerify.all('.hp-usage-updated').length === 1 && /^\d{2}:\d{2} 更新$/.test(usageVerify.text('.hp-usage-updated'))
+                && !/更新|Max 5x|Gemini 4 Hydrogen|経過/.test(usageVerify.text('.hp-usage-body'))
+                && !usageVerify.one('.hp-usage-pace, .hp-usage-plan, .hp-usage-model')
+                """), "panel UI: Antigravity shows remaining percentages and only the header shows update time");
+            const string apiChip = ".hp-usage-chip[data-balance-service=claude-api]";
+            Check(await Js($"""
+                usageVerify.all('{apiChip}').length === 1
+                && usageVerify.text('{apiChip} .hp-usage-balance-amount') === '$112.34'
+                && ['API credit (Max)', '$100.00', '$12.34', '<$0.01', 'まで（あと'].every(s => usageVerify.one('{apiChip}').title.includes(s))
+                """), "panel UI: Claude API total preserves plan, bought credits, sub-cent precision and expiry in the tooltip");
+            Check(await Js("""
+                usageVerify.all('.hp-usage-chip[data-balance-service=codex] .hp-usage-balance-amount').map(n => n.textContent).join('|')
+                    === '12,345.68|無制限|読み取れません'
+                && usageVerify.text('.hp-usage-chip[data-balance-service=colab] .hp-usage-balance-amount') === '87.6'
+                && !usageVerify.one('.hp-usage-service[data-service=colab], .hp-usage-service[data-service=claude-api]')
+                """), "panel UI: balance-only services appear as chips only, preserving amounts and unavailable/unlimited states");
+            Check(await Js("""
+                usageVerify.all('.hp-usage-limit').every(limit => usageVerify.resetFits(limit))
+                && (() => {
+                    const limit = usageVerify.one('[data-service=claude] [data-column=session] .hp-usage-limit');
+                    return limit.querySelector('.hp-usage-reset').getBoundingClientRect().bottom
+                        <= limit.querySelector('.hp-usage-bar').getBoundingClientRect().top;
+                })()
+                """), "panel UI: list percentages remain fully visible with at least 6 CSS px before an inline countdown");
+            Check(await Js("""
+                (() => {
+                    const root = document.documentElement;
+                    const previous = root.dataset.textSize;
+                    try {
+                        root.dataset.textSize = 'extraLarge';
+                        const limit = usageVerify.one('[data-service=antigravity] [data-column=weekly] .hp-usage-limit');
+                        return limit.querySelector('.hp-usage-value').textContent === '94.9%'
+                            && limit.querySelector('.hp-usage-reset').getBoundingClientRect().top >= limit.querySelector('.hp-usage-bar').getBoundingClientRect().bottom
+                            && usageVerify.all('.hp-usage-limit').every(item => usageVerify.resetFits(item))
+                            && usageVerify.reasonFits('muse') && usageVerify.fit();
+                    } finally {
+                        root.dataset.textSize = previous;
+                    }
+                })()
+                """), "panel UI: crowded countdowns move below the bar and the full error still fits at the largest text size");
+            Check(await Js("usageVerify.fit()"), "panel UI: list fits at the minimum panel width");
+            Check(await Js("usageVerify.scrollingList()"), "panel UI: the list scrolls without a scrollbar and the opaque column header stays at the top");
             await Capture(web, "panel");
-            await web.ExecuteScriptAsync("document.querySelector('.hp-usage').scrollTop = 10000");
+            await web.ExecuteScriptAsync("usageVerify.one('.hp-usage-body').scrollTop = 10000");
             await Task.Delay(150, timeout.Token);
             await Capture(web, "panel-bottom");
-            // The Gemini Peer stops: the last values stay, marked as old, with the reason; never 0% or "updated".
-            readings["antigravity"] = AiUsageResult.Failure(AiUsageErrorCodes.PeerMissing);
-            await controller.AiUsageForVerify!.RefreshAsync(["antigravity"], force: true);
-            await dispatcher.PostEventAsync("aiUsage.changed", controller.AiUsageForVerify.BuildState(controller.CurrentSettings.AiUsageHiddenServices));
-            while (!await Js("!!document.querySelector('[data-service=antigravity] .hp-usage-error')")) await Task.Delay(100, timeout.Token);
-            Check(await Js("document.querySelector('[data-service=antigravity] .hp-usage-error').textContent === '前回の値を表示中。Gemini Peerが動いていません。起動すると表示できます。'"
-                + " && document.querySelector('[data-service=antigravity] .hp-usage-meta').textContent.endsWith('の値')"
-                + " && document.querySelector('[data-service=antigravity] .hp-usage-meta').classList.contains('is-warning')"
-                + " && [...document.querySelectorAll('[data-service=antigravity] .hp-usage-row')].every(n => n.classList.contains('is-stale'))"),
-                "panel UI: a stopped Gemini Peer keeps the last values marked old, with the reason");
-            await web.ExecuteScriptAsync("document.querySelector('[data-service=antigravity]').scrollIntoView({block:'center'})");
+
+            await web.ExecuteScriptAsync("usageVerify.one('[data-sort-column=session]').click()");
+            await WaitFor(Ordered("claude,codex,antigravity,gemini,muse"));
+            Check(await Js("usageVerify.sort()?.getAttribute('aria-sort') === 'ascending' && !usageVerify.one('.hp-usage-handle')"),
+                "panel UI: first session sort is ascending and hides dragging");
+            Check(await Js("usageVerify.reasonFits('muse')"), "panel UI: an error without values aligns with the session column even when sorted");
+            await web.ExecuteScriptAsync("usageVerify.one('[data-sort-column=session]').click()");
+            await WaitFor(Ordered("antigravity,codex,claude,gemini,muse"));
+            Check(await Js("usageVerify.sort()?.getAttribute('aria-sort') === 'descending'"), "panel UI: second click is descending; missing rows remain last");
+            await web.ExecuteScriptAsync("usageVerify.one('[data-sort-column=other]').click()");
+            await WaitFor("usageVerify.sort()?.querySelector('[data-sort-column=other]') !== null && usageVerify.sort()?.getAttribute('aria-sort') === 'ascending'");
+            Check(await Js(Ordered(defaultListOrder)), "panel UI: a new sort starts ascending and Other uses the smallest value in the cell");
+            await web.ExecuteScriptAsync("usageVerify.one('[data-sort-column=other]').click()");
+            await WaitFor(Ordered(listAfterDrag));
+            Check(await Js("usageVerify.sort()?.getAttribute('aria-sort') === 'descending'"), "panel UI: Other switches direction and preserves missing-row order");
+            await web.ExecuteScriptAsync("usageVerify.one('.hp-usage-sort-reset').click()");
+            await WaitFor($"!!usageVerify.one('.hp-usage-handle') && {Ordered(defaultListOrder)}");
+            Check(await Js("!usageVerify.sort()"), "panel UI: Back to my order restores the custom order");
+
+            await web.ExecuteScriptAsync("usageVerify.drag('claude','codex')");
+            await WaitFor(Ordered(listAfterDrag));
+            Check(store.Load(ProviderRegistry.CreateDefault().ProviderIds).AiUsageServiceOrder.SequenceEqual(listDragOrder.Split(',')),
+                "panel UI: a list drag saves the new custom order");
+
+            await web.ExecuteScriptAsync("usageVerify.one('[data-sort-column=weekly]').click()");
+            await WaitFor("usageVerify.sort()?.querySelector('[data-sort-column=weekly]') != null");
+            await web.ExecuteScriptAsync("usageVerify.one('[data-view=meter]').click()");
+            await WaitFor($"!!usageVerify.one('.hp-usage-meter-grid') && {Ordered(listDragOrder)}");
+            Check(await Js("""
+                usageVerify.all('.hp-usage-meter').every(n => {
+                    const svg = n.querySelector('svg');
+                    const style = getComputedStyle(svg);
+                    return n.offsetWidth === 116 && n.offsetHeight === 100
+                        && style.width === '116px' && style.height === '100px';
+                })
+                """), "panel UI: each rendered SVG gauge is 116 × 100 CSS px");
+            Check(await Js("""
+                usageVerify.all('.hp-usage-meter .hp-usage-limit-name').every(n => n.offsetWidth <= 60)
+                && (() => {
+                    const model = 'GPT-5.3-Codex-Spark';
+                    const gauges = usageVerify.all('[data-service=codex] .hp-usage-meter').filter(n => n.dataset.label.startsWith(model));
+                    const durations = ['5時間', '1週間'];
+                    return gauges.length === 2 && gauges.every((gauge, i) => {
+                        const name = gauge.querySelector('.hp-usage-limit-name');
+                        const detail = gauge.querySelector('.hp-usage-meter-detail');
+                        const reset = detail?.querySelector('.hp-usage-reset');
+                        const title = model + ' ' + durations[i];
+                        return name.textContent === model && name.scrollWidth > name.clientWidth
+                            && getComputedStyle(name).textOverflow === 'ellipsis'
+                            && !!reset?.textContent && !!reset.title
+                            && detail.textContent === durations[i] + ' · ' + reset.textContent
+                            && detail.getBoundingClientRect().top >= name.getBoundingClientRect().bottom
+                            && detail.scrollWidth <= detail.clientWidth && detail.offsetWidth <= gauge.offsetWidth
+                            && gauge.title === title && gauge.getAttribute('aria-label').startsWith(title + ' ');
+                    });
+                })()
+                """), "panel UI: long gauge names fit the opening; repeated durations sit beside the countdown below and remain in the full title");
+            Check(await Js("""
+                usageVerify.all('[data-service=claude] .hp-usage-meter').map(n => n.dataset.label).join('|') === '5時間|1週間|Fable|3日'
+                && usageVerify.all('[data-service=claude] .hp-usage-meter-number').map(n => n.textContent).join('|') === '68%|70%|15%|25%'
+                && usageVerify.all('[data-service=claude] .hp-usage-meter-value').map(n => n.getAttribute('stroke')).join('|') === '#5fd08a|#5aa9ff|#ff7c7c|#f5c35b'
+                && usageVerify.all('[data-service=claude] .hp-usage-meter').every(n => {
+                    const path = n.querySelector('.hp-usage-meter-value');
+                    const track = n.querySelector('svg path');
+                    return Math.abs(path.getTotalLength() / track.getTotalLength() * 100 - parseFloat(n.dataset.percent)) < 0.1
+                        && path.getAttribute('stroke-dasharray') === '2.6 1.3'
+                        && n.querySelector('.hp-usage-needle') && n.getAttribute('aria-label').includes(n.dataset.percent);
+                })
+                && !usageVerify.one('.hp-usage-legend')
+                """), "panel UI: SVG gauges show the same remaining values and colors, proportional arcs, needles and accessible names");
+            Check(await Js("""
+                usageVerify.text('[data-service=colab] .hp-usage-balance-amount') === '87.6 CU'
+                && usageVerify.text('[data-service=colab] .hp-usage-balance-detail') === 'いまは消費していません'
+                && usageVerify.text('[data-service=codex] .hp-usage-balance-amount') === '12,345.68 CR'
+                && usageVerify.text('[data-service=claude-api] .hp-usage-balance-amount') === '$112.34'
+                && /\d+\/\d+まで/.test(usageVerify.text('[data-service=claude-api] .hp-usage-balance-detail'))
+                && !usageVerify.one('[data-service=claude-api] svg, [data-service=colab] svg')
+                """), "panel UI: meter balances keep units, expiry and detailed consumption without drawing gauges");
+            Check(await Js("usageVerify.fit() && !/更新|Max 5x|Gemini 4 Hydrogen|経過/.test(usageVerify.text('.hp-usage-body'))"),
+                "panel UI: fixed-size meters wrap at minimum width and omit the previous card metadata");
+            await Capture(web, "panel-meter");
+
+            await web.ExecuteScriptAsync("usageVerify.drag('muse','claude')");
+            await WaitFor(Ordered(meterDragOrder));
+            await Select("timer");
+            await WaitFor("!usageVerify.one('.hp-usage')");
+            await Select("ai-usage");
+            await WaitFor($"!!usageVerify.one('.hp-usage-meter-grid') && {Ordered(meterDragOrder)}");
+            var saved = new UserSettingsStore(store.RootDirectory).Load(ProviderRegistry.CreateDefault().ProviderIds);
+            Check(saved.AiUsageView == "meter" && saved.AiUsageSort == new AiUsageListSort("weekly", "asc")
+                && saved.AiUsageServiceOrder.SequenceEqual(meterDragOrder.Split(',')), "panel UI: reopen and disk readback preserve meter, sort and drag order");
+            await web.ExecuteScriptAsync("usageVerify.one('[data-view=list]').click()");
+            await WaitFor("usageVerify.sort()?.querySelector('[data-sort-column=weekly]') != null");
+            await web.ExecuteScriptAsync("usageVerify.one('.hp-usage-sort-reset').click()");
+            await WaitFor($"!!usageVerify.one('.hp-usage-handle') && {Ordered(listAfterMeterDrag)}");
+
+            var service = controller.AiUsageForVerify!;
+            async Task ReadAntigravity(AiUsageResult result, bool newAccount = true)
+            {
+                readings["antigravity"] = result;
+                if (newAccount) service.BeginAccountChange("antigravity");
+                await service.RefreshAsync(["antigravity"], force: true);
+            }
+            const string oldReading = "usageVerify.text('[data-service=antigravity] .hp-usage-old').endsWith('の値')";
+            await ReadAntigravity(AiUsageResult.Failure(AiUsageErrorCodes.PeerMissing), newAccount: false);
+            await WaitFor(oldReading);
+            Check(await Js("""
+                usageVerify.text('[data-service=antigravity] .hp-usage-error') === '前回の値を表示中。Gemini Peerを起動すると最新の値を取得できます。'
+                && usageVerify.reasonFits('antigravity')
+                && /^\d{2}:\d{2} の値$/.test(usageVerify.text('[data-service=antigravity] .hp-usage-old'))
+                && (() => {
+                    const stamp = usageVerify.one('[data-service=antigravity] .hp-usage-old');
+                    return stamp.getBoundingClientRect().top >= stamp.previousElementSibling.getBoundingClientRect().bottom;
+                })()
+                && usageVerify.values('antigravity') === '100%|94.9%'
+                && (() => {
+                    const row = usageVerify.one('[data-service=antigravity]');
+                    return usageVerify.haveOpacity(row, '.hp-usage-value, .hp-usage-bar', 0.5)
+                        && usageVerify.haveOpacity(row, '.hp-usage-service-name, .hp-usage-reset', 1);
+                })()
+                """), "panel UI: a stopped peer shows the new guidance and dims only the old percentages and bars");
+            await web.ExecuteScriptAsync("usageVerify.one('[data-service=antigravity]').scrollIntoView({block:'center'})");
             await Task.Delay(150, timeout.Token);
             await Capture(web, "panel-antigravity-stopped");
-            readings["antigravity"] = AiUsageResult.StaleReading(new AiUsageReading("Gemini 4 Hydrogen (High)", [
+
+            await ReadAntigravity(AiUsageResult.StaleReading(new AiUsageReading("Gemini 4 Hydrogen (High)", [
                 new AiUsageWindow("antigravity:gemini-5h", "session", null, 0, DateTimeOffset.UtcNow.AddHours(2), 300, State: "unreadable"),
-                new AiUsageWindow("antigravity:gemini-weekly", "weekly", null, 40, DateTimeOffset.UtcNow.AddDays(3), 10080)], ObservedAt: DateTimeOffset.UtcNow.AddHours(-2)), AiUsageErrorCodes.Stale);
-            controller.AiUsageForVerify.BeginAccountChange("antigravity");
-            await controller.AiUsageForVerify.RefreshAsync(["antigravity"], force: true);
-            await dispatcher.PostEventAsync("aiUsage.changed", controller.AiUsageForVerify.BuildState(controller.CurrentSettings.AiUsageHiddenServices));
-            while (!await Js("[...document.querySelectorAll('[data-service=antigravity] .hp-usage-value')].map(n => n.textContent).join('|') === '取得できません|40%'"))
-                await Task.Delay(100, timeout.Token);
-            Check(await Js("document.querySelector('[data-service=antigravity] .hp-usage-error').textContent === '古い値です（読み直せていません）。少し待って更新してください。'"
-                + " && document.querySelector('[data-service=antigravity] .hp-usage-meta').textContent.endsWith('の値')"),
-                "panel UI: an old saved reading on first read is shown as old, not as updated");
-            Check(await Js("!document.querySelector('[data-service=antigravity] .hp-usage-row.is-unreadable .hp-usage-fill')"
-                + " && document.querySelector('[data-service=antigravity] .hp-usage-row.is-unreadable .hp-usage-bar').getAttribute('aria-hidden') === 'true'"
-                + " && !document.querySelector('[data-service=antigravity] .hp-usage-row.is-unreadable [role=meter]')"),
-                "panel UI: an unreadable window says so and draws no bar value");
+                new AiUsageWindow("antigravity:gemini-weekly", "weekly", null, 40, DateTimeOffset.UtcNow.AddDays(3), 10080),
+                new AiUsageWindow("antigravity:model-5h", "session", "Example Model", 0, DateTimeOffset.UtcNow.AddHours(1), 300, State: "unreadable"),
+                new AiUsageWindow("antigravity:model-weekly", "weekly", "Example Model", 27, DateTimeOffset.UtcNow.AddDays(3), 10080)],
+                ObservedAt: DateTimeOffset.UtcNow.AddHours(-2)), AiUsageErrorCodes.Stale));
+            await WaitFor("usageVerify.values('antigravity') === '60%|73%'");
+            Check(await Js(oldReading + """
+                 && usageVerify.text('[data-service=antigravity] .hp-usage-error') === '古い値です（読み直せていません）。少し待って更新してください。'
+                 && usageVerify.text('[data-service=antigravity] [data-column=session]') === '取得できません'
+                 && !usageVerify.one('[data-service=antigravity] [data-column=session] [role=meter]')
+                 && usageVerify.haveOpacity(usageVerify.one('[data-service=antigravity]'), '.hp-usage-limit-name, .hp-usage-reset', 1)
+                """), "panel UI: stale readings keep their reason and full-opacity window names and countdowns; unreadable windows have no bar");
+            await web.ExecuteScriptAsync("usageVerify.one('[data-view=meter]').click()");
+            await WaitFor("!!usageVerify.one('[data-service=antigravity] .hp-usage-meter')");
+            Check(await Js("""
+                (() => {
+                    const card = usageVerify.one('[data-service=antigravity]');
+                    const gauges = [...card.querySelectorAll('.hp-usage-meter')];
+                    const unreadable = gauges.filter(n => n.dataset.percent === '');
+                    const opacity = (selector, expected) => usageVerify.haveOpacity(card, selector, expected);
+                    return opacity('.hp-usage-meter[data-percent]:not([data-percent=""]) .hp-usage-meter-number, .hp-usage-meter-value', 0.5)
+                        && opacity('.hp-usage-limit-name, .hp-usage-meter-detail, .hp-usage-reset, .hp-usage-needle, svg', 1)
+                        && unreadable.length === 2
+                        && unreadable.every(n => n.querySelector('.hp-usage-meter-number').textContent === '—'
+                            && n.getAttribute('aria-label').includes('取得できません') && n.title.includes('取得できません')
+                            && !n.querySelector('.hp-usage-unavailable, .hp-usage-meter-value, .hp-usage-needle, .hp-usage-reset'))
+                        && !unreadable[0].querySelector('.hp-usage-meter-detail')
+                        && unreadable[1].querySelector('.hp-usage-limit-name').textContent === 'Example Model'
+                        && unreadable[1].querySelector('.hp-usage-meter-detail').textContent === '5時間'
+                        && unreadable[1].getAttribute('aria-label').startsWith('Example Model 5時間 ');
+                })()
+                """), "panel UI: old gauges dim percentages and value arcs; unreadable gauges keep their hint and show only a repeated duration below the name");
+            await web.ExecuteScriptAsync("usageVerify.one('[data-view=list]').click()");
+            await WaitFor("!!usageVerify.one('.hp-usage-list')");
 
-            // A reading the service called current, but whose capture is now over five minutes old.
-            readings["antigravity"] = AiUsageResult.Success(new AiUsageReading("Gemini 4 Hydrogen (High)", [
-                new AiUsageWindow("antigravity:gemini-weekly", "weekly", null, 7, DateTimeOffset.UtcNow.AddDays(3), 10080)], ObservedAt: DateTimeOffset.UtcNow.AddMinutes(-6)));
-            controller.AiUsageForVerify.BeginAccountChange("antigravity");
-            await controller.AiUsageForVerify.RefreshAsync(["antigravity"], force: true);
-            while (!await Js("document.querySelector('[data-service=antigravity] .hp-usage-value')?.textContent === '7%'")) await Task.Delay(100, timeout.Token);
-            Check(await Js("document.querySelector('[data-service=antigravity] .hp-usage-meta').textContent.endsWith('の値')"
-                + " && !document.querySelector('[data-service=antigravity] .hp-usage-meta').textContent.includes('更新')"
-                + " && document.querySelector('[data-service=antigravity] .hp-usage-error')?.textContent.startsWith('古い値です')"),
-                "panel UI: a saved reading past its five minutes is drawn as old, not as updated");
+            AiUsageResult AntigravityReading(double used, DateTimeOffset observedAt) =>
+                AiUsageResult.Success(new AiUsageReading("Gemini 4 Hydrogen (High)", [
+                    new AiUsageWindow("antigravity:gemini-weekly", "weekly", null, used, DateTimeOffset.UtcNow.AddDays(3), 10080)], ObservedAt: observedAt));
+            await ReadAntigravity(AntigravityReading(7, DateTimeOffset.UtcNow.AddMinutes(-6)));
+            await WaitFor("usageVerify.values('antigravity') === '93%'");
+            Check(await Js(oldReading + " && usageVerify.text('[data-service=antigravity] .hp-usage-error').startsWith('古い値です')"),
+                "panel UI: a snapshot already past freshUntil is immediately shown as old");
 
-            // Shown as current, then the five minutes run out while the panel stays open: it turns old at once.
-            readings["antigravity"] = AiUsageResult.Success(new AiUsageReading("Gemini 4 Hydrogen (High)", [
-                new AiUsageWindow("antigravity:gemini-weekly", "weekly", null, 8, DateTimeOffset.UtcNow.AddDays(3), 10080)],
-                ObservedAt: DateTimeOffset.UtcNow - AiUsageParsers.AntigravityFreshFor + TimeSpan.FromSeconds(4)));
-            await controller.AiUsageForVerify.RefreshAsync(["antigravity"], force: true);
-            while (!await Js("document.querySelector('[data-service=antigravity] .hp-usage-value')?.textContent === '8%'")) await Task.Delay(100, timeout.Token);
-            var shownAsCurrent = await Js("document.querySelector('[data-service=antigravity] .hp-usage-meta').textContent.endsWith('更新')");
-            var expiredAt = DateTimeOffset.UtcNow.AddSeconds(10);
-            while (DateTimeOffset.UtcNow < expiredAt && !await Js("document.querySelector('[data-service=antigravity] .hp-usage-meta').textContent.endsWith('の値')"))
-                await Task.Delay(200, timeout.Token);
-            Check(shownAsCurrent && await Js("document.querySelector('[data-service=antigravity] .hp-usage-meta').textContent.endsWith('の値')"),
-                "panel UI: an open panel turns a reading old when its five minutes run out, without waiting for the 30-second tick");
+            await ReadAntigravity(AntigravityReading(8, DateTimeOffset.UtcNow - AiUsageParsers.AntigravityFreshFor + TimeSpan.FromSeconds(4)), newAccount: false);
+            await WaitFor("usageVerify.values('antigravity') === '92%'");
+            var shownAsCurrent = await Js("usageVerify.one('[data-service=antigravity]').dataset.status === 'ok' && !usageVerify.one('[data-service=antigravity] .hp-usage-old')");
+            var expiryDeadline = DateTimeOffset.UtcNow.AddSeconds(10);
+            while (DateTimeOffset.UtcNow < expiryDeadline && !await Js(oldReading)) await Task.Delay(200, timeout.Token);
+            Check(shownAsCurrent && await Js(oldReading), "panel UI: open panel turns old at freshUntil without waiting for the 30-second tick");
 
-            // A recent capture without a single value: rows say unavailable and the header is not "updated".
-            readings["antigravity"] = AiUsageResult.StaleReading(new AiUsageReading("Gemini 4 Hydrogen (High)", [
+            await ReadAntigravity(AiUsageResult.StaleReading(new AiUsageReading("Gemini 4 Hydrogen (High)", [
                 new AiUsageWindow("antigravity:gemini-5h", "session", null, 0, null, 300, State: "unreadable"),
                 new AiUsageWindow("antigravity:gemini-weekly", "weekly", null, 0, null, 10080, State: "unreadable")],
-                ObservedAt: DateTimeOffset.UtcNow.AddSeconds(-30)), AiUsageErrorCodes.NoValues);
-            controller.AiUsageForVerify.BeginAccountChange("antigravity");
-            await controller.AiUsageForVerify.RefreshAsync(["antigravity"], force: true);
-            while (!await Js("document.querySelectorAll('[data-service=antigravity] .hp-usage-row.is-unreadable').length === 2")) await Task.Delay(100, timeout.Token);
-            Check(await Js("document.querySelector('[data-service=antigravity] .hp-usage-meta').textContent.endsWith('の値')"
-                + " && document.querySelector('[data-service=antigravity] .hp-usage-error').textContent === '記録に利用枠の値がありませんでした。少し待って更新してください。'"),
-                "panel UI: a capture with no values is not shown as updated");
-            readings["antigravity"] = AiUsageResult.Failure(AiUsageErrorCodes.NoSnapshot);
-            controller.AiUsageForVerify.BeginAccountChange("antigravity");
-            await controller.AiUsageForVerify.RefreshAsync(["antigravity"], force: true);
-            await dispatcher.PostEventAsync("aiUsage.changed", controller.AiUsageForVerify.BuildState(controller.CurrentSettings.AiUsageHiddenServices));
-            while (await Js("!!document.querySelector('[data-service=antigravity] .hp-usage-row')")) await Task.Delay(100, timeout.Token);
-            Check(await Js("document.querySelector('[data-service=antigravity] .hp-usage-error').textContent === 'Gemini Peerにまだ利用枠の記録がありません。少し待って更新してください。'"
-                + " && !document.querySelector('[data-service=antigravity] .hp-usage-bar')"),
-                "panel UI: with no reading at all there is no 0% bar, only the reason");
-            // Back to a fresh reading for the Settings checks that follow.
-            readings["antigravity"] = AiUsageResult.Success(new AiUsageReading("Gemini 4 Hydrogen (High)", [
-                new AiUsageWindow("antigravity:gemini-weekly", "weekly", null, 5.1, DateTimeOffset.UtcNow.AddDays(5), 10080)], ObservedAt: DateTimeOffset.UtcNow));
-            await controller.AiUsageForVerify.RefreshAsync(["antigravity"], force: true);
+                ObservedAt: DateTimeOffset.UtcNow.AddSeconds(-30)), AiUsageErrorCodes.NoValues));
+            await WaitFor("usageVerify.all('[data-service=antigravity] .hp-usage-unavailable').length === 2");
+            Check(await Js(oldReading + """
+                 && usageVerify.text('[data-service=antigravity] .hp-usage-error') === '記録に利用枠の値がありませんでした。少し待って更新してください。'
+                 && !usageVerify.one('[data-service=antigravity] .hp-usage-bar')
+                """), "panel UI: a capture with no readable values stays marked old and shows the original reason");
+            await ReadAntigravity(AiUsageResult.Failure(AiUsageErrorCodes.NoSnapshot));
+            await WaitFor("usageVerify.text('[data-service=antigravity] .hp-usage-error').startsWith('Gemini Peerにまだ')");
+            Check(await Js("""
+                usageVerify.text('[data-service=antigravity] .hp-usage-error') === 'Gemini Peerにまだ利用枠の記録がありません。少し待って更新してください。'
+                && usageVerify.reasonFits('antigravity') && !usageVerify.one('[data-service=antigravity] .hp-usage-bar')
+                """), "panel UI: no snapshot draws no bar and keeps the original reason");
+
+            const string peerReason = "usageVerify.text('[data-service=antigravity] .hp-usage-error')";
+            await ReadAntigravity(AiUsageResult.Failure(AiUsageErrorCodes.PeerMissing));
+            await WaitFor(peerReason + ".includes('Gemini Peerを起動')");
+            Check(await Js(peerReason + " === 'Gemini Peerを起動すると最新の値を取得できます。' && usageVerify.reasonFits('antigravity')"),
+                "panel UI: PeerMissing with no saved values has the new guidance and no previous-reading prefix");
+            await ChangePanelState("settings.setLanguage", new { language = "en" });
+            await WaitFor("usageVerify.text('[data-view=list]') === 'List'");
+            await WaitFor(peerReason + ".includes('Gemini Peer')");
+            Check(await Js(peerReason + " === 'Start Gemini Peer to get the latest values.'"), "panel UI: PeerMissing has the new English guidance");
+            await ChangePanelState("settings.setLanguage", new { language = "ja" });
+            await WaitFor("usageVerify.text('[data-view=list]') === '一覧'");
+
+            await ReadAntigravity(AntigravityReading(5.1, DateTimeOffset.UtcNow));
+            service.BeginAccountChange("colab");
+            const string loadingColab = "usageVerify.text('[data-service=colab] .hp-usage-message') === '読み込み中…'";
+            await WaitFor(loadingColab);
+            Check(await Js(loadingColab + " && !usageVerify.one('.hp-usage-chip[data-balance-service=colab]')"),
+                "panel UI: a balance-only service still gets a row while awaiting its first reading");
+            await service.RefreshAsync(["colab"], force: true);
+            await WaitFor(Ordered(listAfterMeterDrag));
+            await VerifySettingsUiAsync(controller, store, log);
+            const string listSettingsOrder = "claude,muse,codex,gemini,antigravity";
+            await WaitFor(Ordered(listSettingsOrder));
+            Check(await Js(Ordered(listSettingsOrder)), "panel UI: Settings moves update the open list");
+            await web.ExecuteScriptAsync("usageVerify.one('[data-view=meter]').click()");
+            await WaitFor($"!!usageVerify.one('.hp-usage-meter-grid') && {Ordered(settingsOrder)}");
+            Check(await Js(Ordered(settingsOrder)), "panel UI: the meter reflects the same Settings order");
             log("PASS ai-usage panel UI rendered in WebView2");
         }
         finally
@@ -1018,19 +1337,57 @@ internal sealed class AiUsageVerifier
                 "settings UI: signed-in state with plan");
             Check(await Js("[...document.querySelectorAll('[data-ai-usage-settings] [data-service=gemini] button')].some(b => b.textContent === 'サインイン')"),
                 "settings UI: sign-in button for a signed-out service");
-            Check(await Js("[...document.querySelectorAll('[data-ai-usage-settings] [data-service=codex] button')].length === 0"),
+            Check(await Js("document.querySelectorAll('[data-ai-usage-settings] [data-service=codex] button:not([data-move])').length === 0"),
                 "settings UI: no sign-in button while Codex is signed in");
             Check(await Js("[...document.querySelectorAll('[data-ai-usage-settings] input[type=checkbox]')].every(i => i.checked)"), "settings UI: all services shown by default");
-            Check(await Js("document.querySelectorAll('[data-ai-usage-settings] [data-service=colab] button').length === 0 && document.querySelector('[data-ai-usage-settings] [data-service=colab]').textContent.includes('Gemini')"),
+            Check(await Js("document.querySelectorAll('[data-ai-usage-settings] [data-service=colab] button:not([data-move])').length === 0 && document.querySelector('[data-ai-usage-settings] [data-service=colab]').textContent.includes('Gemini')"),
                 "settings UI: Colab uses the Gemini sign-in, with no buttons of its own");
             Check(await Js("[...document.querySelectorAll('[data-ai-usage-settings] [data-service=\"claude-api\"] button')].some(b => b.textContent === 'サインインし直す')"),
                 "settings UI: Claude API has its own sign-in");
             Check(await Js("[...document.querySelectorAll('[data-ai-usage-settings] [data-service=gemini] button')].some(b => b.textContent === 'サインアウト')"),
                 "settings UI: Gemini offers sign-out while Colab still reads with its Google sign-in");
-            Check(await Js("document.querySelectorAll('[data-ai-usage-settings] [data-service=antigravity] button').length === 0"
+            Check(await Js("document.querySelectorAll('[data-ai-usage-settings] [data-service=antigravity] button:not([data-move])').length === 0"
                 + " && document.querySelector('[data-ai-usage-settings] [data-service=antigravity] .ai-usage-settings-state').textContent === 'Gemini Peerから取得 · Gemini 4 Hydrogen (High)'"
                 + " && document.querySelector('[data-ai-usage-settings] [data-service=antigravity]').textContent.includes('サインインは要りません')"),
                 "settings UI: Antigravity is read from the Gemini Peer, with no sign-in buttons");
+            const string order = "[...document.querySelectorAll('.ai-usage-settings-row')].map(n => n.dataset.service).join(',')";
+            Check(await Js(order + " === 'muse,claude,codex,claude-api,gemini,antigravity,colab'"), "settings UI: order matches the panel drag");
+            Check(await Js("""
+                [...document.querySelectorAll('.ai-usage-settings-row')].every(row => {
+                    const toggle = row.querySelector('input[type=checkbox]').getBoundingClientRect();
+                    const moves = [...row.querySelectorAll('button[data-move]')];
+                    return moves.length === 2 && moves.every((button, index) => {
+                        const box = button.getBoundingClientRect();
+                        return button.closest('.ai-usage-settings-heading') === row.firstElementChild
+                            && !button.closest('.settings-button-row')
+                            && button.textContent === ['↑', '↓'][index]
+                            && button.getAttribute('aria-label') === ['上へ', '下へ'][index]
+                            && button.offsetWidth === 24 && button.offsetHeight === 24
+                            && box.right <= toggle.left && box.top < toggle.bottom && box.bottom > toggle.top;
+                    });
+                })
+                """), "settings UI: small named arrow buttons sit beside the switch rather than with sign-in actions");
+            var providerIds = ProviderRegistry.CreateDefault().ProviderIds;
+            var originalOrder = store.Load(providerIds).AiUsageServiceOrder;
+            Check(await Js("""
+                (() => {
+                    const up = document.querySelector('.ai-usage-settings-row:first-child [data-move=up]');
+                    const down = document.querySelector('.ai-usage-settings-row:last-child [data-move=down]');
+                    up.click();
+                    down.click();
+                    return up.disabled && down.disabled
+                        && [up, down].every(button => Number(getComputedStyle(button).opacity) < 1);
+                })()
+                """) && store.Load(providerIds).AiUsageServiceOrder.SequenceEqual(originalOrder),
+                "settings UI: end arrows are dimmed, disabled, and clicking them leaves the order unchanged");
+            await web.ExecuteScriptAsync("document.querySelector('.ai-usage-settings-row[data-service=codex] [data-move=up]').click()");
+            while (!await Js(order + " === 'muse,codex,claude,claude-api,gemini,antigravity,colab'")) await Task.Delay(100, timeout.Token);
+            Check(store.Load(providerIds).AiUsageServiceOrder.Take(3).SequenceEqual(["muse", "codex", "claude"]), "settings UI: Move up is saved");
+            await web.ExecuteScriptAsync("document.querySelector('.ai-usage-settings-row[data-service=codex] [data-move=down]').click()");
+            while (!await Js(order + " === 'muse,claude,codex,claude-api,gemini,antigravity,colab'")) await Task.Delay(100, timeout.Token);
+            await web.ExecuteScriptAsync("document.querySelector('.ai-usage-settings-row[data-service=muse] [data-move=down]').click()");
+            while (!await Js(order + " === 'claude,muse,codex,claude-api,gemini,antigravity,colab'")) await Task.Delay(100, timeout.Token);
+            Check(store.Load(providerIds).AiUsageServiceOrder.Take(3).SequenceEqual(["claude", "muse", "codex"]), "settings UI: Move down is saved");
             await Task.Delay(150, timeout.Token);
             await Capture(web, "settings");
             log("PASS ai-usage Settings UI rendered in WebView2");

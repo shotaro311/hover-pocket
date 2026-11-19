@@ -52,14 +52,15 @@ internal sealed class AiUsageService : IDisposable
         lock (_snapshots) return _snapshots[id];
     }
 
-    public object BuildState(IReadOnlyCollection<string> hiddenServices)
+    internal sealed record State(bool Refreshing, IReadOnlyList<object> Services);
+
+    public State BuildState(IReadOnlyCollection<string> hiddenServices)
     {
         AiUsageServiceSnapshot[] snapshots;
         lock (_snapshots) snapshots = AiUsageServiceIds.All.Select(id => _snapshots[id]).ToArray();
-        return new
-        {
-            refreshing = snapshots.Any(snapshot => snapshot.Refreshing),
-            services = snapshots.Select(snapshot => new
+        return new State(
+            snapshots.Any(snapshot => snapshot.Refreshing),
+            snapshots.Select(snapshot => new
             {
                 id = snapshot.Id,
                 name = AiUsageServiceIds.DisplayName(snapshot.Id),
@@ -97,8 +98,7 @@ internal sealed class AiUsageService : IDisposable
                     perHour = balance.PerHour,
                     state = balance.State
                 }).ToArray()
-            }).ToArray()
-        };
+            }).ToArray());
     }
 
     /// <summary>

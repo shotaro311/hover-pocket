@@ -5,6 +5,11 @@ updated_by: claude
 status: production-macos-0.2.18; production-windows-0.2.20
 ---
 
+## 2026-11-19 AI Usageの表示の作り替え（Windows 0.2.21・macOS 0.2.19）
+
+- ユーザーの「見にくい、ごちゃっとして見える、並び替えも」を受け、AI Usageを「一覧」と「メーター」の切り替えに作り替えた。数字は残りの割合と4色（70%以上青、50%以上緑、25%以上黄、それ未満赤）、一覧は列の見出しで並べ替え、メーターは高級車のタコメーター風、順番はドラッグと設定の上下ボタン。設計はClaude、実装はCodex（Windowsはこの PC、macOSはMacのCodex）。[設計書](../docs/design/2026-11-19_ai-usage-list-and-meter.md)、[作業記録](2026-11/2026-11-19_hover-pocket-ai-usage-layout.md)。
+- Windowsの `--verify ai-usage` 207項目とCIと同じ手順一式、macOSのAI Usage検証188項目と既存の検証が合格。Codex（Astra / high）による両OSの実画面のデザインレビューは2回目で指摘なし。配信はユーザーの承認（「Release both」）で進める。
+
 ## 2026-11-19 Windows 0.2.20 本番配信
 
 - `eb386d9` をmainへpushし、Verify WindowsとVerify Pocket Contractsが成功。[Windows 0.2.20](https://github.com/shotaro311/hover-pocket/releases/tag/win-v0.2.20) を `--latest=false` で公開し、8配布物の一致と公開物の99項目検査に合格。macOSは不変。

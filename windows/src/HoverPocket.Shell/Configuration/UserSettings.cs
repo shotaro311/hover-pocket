@@ -74,6 +74,12 @@ internal sealed class UserSettings
 
     public List<string> AiUsageHiddenServices { get; set; } = [];
 
+    public string AiUsageView { get; set; } = "list";
+
+    public List<string> AiUsageServiceOrder { get; set; } = [];
+
+    public AiUsageListSort? AiUsageSort { get; set; }
+
     public UserSettings Clone()
     {
         return new UserSettings
@@ -108,7 +114,12 @@ internal sealed class UserSettings
             DisableTopEdgeInFullscreen = DisableTopEdgeInFullscreen,
             ProviderOrder = [.. ProviderOrder],
             ProviderVisibility = new Dictionary<string, bool>(ProviderVisibility, StringComparer.OrdinalIgnoreCase),
-            AiUsageHiddenServices = [.. AiUsageHiddenServices]
+            AiUsageHiddenServices = [.. AiUsageHiddenServices],
+            AiUsageView = AiUsageView,
+            AiUsageServiceOrder = [.. AiUsageServiceOrder],
+            AiUsageSort = AiUsageSort
         };
     }
 }
+
+internal sealed record AiUsageListSort(string Column, string Direction);
