@@ -434,6 +434,85 @@ internal static partial class AiUsageParsers
         }
     }
 
+    /// <summary>A Gemini Peer reading older than this is stale, matching the peer's own five-minute rule.</summary>
+    public static readonly TimeSpan AntigravityFreshFor = TimeSpan.FromMinutes(5);
+
+    /// <summary>
+    /// Parses the Gemini Peer's <c>/history/api/usage</c> answer: the Antigravity CLI quota panel saved by
+    /// the peer (codex-peer-gemini-windows docs/gemini-usage.md, collector schema version 1). Only the
+    /// Gemini model quotas are shown: <c>gemini-5h</c> and <c>gemini-weekly</c>. Used = 1 − remainingFraction;
+    /// a null fraction (the collector's "unknown") is an unreadable row, never 0%. The values carry the
+    /// time they were captured. An old capture, or one the peer failed to renew afterwards, comes back as
+    /// a stale reading with the reason (the peer's free-text error is not used).
+    /// </summary>
+    public static AiUsageResult ParseAntigravity(string body, DateTimeOffset now)
+    {
+        JsonDocument document;
+        try { document = JsonDocument.Parse(body); }
+        catch (JsonException) { throw new AiUsageParseException("gemini peer answer is not JSON"); }
+        using (document)
+        {
+            var root = document.RootElement;
+            if (root.ValueKind != JsonValueKind.Object) throw new AiUsageParseException("gemini peer answer is not an object");
+            var refreshFailed = root.TryGetProperty("lastAttempt", out var attempt) && attempt.ValueKind == JsonValueKind.Object
+                && attempt.TryGetProperty("ok", out var ok) && ok.ValueKind == JsonValueKind.False;
+            DateTimeOffset? failedAt = null;
+            if (refreshFailed)
+            {
+                try { failedAt = ReadTime(attempt, "at"); }
+                catch (AiUsageParseException) { failedAt = null; }
+            }
+            if (!root.TryGetProperty("sample", out var sample) || sample.ValueKind == JsonValueKind.Null)
+                return AiUsageResult.Failure(refreshFailed ? AiUsageErrorCodes.PeerFailed : AiUsageErrorCodes.NoSnapshot);
+            if (sample.ValueKind != JsonValueKind.Object) throw new AiUsageParseException("gemini peer sample is not an object");
+            if (ReadNumber(sample, "version") is { } version && version != 1) throw new AiUsageParseException("gemini peer sample version changed");
+            if (ReadTime(sample, "observedAt") is not { } observedAt) throw new AiUsageParseException("gemini peer sample has no capture time");
+            if (!sample.TryGetProperty("quotas", out var quotas) || quotas.ValueKind != JsonValueKind.Array)
+                throw new AiUsageParseException("gemini peer sample has no quotas");
+
+            var session = AntigravityQuota(quotas, "gemini-5h", "session", SessionMinutes);
+            var weekly = AntigravityQuota(quotas, "gemini-weekly", "weekly", WeekMinutes);
+            if (session is null && weekly is null) throw new AiUsageParseException("gemini peer sample has no Gemini quotas");
+            // One window missing from the capture is shown as unreadable, so it is clear which one was read.
+            List<AiUsageWindow> windows =
+            [
+                session ?? new AiUsageWindow("antigravity:gemini-5h", "session", null, 0, null, SessionMinutes, State: "unreadable"),
+                weekly ?? new AiUsageWindow("antigravity:gemini-weekly", "weekly", null, 0, null, WeekMinutes, State: "unreadable")
+            ];
+            string? model = null;
+            if (sample.TryGetProperty("model", out var modelInfo) && modelInfo.ValueKind == JsonValueKind.Object)
+                model = Clean(ReadString(modelInfo, "name")) ?? Clean(ReadString(modelInfo, "id"));
+
+            var reading = new AiUsageReading(model, windows, ObservedAt: observedAt);
+            var age = now - observedAt;
+            var stale = (root.TryGetProperty("stale", out var staleFlag) && staleFlag.ValueKind == JsonValueKind.True)
+                || age > AntigravityFreshFor || age < -TimeSpan.FromMinutes(2);
+            // A renewal that failed after this capture means the values could not be confirmed just now.
+            var renewalFailed = refreshFailed && (failedAt is not { } at || at >= observedAt);
+            if (renewalFailed) return AiUsageResult.StaleReading(reading, AiUsageErrorCodes.PeerFailed);
+            if (stale) return AiUsageResult.StaleReading(reading, AiUsageErrorCodes.Stale);
+            // A capture without a single value is not a successful reading, even when it is recent.
+            if (windows.All(window => window.State == "unreadable")) return AiUsageResult.StaleReading(reading, AiUsageErrorCodes.NoValues);
+            return AiUsageResult.Success(reading);
+        }
+    }
+
+    private static AiUsageWindow? AntigravityQuota(JsonElement quotas, string id, string kind, int minutes)
+    {
+        foreach (var quota in quotas.EnumerateArray())
+        {
+            if (quota.ValueKind != JsonValueKind.Object || ReadString(quota, "id") != id) continue;
+            var resetsAt = ReadTime(quota, "resetAt");
+            if (!quota.TryGetProperty("remainingFraction", out var value) || value.ValueKind == JsonValueKind.Null)
+                return new AiUsageWindow($"antigravity:{id}", kind, null, 0, resetsAt, minutes, State: "unreadable");
+            if (value.ValueKind != JsonValueKind.Number || !value.TryGetDouble(out var remaining) || !double.IsFinite(remaining)
+                || remaining is < 0 or > 1)
+                throw new AiUsageParseException("remaining fraction out of range");
+            return new AiUsageWindow($"antigravity:{id}", kind, null, ClampPercent((1 - remaining) * 100), resetsAt, minutes);
+        }
+        return null;
+    }
+
     /// <summary>
     /// Parses the React flight rows returned by muse.ai's settings server action. The subscription is
     /// the row that carries <c>"success": true</c>. Muse only reports a weekly percentage.

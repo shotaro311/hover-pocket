@@ -33,6 +33,7 @@ internal sealed class AiUsageVerifier
             VerifyParsers();
             VerifySnapshots();
             await VerifyServiceAsync();
+            await VerifyAntigravityReaderAsync();
             await VerifyInPageFetchAsync();
             VerifySettings();
             await VerifyBridgeAndUiAsync(log);
@@ -110,6 +111,8 @@ internal sealed class AiUsageVerifier
         ExpectParseFailure(() => AiUsageParsers.ParseGemini("""[{"data":{"viewer":{"rpcs":{"getUsageInfo":{"pools":[{"poolType":"GXU_WEEKLY","percentageUsed":-0.5}]}}}}}]"""),
             "gemini: a negative value is a format change, not 0%");
         ExpectParseFailure(() => AiUsageParsers.ParseGemini("""[{"data":{"viewer":{"rpcs":{}}}}]"""), "gemini: missing pools is a parse failure");
+
+        VerifyAntigravityParser();
 
         const string muse = "0:{\"a\":\"$@1\",\"f\":\"\",\"b\":\"x\"}\n1:{\"success\":true,\"subscription\":{\"usage\":{\"percentUsed\":9,\"resetsAt\":1763856000},\"tier\":{\"name\":\"Plus\"},\"usageRowValueLabel\":\"9% used\"}}\n";
         var museReading = AiUsageParsers.ParseMuse(muse);
@@ -250,6 +253,73 @@ internal sealed class AiUsageVerifier
             && !AiUsageWebReader.IsExpectedSignInHost("claude", "claude.ai.example.com"), "sign-in window: expected hosts, look-alikes warned");
     }
 
+    // Shape of the Gemini Peer's GET /history/api/usage on 2026-11-19 (Antigravity CLI 1.5.11).
+    internal static string AntigravityAnswer(DateTimeOffset observedAt, string? extra = null, string weeklyFraction = "0.94876695") => $$"""
+        {"configuredModel":"gemini-4-hydrogen-high","reasoning":"high","sample":{"version":1,"observedAt":"{{observedAt.UtcDateTime.ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'", System.Globalization.CultureInfo.InvariantCulture)}}",
+         "model":{"id":"Gemini 4 Hydrogen (High)","name":"Gemini 4 Hydrogen (High)"},"cliVersion":"1.5.11","quotas":[
+          {"id":"3p-5h","remainingFraction":0.5,"resetAt":"2026-11-19T08:31:47.000Z"},
+          {"id":"3p-weekly","remainingFraction":1,"resetAt":"2026-11-26T03:31:47.000Z"},
+          {"id":"gemini-5h","remainingFraction":1,"resetAt":"2026-11-19T08:31:47.000Z"},
+          {"id":"gemini-argon-wtu-weekly","remainingFraction":1,"resetAt":"2026-11-26T03:31:47.000Z"},
+          {"id":"gemini-weekly","remainingFraction":{{weeklyFraction}},"resetAt":"2026-11-24T23:46:28.000Z"}]},
+         "stale":false,"refreshing":false{{extra}}}
+        """;
+
+    private void VerifyAntigravityParser()
+    {
+        var observed = DateTimeOffset.Parse("2026-11-19T03:31:47.307Z");
+        var fresh = AiUsageParsers.ParseAntigravity(AntigravityAnswer(observed, ""","lastAttempt":{"at":"2026-11-19T03:31:47.461Z","ok":true}"""), observed.AddMinutes(1));
+        Check(fresh is { Status: AiUsageStatus.Ok, Reading: { Plan: "Gemini 4 Hydrogen (High)", Windows.Count: 2 } } && fresh.Reading.ObservedAt == observed,
+            "antigravity: fresh reading with the model name and the capture time");
+        Check(fresh.Reading?.Windows[0] is { Id: "antigravity:gemini-5h", Kind: "session", UsedPercent: 0, WindowMinutes: 300, Model: null }
+            && fresh.Reading.Windows[1] is { Id: "antigravity:gemini-weekly", Kind: "weekly", UsedPercent: 5.1, WindowMinutes: 10080 },
+            "antigravity: Gemini five-hour and weekly only, used = 1 − remainingFraction (other quotas ignored)");
+        Check(fresh.Reading?.Windows[1].ResetsAt == DateTimeOffset.Parse("2026-11-24T23:46:28Z"), "antigravity: reset instant");
+
+        var old = AiUsageParsers.ParseAntigravity(AntigravityAnswer(observed), observed.AddMinutes(6));
+        Check(old is { Status: AiUsageStatus.Error, ErrorCode: AiUsageErrorCodes.Stale, Reading.Windows.Count: 2 },
+            "antigravity: a capture older than five minutes is a stale reading, not a success");
+        var failedRenewal = AiUsageParsers.ParseAntigravity(AntigravityAnswer(observed, ""","lastAttempt":{"at":"2026-11-19T03:40:00.000Z","ok":false,"error":"x"}"""), observed.AddMinutes(9));
+        Check(failedRenewal is { Status: AiUsageStatus.Error, ErrorCode: AiUsageErrorCodes.PeerFailed, Reading: not null },
+            "antigravity: a failed peer refresh is reported with the old values");
+        var peerSaysStale = AiUsageParsers.ParseAntigravity(AntigravityAnswer(observed).Replace("\"stale\":false", "\"stale\":true"), observed.AddMinutes(1));
+        Check(peerSaysStale is { Status: AiUsageStatus.Error, ErrorCode: AiUsageErrorCodes.Stale }, "antigravity: the peer's own stale flag is honoured");
+        Check(AiUsageParsers.ParseAntigravity(AntigravityAnswer(observed), observed.AddMinutes(-10)).Status == AiUsageStatus.Error,
+            "antigravity: a capture far in the future is not shown as current");
+
+        Check(AiUsageParsers.ParseAntigravity("""{"configuredModel":"gemini-4-hydrogen-high","sample":null,"stale":true,"lastAttempt":null}""", observed)
+            is { Status: AiUsageStatus.Error, ErrorCode: AiUsageErrorCodes.NoSnapshot, Reading: null }, "antigravity: no saved reading is its own error, never 0%");
+        Check(AiUsageParsers.ParseAntigravity("""{"sample":null,"lastAttempt":{"at":"2026-11-19T03:40:00.000Z","ok":false}}""", observed)
+            is { ErrorCode: AiUsageErrorCodes.PeerFailed, Reading: null }, "antigravity: no saved reading after a failed refresh");
+
+        var unknownWeekly = AiUsageParsers.ParseAntigravity(AntigravityAnswer(observed, weeklyFraction: "null"), observed);
+        Check(unknownWeekly is { Status: AiUsageStatus.Ok } && unknownWeekly.Reading?.Windows is [{ Kind: "session", State: null }, { Kind: "weekly", State: "unreadable" }]
+            && unknownWeekly.Reading.Windows[1].ResetsAt is not null, "antigravity: an unknown fraction is an unreadable row, not 0% and not dropped");
+        var unknownBoth = AiUsageParsers.ParseAntigravity(AntigravityAnswer(observed, weeklyFraction: "null").Replace(
+            "\"id\":\"gemini-5h\",\"remainingFraction\":1", "\"id\":\"gemini-5h\",\"remainingFraction\":null"), observed);
+        Check(unknownBoth is { Status: AiUsageStatus.Error, ErrorCode: AiUsageErrorCodes.NoValues } && unknownBoth.Reading?.Windows is [{ State: "unreadable" }, { State: "unreadable" }],
+            "antigravity: with both fractions unknown the rows stay, but the reading is not a success");
+        var missingSession = AiUsageParsers.ParseAntigravity(AntigravityAnswer(observed).Replace("\"id\":\"gemini-5h\"", "\"id\":\"gemini-5h-renamed\""), observed);
+        Check(missingSession is { Status: AiUsageStatus.Ok } && missingSession.Reading?.Windows is [{ Kind: "session", State: "unreadable", ResetsAt: null }, { Kind: "weekly", State: null }],
+            "antigravity: a window missing from the capture is an unreadable row, so it is clear which one was read");
+        var renewalFailedFresh = AiUsageParsers.ParseAntigravity(AntigravityAnswer(observed, ""","lastAttempt":{"at":"2026-11-19T03:32:30.000Z","ok":false}"""), observed.AddMinutes(1));
+        Check(renewalFailedFresh is { Status: AiUsageStatus.Error, ErrorCode: AiUsageErrorCodes.PeerFailed, Reading: not null },
+            "antigravity: a renewal that failed after a recent capture is reported, not shown as updated");
+        var failedBefore = AiUsageParsers.ParseAntigravity(AntigravityAnswer(observed, ""","lastAttempt":{"at":"2026-11-19T03:20:00.000Z","ok":false}"""), observed.AddMinutes(1));
+        Check(failedBefore.Status == AiUsageStatus.Ok, "antigravity: a failure older than the capture does not taint it");
+        ExpectParseFailure(() => AiUsageParsers.ParseAntigravity(AntigravityAnswer(observed, weeklyFraction: "1.5"), observed),
+            "antigravity: a fraction above 1 is a format change");
+        ExpectParseFailure(() => AiUsageParsers.ParseAntigravity(AntigravityAnswer(observed, weeklyFraction: "-0.1"), observed),
+            "antigravity: a negative fraction is a format change");
+        ExpectParseFailure(() => AiUsageParsers.ParseAntigravity("""{"sample":{"version":1,"observedAt":"2026-11-19T03:31:47Z","quotas":[{"id":"3p-5h","remainingFraction":1}]}}""", observed),
+            "antigravity: no Gemini quota is a parse failure");
+        ExpectParseFailure(() => AiUsageParsers.ParseAntigravity("""{"sample":{"version":2,"observedAt":"2026-11-19T03:31:47Z","quotas":[]}}""", observed),
+            "antigravity: a new sample version is a format change");
+        ExpectParseFailure(() => AiUsageParsers.ParseAntigravity("""{"sample":{"version":1,"quotas":[{"id":"gemini-5h","remainingFraction":1}]}}""", observed),
+            "antigravity: a sample without a capture time is not trusted");
+        ExpectParseFailure(() => AiUsageParsers.ParseAntigravity("<html></html>", observed), "antigravity: an HTML page is a format change");
+    }
+
     private void ExpectParseFailure(Action action, string label)
     {
         try
@@ -280,6 +350,19 @@ internal sealed class AiUsageVerifier
             "snapshot: a failed balance read keeps the last balance as stale, never 0");
         var signedOut = failed.Apply(AiUsageResult.SignedOut(), now.AddMinutes(6));
         Check(signedOut is { Status: AiUsageStatus.SignedOut, Windows.Count: 0, Plan: null, Stale: false }, "snapshot: sign-out clears old readings");
+
+        // A saved reading (Antigravity through the Gemini Peer) keeps the time it was captured.
+        var captured = now.AddMinutes(-3);
+        var saved = reading with { ObservedAt = captured };
+        var savedOk = AiUsageServiceSnapshot.Initial("antigravity").Apply(AiUsageResult.Success(saved), now);
+        Check(savedOk is { Status: AiUsageStatus.Ok, Stale: false } && savedOk.FetchedAt == captured && savedOk.CheckedAt == now,
+            "snapshot: a saved reading shows its capture time, not the time it was read");
+        var oldFirst = AiUsageServiceSnapshot.Initial("antigravity").Apply(AiUsageResult.StaleReading(saved, AiUsageErrorCodes.Stale), now);
+        Check(oldFirst is { Status: AiUsageStatus.Error, Stale: true, Windows.Count: 1, ErrorCode: AiUsageErrorCodes.Stale } && oldFirst.FetchedAt == captured,
+            "snapshot: an old saved reading on first read is shown, marked stale with the reason");
+        var newer = savedOk.Apply(AiUsageResult.StaleReading(saved with { Plan = "Older", ObservedAt = captured.AddMinutes(-60) }, AiUsageErrorCodes.PeerFailed), now.AddMinutes(10));
+        Check(newer is { Status: AiUsageStatus.Error, Stale: true, Plan: "Pro", ErrorCode: AiUsageErrorCodes.PeerFailed } && newer.FetchedAt == captured,
+            "snapshot: an older saved reading never replaces a newer one on screen");
     }
 
     private async Task VerifyServiceAsync()
@@ -292,6 +375,7 @@ internal sealed class AiUsageVerifier
             ["claude"] = AiUsageResult.Success(new AiUsageReading("Max 5x", [new AiUsageWindow("a", "weekly", "Fable", 35, null, 10080)])),
             ["claude-api"] = AiUsageResult.Success(new AiUsageReading(null, [], [new AiUsageBalance("planCredit", "API credit (Max)", 100m, "usd", null)])),
             ["gemini"] = AiUsageResult.SignedOut(),
+            ["antigravity"] = AiUsageResult.Success(new AiUsageReading("Gemini 4 Hydrogen (High)", [new AiUsageWindow("g", "weekly", null, 5.1, null, 10080)], ObservedAt: DateTimeOffset.Parse("2026-11-18T00:59:00Z"))),
             ["colab"] = AiUsageResult.SignedOut(),
             ["muse"] = AiUsageResult.Failure(AiUsageErrorCodes.Changed)
         };
@@ -321,6 +405,30 @@ internal sealed class AiUsageVerifier
         now = now.AddMinutes(31);
         await service.RefreshAsync(["gemini"], force: false);
         Check(calls["gemini"] == 3, "service: a signed-out service is re-checked after 30 minutes");
+
+        // A saved reading shown as current turns old five minutes after its capture, so it is re-read on the
+        // next panel open even within two minutes of the last check.
+        var peerCalls = 0;
+        var peerNow = DateTimeOffset.Parse("2026-11-19T10:04:50Z");
+        using (var peerService = new AiUsageService(Path.Combine(root, "codex8"), Path.Combine(root, "web8"), (_, _) =>
+        {
+            peerCalls++;
+            return Task.FromResult(AiUsageResult.Success(new AiUsageReading("Gemini 4 Hydrogen (High)", [
+                new AiUsageWindow("antigravity:gemini-5h", "session", null, 0, null, 300, State: "unreadable"),
+                new AiUsageWindow("antigravity:gemini-weekly", "weekly", null, 5.1, null, 10080)], ObservedAt: DateTimeOffset.Parse("2026-11-19T10:00:00Z"))));
+        }, () => peerNow))
+        {
+            await peerService.RefreshAsync(["antigravity"], force: false);
+            var wire = JsonSerializer.SerializeToNode(peerService.BuildState([]), BridgeJson.Options)!["services"]!.AsArray()
+                .Single(node => node!["id"]!.GetValue<string>() == "antigravity")!;
+            Check(wire["freshUntil"]?.GetValue<string>() == DateTimeOffset.Parse("2026-11-19T10:05:00Z").ToString("O")
+                && wire["windows"]![0]!["usedPercent"] is null && wire["windows"]![0]!["state"]?.GetValue<string>() == "unreadable"
+                && wire["windows"]![1]!["usedPercent"]!.GetValue<double>() == 5.1,
+                "service: the wire state says when a saved reading turns old, and carries no number for an unreadable row");
+            peerNow = peerNow.AddSeconds(20);
+            await peerService.RefreshAsync(["antigravity"], force: false);
+            Check(peerCalls == 2, "service: a saved reading past its five minutes is re-read on the next panel open");
+        }
 
         // A reading that started before a sign-in or sign-out must not land afterwards.
         var gate = new TaskCompletionSource<AiUsageResult>(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -390,7 +498,9 @@ internal sealed class AiUsageVerifier
         var state = JsonSerializer.SerializeToNode(service.BuildState(["muse"]), BridgeJson.Options)!;
         var services = state["services"]!.AsArray();
         JsonNode Service(string id) => services.Single(node => node!["id"]!.GetValue<string>() == id)!;
-        Check(services.Count == 6 && Service("muse")["visible"]!.GetValue<bool>() == false && Service("codex")["signIn"]!.GetValue<string>() == "codex"
+        Check(services.Count == 7 && Service("muse")["visible"]!.GetValue<bool>() == false && Service("codex")["signIn"]!.GetValue<string>() == "codex"
+            && Service("antigravity")["signIn"]!.GetValue<string>() == "peer" && Service("antigravity")["sharedWith"] is null
+            && Service("antigravity")["fetchedAt"]!.GetValue<string>() == DateTimeOffset.Parse("2026-11-18T00:59:00Z").ToString("O")
             && Service("claude")["windows"]![0]!["model"]!.GetValue<string>() == "Fable"
             && Service("colab")["signIn"]!.GetValue<string>() == "shared" && Service("colab")["sharedWith"]!.GetValue<string>() == "gemini"
             && Service("claude-api")["balances"]![0]!["amount"]!.GetValue<decimal>() == 100m, "service: wire state lists all services, balances and the shared sign-in");
@@ -447,6 +557,156 @@ internal sealed class AiUsageVerifier
         }
     }
 
+    /// <summary>A response body that ends abruptly after its first bytes, like a connection dropped mid-answer.</summary>
+    private sealed class CutOffBody : Stream
+    {
+        private bool _started;
+        public override bool CanRead => true;
+        public override bool CanSeek => false;
+        public override bool CanWrite => false;
+        public override long Length => throw new NotSupportedException();
+        public override long Position { get => throw new NotSupportedException(); set => throw new NotSupportedException(); }
+        public override void Flush() { }
+        public override int Read(byte[] buffer, int offset, int count) => ReadAsync(buffer.AsMemory(offset, count)).AsTask().GetAwaiter().GetResult();
+        public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            if (_started) throw new HttpIOException(HttpRequestError.ResponseEnded, "cut off");
+            _started = true;
+            var start = "{\"sample\":"u8;
+            start.CopyTo(buffer.Span);
+            return ValueTask.FromResult(start.Length);
+        }
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+    }
+
+    private sealed class FakeGeminiPeer(Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> respond) : HttpMessageHandler
+    {
+        public List<(string Method, string Path, string? Origin, string Authority)> Requests { get; } = [];
+
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            Requests.Add((request.Method.Method, request.RequestUri!.AbsolutePath,
+                request.Headers.TryGetValues("Origin", out var origin) ? origin.Single() : null, request.RequestUri.Authority));
+            return respond(request, cancellationToken);
+        }
+    }
+
+    /// <summary>
+    /// The Antigravity reader against a fake Gemini Peer: when it renews (only stale or forced), the
+    /// exact address and Origin it sends, and that every failure keeps the reason instead of 0%.
+    /// </summary>
+    private async Task VerifyAntigravityReaderAsync()
+    {
+        var now = DateTimeOffset.Parse("2026-11-19T03:35:00Z");
+        var freshAt = now.AddMinutes(-1);
+        var oldAt = now.AddMinutes(-30);
+        static Task<HttpResponseMessage> Answer(string body, System.Net.HttpStatusCode status = System.Net.HttpStatusCode.OK) =>
+            Task.FromResult(new HttpResponseMessage(status) { Content = new StringContent(body, System.Text.Encoding.UTF8, "application/json") });
+        async Task<(AiUsageResult Result, FakeGeminiPeer Peer)> Read(bool force, Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> respond)
+        {
+            var peer = new FakeGeminiPeer(respond);
+            using var reader = new AiUsageAntigravityReader(null, peer, () => now);
+            return (await reader.ReadAsync(force, CancellationToken.None), peer);
+        }
+        static bool IsPost(HttpRequestMessage request) => request.Method == HttpMethod.Post;
+
+        var (fresh, freshPeer) = await Read(false, (_, _) => Answer(AntigravityAnswer(freshAt)));
+        Check(fresh.Status == AiUsageStatus.Ok && freshPeer.Requests is [("GET", "/history/api/usage", null, "127.0.0.1:17848")],
+            "antigravity reader: a fresh saved reading is used without asking the peer to run agy");
+
+        var (renewed, renewedPeer) = await Read(false, (request, _) => Answer(AntigravityAnswer(IsPost(request) ? freshAt : oldAt)));
+        Check(renewed is { Status: AiUsageStatus.Ok, Reading.ObservedAt: { } at } && at == freshAt
+            && renewedPeer.Requests is [("GET", _, _, _), ("POST", "/history/api/usage/refresh", "http://127.0.0.1:17848", "127.0.0.1:17848")],
+            "antigravity reader: a stale reading is renewed with a POST from the peer's own origin");
+
+        var (forced, forcedPeer) = await Read(true, (_, _) => Answer(AntigravityAnswer(freshAt)));
+        Check(forced.Status == AiUsageStatus.Ok && forcedPeer.Requests.Count(r => r.Method == "POST") == 1, "antigravity reader: the refresh button always renews");
+
+        var (forcedKept, _) = await Read(true, (request, _) => IsPost(request)
+            ? Answer("{}", System.Net.HttpStatusCode.InternalServerError) : Answer(AntigravityAnswer(freshAt)));
+        Check(forcedKept is { Status: AiUsageStatus.Error, ErrorCode: AiUsageErrorCodes.Unavailable, Reading.ObservedAt: { } keptAt } && keptAt == freshAt,
+            "antigravity reader: a failed refresh-button renewal keeps the saved values but is not shown as updated");
+
+        var (droppedPost, _) = await Read(true, (request, _) => IsPost(request)
+            ? throw new HttpRequestException("reset", null, System.Net.HttpStatusCode.OK) : Answer(AntigravityAnswer(freshAt)));
+        Check(droppedPost is { Status: AiUsageStatus.Error, ErrorCode: AiUsageErrorCodes.Network, Reading: not null },
+            "antigravity reader: a renewal that fails to connect is reported as a connection problem with the saved values");
+
+        var (cutOff, _) = await Read(false, (request, _) => IsPost(request)
+            ? Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.OK) { Content = new StreamContent(new CutOffBody()) })
+            : Answer(AntigravityAnswer(oldAt)));
+        Check(cutOff is { Status: AiUsageStatus.Error, ErrorCode: AiUsageErrorCodes.Network, Reading: not null },
+            "antigravity reader: a renewal whose answer is cut off mid-body keeps the saved values with the reason");
+
+        var (renewFailed, _) = await Read(false, (request, _) => IsPost(request)
+            ? Answer("{}", System.Net.HttpStatusCode.InternalServerError) : Answer(AntigravityAnswer(oldAt)));
+        Check(renewFailed is { Status: AiUsageStatus.Error, ErrorCode: AiUsageErrorCodes.Unavailable, Reading.Windows.Count: 2 },
+            "antigravity reader: a failed renewal shows the old values with the reason");
+
+        var (peerFailed, _) = await Read(false, (request, _) => Answer(AntigravityAnswer(oldAt,
+            IsPost(request) ? ""","lastAttempt":{"at":"2026-11-19T03:34:59.000Z","ok":false,"error":"x"}""" : "")));
+        Check(peerFailed is { Status: AiUsageStatus.Error, ErrorCode: AiUsageErrorCodes.PeerFailed, Reading: not null },
+            "antigravity reader: the peer's failed agy read is reported with the old values");
+
+        var (firstCapture, firstPeer) = await Read(false, (request, _) => IsPost(request)
+            ? Answer(AntigravityAnswer(freshAt)) : Answer("""{"sample":null,"stale":true,"lastAttempt":null}"""));
+        Check(firstCapture.Status == AiUsageStatus.Ok && firstPeer.Requests.Count == 2, "antigravity reader: with no saved reading the peer is asked to read one");
+
+        var (refused, refusedPeer) = await Read(false, (_, _) => Answer("""{"error":"x"}""", System.Net.HttpStatusCode.Forbidden));
+        Check(refused is { Status: AiUsageStatus.Error, ErrorCode: AiUsageErrorCodes.Changed, Reading: null } && refusedPeer.Requests.Count == 1,
+            "antigravity reader: a refused request is a changed interface and is not retried as a POST");
+
+        var (garbled, garbledPeer) = await Read(false, (_, _) => Answer("<html></html>"));
+        Check(garbled is { ErrorCode: AiUsageErrorCodes.Changed, Reading: null } && garbledPeer.Requests.Count == 2,
+            "antigravity reader: an unreadable answer is a changed interface, and the peer is still asked to renew");
+
+        var huge = new string(' ', 300 * 1024) + "{}";
+        var (oversized, _) = await Read(false, (request, _) => IsPost(request) ? Answer(huge) : Answer(huge));
+        Check(oversized is { Status: AiUsageStatus.Error, ErrorCode: AiUsageErrorCodes.Changed, Reading: null }, "antigravity reader: an answer over 256 KiB is refused, not parsed");
+        var (oversizedThenOk, _) = await Read(false, (request, _) => IsPost(request) ? Answer(AntigravityAnswer(freshAt)) : Answer(huge));
+        Check(oversizedThenOk.Status == AiUsageStatus.Ok, "antigravity reader: after a refused answer a good renewal is used");
+
+        using (var cancel = new CancellationTokenSource())
+        {
+            var waiting = new FakeGeminiPeer(async (request, token) =>
+            {
+                if (!IsPost(request)) return await Answer(AntigravityAnswer(oldAt));
+                cancel.CancelAfter(100);
+                await Task.Delay(Timeout.Infinite, token);
+                throw new InvalidOperationException("unreachable");
+            });
+            using var reader = new AiUsageAntigravityReader(null, waiting, () => now);
+            try
+            {
+                await reader.ReadAsync(false, cancel.Token);
+                Check(false, "antigravity reader: closing the app during a renewal cancels it instead of reporting a timeout");
+            }
+            catch (OperationCanceledException)
+            {
+                Check(true, "antigravity reader: closing the app during a renewal cancels it instead of reporting a timeout");
+            }
+        }
+
+        var (hung, hungPeer) = await Read(false, async (_, token) =>
+        {
+            await Task.Delay(Timeout.Infinite, token);
+            throw new InvalidOperationException("unreachable");
+        });
+        Check(hung is { ErrorCode: AiUsageErrorCodes.Timeout, Reading: null } && hungPeer.Requests.Count == 1,
+            "antigravity reader: a hung peer times out once instead of being asked again");
+
+        // Nothing listens on a port that was just released: the real socket path reports a stopped peer.
+        var probe = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, 0);
+        probe.Start();
+        var port = ((System.Net.IPEndPoint)probe.LocalEndpoint).Port;
+        probe.Stop();
+        using (var reader = new AiUsageAntigravityReader(new Uri($"http://127.0.0.1:{port}"), clock: () => now))
+            Check(await reader.ReadAsync(false, CancellationToken.None) is { Status: AiUsageStatus.Error, ErrorCode: AiUsageErrorCodes.PeerMissing, Reading: null },
+                "antigravity reader: a stopped Gemini Peer is reported as not running, not 0%");
+    }
+
     /// <summary>
     /// The hidden view's in-page reader against a local HTTPS origin (WebView2 virtual host): repeated
     /// reads in one document, the size cap, the origin lock, and the Muse script evaluated twice.
@@ -494,17 +754,17 @@ internal sealed class AiUsageVerifier
         {
             ProviderOrder = ["controls", "calculator", "calendar", "clipboard", "sticky", "assets", "timer"],
             ProviderVisibility = new(StringComparer.OrdinalIgnoreCase) { ["timer"] = false },
-            AiUsageHiddenServices = ["muse", "unknown", "muse"]
+            AiUsageHiddenServices = ["muse", "unknown", "muse", "antigravity"]
         };
         var normalized = UserSettingsStore.Normalize(old, providers.ProviderIds);
         Check(normalized.ProviderOrder[^1] == "ai-usage" && normalized.ProviderVisibility["ai-usage"], "settings: existing users get the new tool at the end, visible");
-        Check(normalized.AiUsageHiddenServices.SequenceEqual(["muse"]), "settings: hidden services keep only known ids");
+        Check(normalized.AiUsageHiddenServices.SequenceEqual(["muse", "antigravity"]), "settings: hidden services keep only known ids");
         var clone = normalized.Clone();
         clone.AiUsageHiddenServices.Add("codex");
-        Check(normalized.AiUsageHiddenServices.Count == 1, "settings: clone copies the hidden list");
+        Check(normalized.AiUsageHiddenServices.Count == 2, "settings: clone copies the hidden list");
         var store = UserSettingsStore.CreateTemporary("AiUsageSettingsVerify");
         store.Save(normalized);
-        Check(store.Load(providers.ProviderIds).AiUsageHiddenServices.SequenceEqual(["muse"]), "settings: hidden services persist");
+        Check(store.Load(providers.ProviderIds).AiUsageHiddenServices.SequenceEqual(["muse", "antigravity"]), "settings: hidden services persist");
     }
 
     private async Task VerifyBridgeAndUiAsync(Action<string> log)
@@ -527,6 +787,9 @@ internal sealed class AiUsageVerifier
                 new AiUsageBalance("purchasedCredit", null, 12.34m, "usd", now.AddDays(26)),
                 new AiUsageBalance("purchasedCredit", null, 0.004m, "usd", now.AddDays(90))])),
             ["gemini"] = AiUsageResult.SignedOut(),
+            ["antigravity"] = AiUsageResult.Success(new AiUsageReading("Gemini 4 Hydrogen (High)", [
+                new AiUsageWindow("antigravity:gemini-5h", "session", null, 0, now.AddHours(4).AddMinutes(30), 300),
+                new AiUsageWindow("antigravity:gemini-weekly", "weekly", null, 5.1, now.AddDays(5).AddHours(20), 10080)], ObservedAt: now.AddMinutes(-1))),
             ["colab"] = AiUsageResult.Success(new AiUsageReading(null, [], [new AiUsageBalance("computeUnits", null, 87.6m, "units", null, 0m)])),
             ["muse"] = AiUsageResult.Failure(AiUsageErrorCodes.Changed)
         };
@@ -552,7 +815,7 @@ internal sealed class AiUsageVerifier
         }
 
         var initial = await Call(panel, "aiUsage.getState", new { refresh = true });
-        Check(initial["result"]?["services"]?.AsArray().Count == 6, "bridge: panel reads the usage state");
+        Check(initial["result"]?["services"]?.AsArray().Count == 7, "bridge: panel reads the usage state");
         using var wait = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         while (controller.AiUsageForVerify!.Snapshot("muse").Status == AiUsageStatus.Idle) await Task.Delay(20, wait.Token);
         Check((await Call(panel, "aiUsage.signIn", new { service = "claude" }))["error"]?["code"]?.GetValue<string>() == "unknown_method",
@@ -575,7 +838,7 @@ internal sealed class AiUsageVerifier
         Check(focus.Length == 1 && focus[0]["payload"]?["category"]?.GetValue<string>() == "ai" && afterFocus["result"]?["openSettingsCategory"] is null,
             "bridge: a loaded Settings page switches to AI without leaving a pending jump");
 
-        await VerifyPanelUiAsync(controller, store, log);
+        await VerifyPanelUiAsync(controller, store, readings, log);
         await VerifySettingsUiAsync(controller, store, log);
 
         var hidden = await Call(settings, "aiUsage.setVisible", new { service = "muse", visible = false });
@@ -584,7 +847,7 @@ internal sealed class AiUsageVerifier
             && store.Load(providers.ProviderIds).AiUsageHiddenServices.SequenceEqual(["muse"]), "bridge: hiding a service is saved");
     }
 
-    private async Task VerifyPanelUiAsync(PanelBridgeController controller, UserSettingsStore store, Action<string> log)
+    private async Task VerifyPanelUiAsync(PanelBridgeController controller, UserSettingsStore store, Dictionary<string, AiUsageResult> readings, Action<string> log)
     {
         var window = new Window
         {
@@ -608,7 +871,7 @@ internal sealed class AiUsageVerifier
                 await Task.Delay(100, timeout.Token);
             await dispatcher.ProcessRawMessageAsync("""{"id":"select","method":"provider.select","params":{"id":"ai-usage"}}""");
             await dispatcher.PostEventAsync("state.changed", controller.BuildState(BridgeSurface.Panel));
-            while (await web.ExecuteScriptAsync("document.querySelectorAll('.hp-usage-card').length === 6") != "true")
+            while (await web.ExecuteScriptAsync("document.querySelectorAll('.hp-usage-card').length === 7") != "true")
                 await Task.Delay(100, timeout.Token);
             async Task<bool> Js(string expression) => await web.ExecuteScriptAsync(expression) == "true";
             Check(await Js("document.querySelector('[data-provider-title]').textContent === 'AI Usage'"), "panel UI: title");
@@ -637,11 +900,95 @@ internal sealed class AiUsageVerifier
             Check(await Js("[...document.querySelectorAll('[data-service=codex] .hp-usage-balance .hp-usage-value')].map(n => n.textContent).join('|') === '12,345.68|無制限|読み取れません'"),
                 "panel UI: unlimited and unreadable credits are shown as such, never 0");
             Check(await Js("!document.querySelector('[data-service=colab] .hp-usage-bar') && !document.querySelector('[data-service=\"claude-api\"] .hp-usage-bar')"), "panel UI: balances are amounts, not bars");
+            Check(await Js("[...document.querySelectorAll('[data-service=antigravity] .hp-usage-label')].map(n => n.textContent).join('|') === '5時間|1週間'"
+                + " && [...document.querySelectorAll('[data-service=antigravity] .hp-usage-value')].map(n => n.textContent).join('|') === '0%|5.1%'"),
+                "panel UI: Antigravity five-hour and weekly rows with used percentages");
+            Check(await Js("document.querySelector('[data-service=antigravity] .hp-usage-mark').textContent === 'AG'"
+                + " && document.querySelector('[data-service=antigravity] .hp-usage-model').textContent === 'モデル: Gemini 4 Hydrogen (High)'"
+                + " && !document.querySelector('[data-service=antigravity] .hp-usage-plan')"
+                + " && document.querySelector('[data-service=antigravity] .hp-usage-meta').textContent.endsWith('更新')"),
+                "panel UI: Antigravity mark, model name and capture time");
             Check(await Js("document.querySelector('.hp-usage').scrollWidth <= document.querySelector('.hp-usage').clientWidth"), "panel UI: no horizontal overflow");
             await Capture(web, "panel");
             await web.ExecuteScriptAsync("document.querySelector('.hp-usage').scrollTop = 10000");
             await Task.Delay(150, timeout.Token);
             await Capture(web, "panel-bottom");
+            // The Gemini Peer stops: the last values stay, marked as old, with the reason; never 0% or "updated".
+            readings["antigravity"] = AiUsageResult.Failure(AiUsageErrorCodes.PeerMissing);
+            await controller.AiUsageForVerify!.RefreshAsync(["antigravity"], force: true);
+            await dispatcher.PostEventAsync("aiUsage.changed", controller.AiUsageForVerify.BuildState(controller.CurrentSettings.AiUsageHiddenServices));
+            while (!await Js("!!document.querySelector('[data-service=antigravity] .hp-usage-error')")) await Task.Delay(100, timeout.Token);
+            Check(await Js("document.querySelector('[data-service=antigravity] .hp-usage-error').textContent === '前回の値を表示中。Gemini Peerが動いていません。起動すると表示できます。'"
+                + " && document.querySelector('[data-service=antigravity] .hp-usage-meta').textContent.endsWith('の値')"
+                + " && document.querySelector('[data-service=antigravity] .hp-usage-meta').classList.contains('is-warning')"
+                + " && [...document.querySelectorAll('[data-service=antigravity] .hp-usage-row')].every(n => n.classList.contains('is-stale'))"),
+                "panel UI: a stopped Gemini Peer keeps the last values marked old, with the reason");
+            await web.ExecuteScriptAsync("document.querySelector('[data-service=antigravity]').scrollIntoView({block:'center'})");
+            await Task.Delay(150, timeout.Token);
+            await Capture(web, "panel-antigravity-stopped");
+            readings["antigravity"] = AiUsageResult.StaleReading(new AiUsageReading("Gemini 4 Hydrogen (High)", [
+                new AiUsageWindow("antigravity:gemini-5h", "session", null, 0, DateTimeOffset.UtcNow.AddHours(2), 300, State: "unreadable"),
+                new AiUsageWindow("antigravity:gemini-weekly", "weekly", null, 40, DateTimeOffset.UtcNow.AddDays(3), 10080)], ObservedAt: DateTimeOffset.UtcNow.AddHours(-2)), AiUsageErrorCodes.Stale);
+            controller.AiUsageForVerify.BeginAccountChange("antigravity");
+            await controller.AiUsageForVerify.RefreshAsync(["antigravity"], force: true);
+            await dispatcher.PostEventAsync("aiUsage.changed", controller.AiUsageForVerify.BuildState(controller.CurrentSettings.AiUsageHiddenServices));
+            while (!await Js("[...document.querySelectorAll('[data-service=antigravity] .hp-usage-value')].map(n => n.textContent).join('|') === '取得できません|40%'"))
+                await Task.Delay(100, timeout.Token);
+            Check(await Js("document.querySelector('[data-service=antigravity] .hp-usage-error').textContent === '古い値です（読み直せていません）。少し待って更新してください。'"
+                + " && document.querySelector('[data-service=antigravity] .hp-usage-meta').textContent.endsWith('の値')"),
+                "panel UI: an old saved reading on first read is shown as old, not as updated");
+            Check(await Js("!document.querySelector('[data-service=antigravity] .hp-usage-row.is-unreadable .hp-usage-fill')"
+                + " && document.querySelector('[data-service=antigravity] .hp-usage-row.is-unreadable .hp-usage-bar').getAttribute('aria-hidden') === 'true'"
+                + " && !document.querySelector('[data-service=antigravity] .hp-usage-row.is-unreadable [role=meter]')"),
+                "panel UI: an unreadable window says so and draws no bar value");
+
+            // A reading the service called current, but whose capture is now over five minutes old.
+            readings["antigravity"] = AiUsageResult.Success(new AiUsageReading("Gemini 4 Hydrogen (High)", [
+                new AiUsageWindow("antigravity:gemini-weekly", "weekly", null, 7, DateTimeOffset.UtcNow.AddDays(3), 10080)], ObservedAt: DateTimeOffset.UtcNow.AddMinutes(-6)));
+            controller.AiUsageForVerify.BeginAccountChange("antigravity");
+            await controller.AiUsageForVerify.RefreshAsync(["antigravity"], force: true);
+            while (!await Js("document.querySelector('[data-service=antigravity] .hp-usage-value')?.textContent === '7%'")) await Task.Delay(100, timeout.Token);
+            Check(await Js("document.querySelector('[data-service=antigravity] .hp-usage-meta').textContent.endsWith('の値')"
+                + " && !document.querySelector('[data-service=antigravity] .hp-usage-meta').textContent.includes('更新')"
+                + " && document.querySelector('[data-service=antigravity] .hp-usage-error')?.textContent.startsWith('古い値です')"),
+                "panel UI: a saved reading past its five minutes is drawn as old, not as updated");
+
+            // Shown as current, then the five minutes run out while the panel stays open: it turns old at once.
+            readings["antigravity"] = AiUsageResult.Success(new AiUsageReading("Gemini 4 Hydrogen (High)", [
+                new AiUsageWindow("antigravity:gemini-weekly", "weekly", null, 8, DateTimeOffset.UtcNow.AddDays(3), 10080)],
+                ObservedAt: DateTimeOffset.UtcNow - AiUsageParsers.AntigravityFreshFor + TimeSpan.FromSeconds(4)));
+            await controller.AiUsageForVerify.RefreshAsync(["antigravity"], force: true);
+            while (!await Js("document.querySelector('[data-service=antigravity] .hp-usage-value')?.textContent === '8%'")) await Task.Delay(100, timeout.Token);
+            var shownAsCurrent = await Js("document.querySelector('[data-service=antigravity] .hp-usage-meta').textContent.endsWith('更新')");
+            var expiredAt = DateTimeOffset.UtcNow.AddSeconds(10);
+            while (DateTimeOffset.UtcNow < expiredAt && !await Js("document.querySelector('[data-service=antigravity] .hp-usage-meta').textContent.endsWith('の値')"))
+                await Task.Delay(200, timeout.Token);
+            Check(shownAsCurrent && await Js("document.querySelector('[data-service=antigravity] .hp-usage-meta').textContent.endsWith('の値')"),
+                "panel UI: an open panel turns a reading old when its five minutes run out, without waiting for the 30-second tick");
+
+            // A recent capture without a single value: rows say unavailable and the header is not "updated".
+            readings["antigravity"] = AiUsageResult.StaleReading(new AiUsageReading("Gemini 4 Hydrogen (High)", [
+                new AiUsageWindow("antigravity:gemini-5h", "session", null, 0, null, 300, State: "unreadable"),
+                new AiUsageWindow("antigravity:gemini-weekly", "weekly", null, 0, null, 10080, State: "unreadable")],
+                ObservedAt: DateTimeOffset.UtcNow.AddSeconds(-30)), AiUsageErrorCodes.NoValues);
+            controller.AiUsageForVerify.BeginAccountChange("antigravity");
+            await controller.AiUsageForVerify.RefreshAsync(["antigravity"], force: true);
+            while (!await Js("document.querySelectorAll('[data-service=antigravity] .hp-usage-row.is-unreadable').length === 2")) await Task.Delay(100, timeout.Token);
+            Check(await Js("document.querySelector('[data-service=antigravity] .hp-usage-meta').textContent.endsWith('の値')"
+                + " && document.querySelector('[data-service=antigravity] .hp-usage-error').textContent === '記録に利用枠の値がありませんでした。少し待って更新してください。'"),
+                "panel UI: a capture with no values is not shown as updated");
+            readings["antigravity"] = AiUsageResult.Failure(AiUsageErrorCodes.NoSnapshot);
+            controller.AiUsageForVerify.BeginAccountChange("antigravity");
+            await controller.AiUsageForVerify.RefreshAsync(["antigravity"], force: true);
+            await dispatcher.PostEventAsync("aiUsage.changed", controller.AiUsageForVerify.BuildState(controller.CurrentSettings.AiUsageHiddenServices));
+            while (await Js("!!document.querySelector('[data-service=antigravity] .hp-usage-row')")) await Task.Delay(100, timeout.Token);
+            Check(await Js("document.querySelector('[data-service=antigravity] .hp-usage-error').textContent === 'Gemini Peerにまだ利用枠の記録がありません。少し待って更新してください。'"
+                + " && !document.querySelector('[data-service=antigravity] .hp-usage-bar')"),
+                "panel UI: with no reading at all there is no 0% bar, only the reason");
+            // Back to a fresh reading for the Settings checks that follow.
+            readings["antigravity"] = AiUsageResult.Success(new AiUsageReading("Gemini 4 Hydrogen (High)", [
+                new AiUsageWindow("antigravity:gemini-weekly", "weekly", null, 5.1, DateTimeOffset.UtcNow.AddDays(5), 10080)], ObservedAt: DateTimeOffset.UtcNow));
+            await controller.AiUsageForVerify.RefreshAsync(["antigravity"], force: true);
             log("PASS ai-usage panel UI rendered in WebView2");
         }
         finally
@@ -661,7 +1008,7 @@ internal sealed class AiUsageVerifier
         {
             window.Show();
             while (window.WebViewForVerify?.CoreWebView2 is null
-                || await window.WebViewForVerify.ExecuteScriptAsync("document.querySelectorAll('.ai-usage-settings-row').length === 6") != "true")
+                || await window.WebViewForVerify.ExecuteScriptAsync("document.querySelectorAll('.ai-usage-settings-row').length === 7") != "true")
                 await Task.Delay(100, timeout.Token);
             var web = window.WebViewForVerify;
             await web.ExecuteScriptAsync("document.querySelector('[data-category=ai]').click(); document.querySelector('[data-ai-usage-settings]').scrollIntoView({block:'start'})");
@@ -680,6 +1027,10 @@ internal sealed class AiUsageVerifier
                 "settings UI: Claude API has its own sign-in");
             Check(await Js("[...document.querySelectorAll('[data-ai-usage-settings] [data-service=gemini] button')].some(b => b.textContent === 'サインアウト')"),
                 "settings UI: Gemini offers sign-out while Colab still reads with its Google sign-in");
+            Check(await Js("document.querySelectorAll('[data-ai-usage-settings] [data-service=antigravity] button').length === 0"
+                + " && document.querySelector('[data-ai-usage-settings] [data-service=antigravity] .ai-usage-settings-state').textContent === 'Gemini Peerから取得 · Gemini 4 Hydrogen (High)'"
+                + " && document.querySelector('[data-ai-usage-settings] [data-service=antigravity]').textContent.includes('サインインは要りません')"),
+                "settings UI: Antigravity is read from the Gemini Peer, with no sign-in buttons");
             await Task.Delay(150, timeout.Token);
             await Capture(web, "settings");
             log("PASS ai-usage Settings UI rendered in WebView2");
@@ -748,7 +1099,7 @@ internal sealed class AiUsageVerifier
             : only.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
         if (services.Count == 0 || services.Any(id => !AiUsageServiceIds.IsKnown(id)))
         {
-            log("FAIL unknown service in HOVERPOCKET_AI_USAGE_ONLY; use codex, claude, gemini, muse");
+            log("FAIL unknown service in HOVERPOCKET_AI_USAGE_ONLY; use " + string.Join(", ", AiUsageServiceIds.All));
             return 2;
         }
         var started = DateTimeOffset.UtcNow;

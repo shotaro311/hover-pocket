@@ -1,6 +1,7 @@
 /**
  * Settings › AI › AI usage: which services the panel shows and the sign-in for each.
  * Claude, Gemini and Muse open a HoverPocket sign-in window; Codex reuses the chat's ChatGPT login.
+ * Antigravity is read from the local Gemini Peer and has no sign-in here.
  */
 export function createAiUsageSettings(root, request, on) {
   let usage = null;
@@ -45,11 +46,11 @@ export function createAiUsageSettings(root, request, on) {
   function paint() {
     find("title").textContent = tx("AI使用状況", "AI usage");
     find("note").textContent = tx(
-      "パネルの「AI Usage」に、5時間・1週間・モデル別（ClaudeのFableなど）の使用率を表示します。表示するサービスを選び、それぞれサインインしてください。",
-      "The AI Usage tool shows five-hour, weekly, and model-specific limits (such as Claude's Fable). Choose services and sign in to each.");
+      "パネルの「AI Usage」に、5時間・1週間・モデル別（ClaudeのFableなど）の使用率を表示します。表示するサービスを選び、サインインが要るものはサインインしてください。",
+      "The AI Usage tool shows five-hour, weekly, and model-specific limits (such as Claude's Fable). Choose services and sign in where needed.");
     find("privacy").textContent = tx(
-      "Claude・Claude Console・Gemini・MuseはHoverPocketの窓で、Codexは普段のブラウザーでOpenAIのログイン画面からサインインします（チャット・音声と共通の1つのログイン）。パスワードはHoverPocketに渡りません。ログイン状態はこのPCのHoverPocket専用の保存場所にサービスごとに残り、ColabだけはGeminiと同じGoogleのログインを使います。使用状況を読むために各サービスのページを画面に出さずに開き、パネルには使用率・リセット時刻・プラン名・枠の名前と、残高・期限・1時間あたりの消費だけを表示します。",
-      "Claude, Claude Console, Gemini and Muse sign in inside a HoverPocket window; Codex signs in on OpenAI's page in your usual browser (one login shared with the chat and voice). HoverPocket never receives your password. Each session stays in its own HoverPocket-only profile on this PC; Colab alone uses Gemini's Google sign-in. To read usage, HoverPocket opens each service's pages off screen, and the panel shows only percentages, reset times, plan and limit names, balances, expiry dates and hourly consumption.");
+      "Claude・Claude Console・Gemini・MuseはHoverPocketの窓で、Codexは普段のブラウザーでOpenAIのログイン画面からサインインします（チャット・音声と共通の1つのログイン）。パスワードはHoverPocketに渡りません。ログイン状態はこのPCのHoverPocket専用の保存場所にサービスごとに残り、ColabだけはGeminiと同じGoogleのログインを使います。使用状況を読むために各サービスのページを画面に出さずに開き、パネルには使用率・リセット時刻・プラン名・枠の名前と、残高・期限・1時間あたりの消費だけを表示します。Antigravityは、このPCで動くGemini Peerから読みます（この欄でHoverPocketが接続するのはGemini Peerだけです）。",
+      "Claude, Claude Console, Gemini and Muse sign in inside a HoverPocket window; Codex signs in on OpenAI's page in your usual browser (one login shared with the chat and voice). HoverPocket never receives your password. Each session stays in its own HoverPocket-only profile on this PC; Colab alone uses Gemini's Google sign-in. To read usage, HoverPocket opens each service's pages off screen, and the panel shows only percentages, reset times, plan and limit names, balances, expiry dates and hourly consumption. Antigravity is read from the Gemini Peer running on this PC (for it, HoverPocket connects only to the Gemini Peer).");
     const list = find("list");
     list.replaceChildren();
     for (const service of usage?.services ?? []) list.append(row(service));
@@ -80,8 +81,8 @@ export function createAiUsageSettings(root, request, on) {
     const buttons = document.createElement("div");
     buttons.className = "settings-button-row";
     const pending = busy.get(service.id);
-    if (service.signIn === "shared") {
-      // Colab reads with Gemini's Google sign-in; it has no sign-in of its own.
+    if (service.signIn === "shared" || service.signIn === "peer") {
+      // Colab reads with Gemini's Google sign-in; Antigravity is read from the Gemini Peer. No sign-in of their own.
     } else if (service.signIn === "codex") {
       if (service.status !== "ok") buttons.append(button(
         pending === "signIn" ? tx("ブラウザでログイン中…", "Signing in in your browser…") : tx("ChatGPTにログイン", "Sign in to ChatGPT"),
@@ -111,6 +112,8 @@ export function createAiUsageSettings(root, request, on) {
 
   function statusText(service) {
     if (service.refreshing) return tx("確認中…", "Checking…");
+    if (service.signIn === "peer" && service.status === "ok")
+      return [tx("Gemini Peerから取得", "Read from Gemini Peer"), service.plan].filter(Boolean).join(" · ");
     switch (service.status) {
       case "ok": return [tx("サインイン済み", "Signed in"), service.plan].filter(Boolean).join(" · ");
       case "signedOut": return service.signIn === "shared"
@@ -125,6 +128,8 @@ export function createAiUsageSettings(root, request, on) {
     switch (id) {
       case "codex": return tx("チャット・音声と同じ1つのChatGPTログインを使います。", "Uses the one ChatGPT login shared with the chat and voice.");
       case "gemini": return tx("Googleアカウントでgemini.google.comにサインインします。Colabもこのサインインを使います。", "Sign in to gemini.google.com with your Google account. Colab uses this sign-in too.");
+      case "antigravity": return tx("Antigravity CLI（agy）のGeminiモデルの5時間と1週間の枠です。Geminiアプリの枠とは別です。このPCで動くGemini Peerが読み取るので、HoverPocketでのサインインは要りません。読み直すときはGemini Peerがagyの /usage を一度開くため、agyにログインしている必要があります（モデルへの依頼はしないので、枠は使いません）。",
+        "Five-hour and weekly limits of Gemini models in the Antigravity CLI (agy), separate from the Gemini app's. The Gemini Peer on this PC reads them, so no sign-in is needed in HoverPocket. To re-read, the Gemini Peer opens agy's /usage once, so agy must be signed in (no model request, so no limit is used).");
       case "claude-api": return tx("Claude Console（platform.claude.com）にサインインします。Maxプランに毎月付くAPIクレジットは、プランにリンクしたConsoleの組織に付きます。", "Sign in to Claude Console (platform.claude.com). The Max plan's monthly API credits go to the Console organization linked to the plan.");
       case "colab": return tx("Geminiと同じGoogleアカウントのサインインを使い、Colabのコンピューティング ユニットの残高を表示します。Googleアカウントが複数あるときは、最初にサインインしたアカウントを読みます。", "Uses the Gemini Google sign-in to show Colab compute units. With several Google accounts, the first one signed in is read.");
       case "muse": return tx("muse.aiにサインインします。表示するのは1週間の枠です。", "Sign in to muse.ai. Muse reports a weekly limit.");

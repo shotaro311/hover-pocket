@@ -5,6 +5,11 @@ updated_by: claude
 status: production-macos-0.2.18; production-windows-0.2.19
 ---
 
+## 2026-11-19 AI UsageにAntigravityを追加（Windows 0.2.20）
+
+- AI Usageに7つ目の欄「Antigravity」を加えた。Antigravity CLI（agy）のGeminiモデルの5時間枠・1週間枠とモデル名を、同じPCのGemini Peer（`127.0.0.1:17848`）が保存する値から表示する（Geminiアプリの枠とは別）。値は取得時刻のものとして示し、5分より古い値、Gemini Peerの停止、読み直しの失敗、値のない枠は、0%や「更新」とせず理由を出す。macOS版は範囲外。
+- `--verify ai-usage` 187項目、CIと同じ手順一式が合格。実際のGemini Peerから読め、値はPeerの応答と一致した。Codex（Astra / high）のレビュー2回の指摘はすべて直したが、共通ルール上は「レビュー未完了」で、2回目のあとの修正はCodexの確認を受けていない。ユーザーは3回目なしで本番化すると判断した。[作業記録](2026-11/2026-11-19_hover-pocket-ai-usage-antigravity.md)。
+
 ## 2026-11-19 Pocket ContractsのCI
 
 - GitHub Actionsの `macos-14` が提供対象外になり、Pocket ContractsのmacOSジョブが `0934780` 以降すべて実行前に取り消され、3OSの比較もスキップされていた。`656017c` でmacOS CIと同じ `macos-15` へ移し、[3OSと比較の全ジョブが成功](https://github.com/shotaro311/hover-pocket/actions/runs/44328532652)。macOS 0.2.18の記録にあった未解決事項はこれで解消。

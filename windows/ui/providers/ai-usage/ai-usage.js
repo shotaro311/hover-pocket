@@ -1,6 +1,6 @@
 import { on } from "../../js/bridge.js";
 
-const SERVICE_MARKS = { codex: "Cx", claude: "Cl", "claude-api": "CA", gemini: "Ge", colab: "Co", muse: "Mu" };
+const SERVICE_MARKS = { codex: "Cx", claude: "Cl", "claude-api": "CA", gemini: "Ge", antigravity: "AG", colab: "Co", muse: "Mu" };
 
 /**
  * Lists each AI service's usage windows (five-hour, weekly, model-scoped weekly) as bars.
@@ -21,9 +21,33 @@ export function renderAiUsageProvider({ container, state, request }) {
   const clock = window.setInterval(tick, 30_000);
   void request("aiUsage.getState", { refresh: true }).then((payload) => { usage = payload; paint(); }).catch(() => paint(true));
 
+  // A saved reading shown as current (Antigravity) turns old at `freshUntil`, even with no new data.
+  let paintedExpired = "";
+  function isExpired(service) {
+    const until = service.freshUntil ? Date.parse(service.freshUntil) : NaN;
+    return service.status === "ok" && !Number.isNaN(until) && Date.now() >= until;
+  }
+  function expiredIds() {
+    return (usage?.services ?? []).filter((service) => service.visible && isExpired(service)).map((service) => service.id).join(",");
+  }
+
+  // Repaint right when the next shown-as-current reading turns old, not up to 30 seconds later.
+  let expiryTimer = 0;
+  function scheduleExpiry() {
+    window.clearTimeout(expiryTimer);
+    const next = Math.min(...(usage?.services ?? [])
+      .filter((service) => service.visible && service.status === "ok" && service.freshUntil && !isExpired(service))
+      .map((service) => Date.parse(service.freshUntil))
+      .filter((until) => !Number.isNaN(until)));
+    if (Number.isFinite(next)) expiryTimer = window.setTimeout(() => paint(), Math.max(0, next - Date.now()) + 50);
+  }
+
   function paint(failed = false) {
     if (disposed) return;
-    const services = (usage?.services ?? []).filter((service) => service.visible);
+    paintedExpired = expiredIds();
+    scheduleExpiry();
+    const services = (usage?.services ?? []).filter((service) => service.visible)
+      .map((service) => (isExpired(service) ? { ...service, status: "error", stale: true, errorCode: "stale" } : service));
     if (!usage) {
       root.replaceChildren(message(failed
         ? tx("使用状況を読み込めませんでした。", "Could not load usage.")
@@ -59,10 +83,13 @@ export function renderAiUsageProvider({ container, state, request }) {
     name.className = "hp-usage-name";
     name.textContent = service.name;
     head.append(mark, name);
-    if (service.plan) {
+    // For the Gemini Peer card the "plan" is the model agy ran (a long name), shown on its own line.
+    const showsModel = service.signIn === "peer";
+    if (service.plan && !showsModel) {
       const plan = document.createElement("span");
       plan.className = "hp-usage-plan";
       plan.textContent = service.plan;
+      plan.title = service.plan;
       head.append(plan);
     }
     const meta = document.createElement("span");
@@ -71,6 +98,12 @@ export function renderAiUsageProvider({ container, state, request }) {
     if (service.stale || service.status === "error") meta.classList.add("is-warning");
     head.append(meta);
     article.append(head);
+    if (service.plan && showsModel) {
+      const model = document.createElement("p");
+      model.className = "hp-usage-model";
+      model.textContent = tx(`モデル: ${service.plan}`, `Model: ${service.plan}`);
+      article.append(model);
+    }
 
     if (service.status === "signedOut") {
       const shared = (usage?.services ?? []).find((item) => item.id === service.sharedWith)?.name;
@@ -108,7 +141,8 @@ export function renderAiUsageProvider({ container, state, request }) {
     if (service.status === "error") {
       const error = document.createElement("p");
       error.className = "hp-usage-error";
-      error.textContent = (service.stale ? tx("前回の値を表示中。", "Showing the last reading. ") : "") + errorText(service.errorCode);
+      const keepsLast = service.stale && service.errorCode !== "stale" && service.errorCode !== "noValues";
+      error.textContent = (keepsLast ? tx("前回の値を表示中。", "Showing the last reading. ") : "") + errorText(service.errorCode);
       article.append(error);
     } else if (service.windows.length === 0 && balances.length === 0) {
       article.append(message(service.refreshing || service.status === "idle"
@@ -119,15 +153,18 @@ export function renderAiUsageProvider({ container, state, request }) {
   }
 
   function row(limit, stale) {
+    // A window the service reports without a value is shown as unavailable, never as 0%.
+    const unreadable = limit.state === "unreadable";
     const raw = typeof limit.usedPercent === "number" ? limit.usedPercent : NaN;
-    if (!Number.isFinite(raw) || raw < 0) return null;
-    const used = Math.min(100, raw);
+    if (!unreadable && (!Number.isFinite(raw) || raw < 0)) return null;
+    const used = unreadable ? 0 : Math.min(100, raw);
     const item = document.createElement("li");
     item.className = "hp-usage-row";
     item.dataset.kind = limit.kind ?? "";
     item.dataset.minutes = String(limit.windowMinutes ?? "");
     item.dataset.resetsAt = limit.resetsAt ?? "";
-    item.dataset.level = used >= 90 ? "high" : used >= 80 ? "warn" : "normal";
+    item.dataset.level = unreadable ? "warn" : used >= 90 ? "high" : used >= 80 ? "warn" : "normal";
+    if (unreadable) item.classList.add("is-unreadable");
     if (stale) item.classList.add("is-stale");
 
     const top = document.createElement("div");
@@ -137,20 +174,25 @@ export function renderAiUsageProvider({ container, state, request }) {
     label.textContent = windowLabel(limit);
     const value = document.createElement("span");
     value.className = "hp-usage-value";
-    value.textContent = `${formatPercent(used)}%`;
+    value.textContent = unreadable ? tx("取得できません", "Unavailable") : `${formatPercent(used)}%`;
     top.append(label, value);
 
     const bar = document.createElement("div");
     bar.className = "hp-usage-bar";
-    bar.setAttribute("role", "meter");
-    bar.setAttribute("aria-valuemin", "0");
-    bar.setAttribute("aria-valuemax", "100");
-    bar.setAttribute("aria-valuenow", String(used));
-    bar.setAttribute("aria-label", `${label.textContent} ${value.textContent}`);
-    const fill = document.createElement("span");
-    fill.className = "hp-usage-fill";
-    fill.style.width = `${used}%`;
-    bar.append(fill);
+    if (unreadable) {
+      // No value to measure: assistive technology reads the "unavailable" text instead of a meter.
+      bar.setAttribute("aria-hidden", "true");
+    } else {
+      bar.setAttribute("role", "meter");
+      bar.setAttribute("aria-valuemin", "0");
+      bar.setAttribute("aria-valuemax", "100");
+      bar.setAttribute("aria-valuenow", String(used));
+      bar.setAttribute("aria-label", `${label.textContent} ${value.textContent}`);
+      const fill = document.createElement("span");
+      fill.className = "hp-usage-fill";
+      fill.style.width = `${used}%`;
+      bar.append(fill);
+    }
     const pace = document.createElement("span");
     pace.className = "hp-usage-pace";
     bar.append(pace);
@@ -258,6 +300,10 @@ export function renderAiUsageProvider({ container, state, request }) {
 
   function tick() {
     if (disposed) return;
+    if (usage && expiredIds() !== paintedExpired) {
+      paint();
+      return;
+    }
     root.querySelectorAll(".hp-usage-row:not(.hp-usage-balance)").forEach(updateTimes);
     root.querySelectorAll(".hp-usage-balance").forEach(updateBalance);
   }
@@ -328,6 +374,11 @@ export function renderAiUsageProvider({ container, state, request }) {
       case "unavailable": return tx("いまは取得できません。少し待って更新してください。", "Usage is unavailable right now. Try again later.");
       case "noAccess": return tx("このアカウントでは請求情報を見る権限がありません。", "This account cannot view billing.");
       case "ambiguous": return tx("Consoleの組織が複数あり、どれかを特定できません。", "Several Console organizations; cannot tell which one.");
+      case "peerMissing": return tx("Gemini Peerが動いていません。起動すると表示できます。", "Gemini Peer is not running. Start it to show this.");
+      case "peerFailed": return tx("Gemini Peerが利用枠を読み直せませんでした。agyのログインとステータス表示の設定を確認してください。", "Gemini Peer could not re-read the limits. Check the agy sign-in and status line setup.");
+      case "stale": return tx("古い値です（読み直せていません）。少し待って更新してください。", "This reading is old and was not renewed. Try again shortly.");
+      case "noSnapshot": return tx("Gemini Peerにまだ利用枠の記録がありません。少し待って更新してください。", "Gemini Peer has no reading yet. Try again shortly.");
+      case "noValues": return tx("記録に利用枠の値がありませんでした。少し待って更新してください。", "The reading had no values. Try again shortly.");
       default: return tx("接続できませんでした。", "Could not connect.");
     }
   }
@@ -364,6 +415,7 @@ export function renderAiUsageProvider({ container, state, request }) {
       disposed = true;
       offChanged();
       window.clearInterval(clock);
+      window.clearTimeout(expiryTimer);
     },
   };
 }

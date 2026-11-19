@@ -49,6 +49,7 @@
 .hp-usage-card[data-service="codex"] .hp-usage-mark { color: #9fd8ff; }
 .hp-usage-card[data-service="claude"] .hp-usage-mark { color: #f2b08a; }
 .hp-usage-card[data-service="gemini"] .hp-usage-mark { color: #a8b8ff; }
+.hp-usage-card[data-service="antigravity"] .hp-usage-mark { color: #8fdcc4; }
 .hp-usage-card[data-service="muse"] .hp-usage-mark { color: #e6b3f0; }
 .hp-usage-card[data-service="claude-api"] .hp-usage-mark { color: #f2b08a; }
 .hp-usage-card[data-service="colab"] .hp-usage-mark { color: #f7c46c; }
@@ -92,6 +93,13 @@
 
 .hp-usage-meta.is-warning {
   color: #f5c35b;
+}
+
+.hp-usage-model {
+  margin: -3px 0 9px;
+  color: var(--hp-muted);
+  font-size: calc(10.5px * var(--hp-text-scale));
+  overflow-wrap: anywhere;
 }
 
 .hp-usage-rows {

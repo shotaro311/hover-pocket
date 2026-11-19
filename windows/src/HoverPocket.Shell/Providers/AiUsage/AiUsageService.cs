@@ -17,6 +17,7 @@ internal sealed class AiUsageService : IDisposable
     private readonly Func<string, CancellationToken, Task<AiUsageResult>>? _readerOverride;
     private readonly Func<DateTimeOffset> _clock;
     private readonly AiUsageWebReader _webReader = new();
+    private readonly AiUsageAntigravityReader _antigravityReader = new();
     private readonly Dictionary<string, AiUsageServiceSnapshot> _snapshots = new(StringComparer.Ordinal);
     private readonly Dictionary<string, int> _generations = new(StringComparer.Ordinal);
     // Sign-outs in progress per service; a count, so one ending early cannot lift another's hold.
@@ -63,7 +64,9 @@ internal sealed class AiUsageService : IDisposable
                 id = snapshot.Id,
                 name = AiUsageServiceIds.DisplayName(snapshot.Id),
                 visible = !hiddenServices.Contains(snapshot.Id, StringComparer.Ordinal),
+                // "peer": read from the local Gemini Peer, with no sign-in in HoverPocket.
                 signIn = snapshot.Id == AiUsageServiceIds.Codex ? "codex"
+                    : snapshot.Id == AiUsageServiceIds.Antigravity ? "peer"
                     : AiUsageServiceIds.SignIn.Contains(snapshot.Id, StringComparer.Ordinal) ? "web"
                     : "shared",
                 sharedWith = AiUsageServiceIds.Profile(snapshot.Id) == snapshot.Id ? null : AiUsageServiceIds.Profile(snapshot.Id),
@@ -73,11 +76,14 @@ internal sealed class AiUsageService : IDisposable
                 stale = snapshot.Stale,
                 refreshing = snapshot.Refreshing,
                 fetchedAt = snapshot.FetchedAt?.ToString("O"),
+                // When a reading shown as current turns old on screen (Antigravity's capture time + 5 minutes).
+                freshUntil = FreshUntil(snapshot)?.ToString("O"),
                 windows = snapshot.Windows.Select(window => new
                 {
                     kind = window.Kind,
                     model = window.Model,
-                    usedPercent = window.UsedPercent,
+                    usedPercent = window.State is null ? window.UsedPercent : (double?)null,
+                    state = window.State,
                     resetsAt = window.ResetsAt?.ToString("O"),
                     windowMinutes = window.WindowMinutes
                 }).ToArray(),
@@ -96,9 +102,19 @@ internal sealed class AiUsageService : IDisposable
     }
 
     /// <summary>
+    /// A saved reading (Antigravity) is current only for <see cref="AiUsageParsers.AntigravityFreshFor"/>
+    /// after it was captured, however recently it was fetched.
+    /// </summary>
+    private static DateTimeOffset? FreshUntil(AiUsageServiceSnapshot snapshot) =>
+        snapshot.Id == AiUsageServiceIds.Antigravity && snapshot.Status == AiUsageStatus.Ok && snapshot.FetchedAt is { } observed
+            ? observed + AiUsageParsers.AntigravityFreshFor
+            : null;
+
+    /// <summary>
     /// Refreshes the given services. Without <paramref name="force"/>, services checked within
-    /// <see cref="StaleAfter"/> are skipped, and a signed-out service is re-checked only after
-    /// <see cref="SignedOutRecheckAfter"/>. A request already covered by a running refresh joins it.
+    /// <see cref="StaleAfter"/> are skipped (unless a saved reading shown as current has turned old),
+    /// and a signed-out service is re-checked only after <see cref="SignedOutRecheckAfter"/>. A request
+    /// already covered by a running refresh joins it.
     /// </summary>
     public Task RefreshAsync(IReadOnlyCollection<string> services, bool force, CancellationToken cancellationToken = default)
     {
@@ -127,6 +143,7 @@ internal sealed class AiUsageService : IDisposable
             {
                 var snapshot = Snapshot(id);
                 if (force || snapshot.CheckedAt is not { } checkedAt) return true;
+                if (FreshUntil(snapshot) is { } freshUntil && now >= freshUntil) return true;
                 var maxAge = snapshot.Status == AiUsageStatus.SignedOut ? SignedOutRecheckAfter : StaleAfter;
                 return now - checkedAt >= maxAge;
             }).ToArray();
@@ -138,8 +155,13 @@ internal sealed class AiUsageService : IDisposable
                     ? reader(AiUsageServiceIds.Codex, token)
                     : Task.Run(() => AiUsageCodexReader.ReadAsync(_codexProfileRoot, token), token))
                 : Task.CompletedTask;
-            var web = due.Where(id => id != AiUsageServiceIds.Codex).ToArray();
-            await Task.WhenAll(codex, RefreshWebAsync(web, token));
+            var antigravity = due.Contains(AiUsageServiceIds.Antigravity)
+                ? RunOneAsync(AiUsageServiceIds.Antigravity, token, () => _readerOverride is { } reader
+                    ? reader(AiUsageServiceIds.Antigravity, token)
+                    : Task.Run(() => _antigravityReader.ReadAsync(force, token), token))
+                : Task.CompletedTask;
+            var web = due.Where(id => AiUsageServiceIds.Web.Contains(id, StringComparer.Ordinal)).ToArray();
+            await Task.WhenAll(codex, antigravity, RefreshWebAsync(web, token));
         }
         finally
         {
@@ -372,6 +394,7 @@ internal sealed class AiUsageService : IDisposable
         _disposed = true;
         Changed = null;
         _lifetime.Cancel();
+        _antigravityReader.Dispose();
         foreach (var window in _signInWindows.Values.ToArray()) window.Close();
         _signInWindows.Clear();
     }
