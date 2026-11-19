@@ -9,28 +9,33 @@ struct AiUsageSettingsView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text(copy.text("AI使用状況", "AI usage")).font(.headline)
-            ForEach(settings.aiUsageServiceOrder) { service in
-                if service != settings.aiUsageServiceOrder.first { Divider() }
-                row(service)
+            ForEach(AiUsageSection.allCases, id: \.self) { section in
+                Text(section.title(copy)).font(.subheadline).foregroundStyle(.secondary)
+                    .accessibilityAddTraits(.isHeader)
+                let order = settings.aiUsageOrder(in: section)
+                ForEach(order) { service in
+                    if service != order.first { Divider() }
+                    row(service, section: section)
+                }
             }
         }
     }
 
     private var copy: AiUsageCopy { .init(language: settings.appLanguage) }
 
-    private func row(_ service: AiUsageService) -> some View {
+    private func row(_ service: AiUsageService, section: AiUsageSection) -> some View {
         let state = usage.snapshot(service)
         let changing = usage.isChangingAccount(service)
         return VStack(alignment: .leading, spacing: 5) {
             HStack(alignment: .top) {
-                Text(service.title).fontWeight(.semibold)
+                Text(service == .codex && section == .balances ? copy.text("Codex クレジット", "Codex credits") : service.title).fontWeight(.semibold)
                 Text(heading(state: state, changing: changing))
                     .font(.callout)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
                 Spacer()
-                orderButton(service, offset: -1)
-                orderButton(service, offset: 1)
+                orderButton(service, section: section, offset: -1)
+                orderButton(service, section: section, offset: 1)
                 Toggle(copy.text("\(service.title)を表示", "Show \(service.title)"), isOn: Binding(
                     get: { !settings.hiddenAiUsageServices.contains(service) },
                     set: { visible in
@@ -51,7 +56,7 @@ struct AiUsageSettingsView: View {
             }
             HStack(spacing: 8) {
                 if service == .codex {
-                    codexActions(state)
+                    if section == .limits { codexActions(state) }
                 } else if service.hasWebSignIn {
                     let signedIn = Self.canSignOut(service, usage: usage)
                     Button(state.status == .ready ? copy.text("サインインし直す", "Sign in again") : copy.text("サインイン", "Sign in")) {
@@ -69,7 +74,7 @@ struct AiUsageSettingsView: View {
                         .disabled(changing)
                     }
                 }
-                if let detail = detail(service) {
+                if (section == .limits || service != .codex), let detail = detail(service) {
                     Text(detail).font(.caption).foregroundStyle(.secondary)
                 }
             }
@@ -77,11 +82,11 @@ struct AiUsageSettingsView: View {
         .padding(.vertical, 3)
     }
 
-    private func orderButton(_ service: AiUsageService, offset: Int) -> some View {
+    private func orderButton(_ service: AiUsageService, section: AiUsageSection, offset: Int) -> some View {
         let label = offset < 0 ? copy.text("上へ", "Move up") : copy.text("下へ", "Move down")
-        let allowed = settings.canStepAiUsageService(service, by: offset)
+        let allowed = settings.canStepAiUsageService(service, in: section, by: offset)
         return Button {
-            settings.stepAiUsageService(service, by: offset)
+            settings.stepAiUsageService(service, in: section, by: offset)
         } label: {
             Image(systemName: offset < 0 ? "arrow.up" : "arrow.down")
                 .font(.system(size: 11, weight: .semibold))

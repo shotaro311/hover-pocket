@@ -1205,6 +1205,7 @@ final class HoverWindowController {
             self.closeTask = nil
             guard !self.isMouseInsideHoverRegion(at: location), self.previewWindow?.attachedSheet == nil,
                   self.trackingMenus.isEmpty,
+                  !self.aiUsagePointerIsDown,
                   !AssetLibraryRuntime.shared.holdsPanel,
                   !CodexChatController.shared.holdsPanel,
                   !self.settings.panelResizing,
@@ -1386,8 +1387,16 @@ final class HoverWindowController {
 
     private func updatePreviewMouseRouting(at location: NSPoint? = nil) {
         guard (!isPanelSoakVerification || location != nil), !previewIsClosing, let previewWindow, previewWindow.isVisible else { return }
+        if aiUsagePointerIsDown {
+            previewWindow.ignoresMouseEvents = false
+            return
+        }
         // The transparent menu areas must route to the windows below this panel.
         previewWindow.ignoresMouseEvents = !(liquidSurface?.contains(screenPoint: location ?? NSEvent.mouseLocation) ?? false)
+    }
+
+    private var aiUsagePointerIsDown: Bool {
+        (previewWindow?.firstResponder as? AiUsageOrderHandleView)?.isReordering == true
     }
 
     private func closeIfMouseLeftHoverRegion(at location: NSPoint? = nil) {
@@ -1400,6 +1409,7 @@ final class HoverWindowController {
         guard previewWindow?.isVisible == true,
               trackingMenus.isEmpty,
               closeTask == nil,
+              !aiUsagePointerIsDown,
               previewWindow?.attachedSheet == nil,
               !awaitingPointerAfterExplicitOpen,
               TimerStore.shared.activeAlert == nil,

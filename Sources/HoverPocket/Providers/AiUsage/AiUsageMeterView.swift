@@ -68,12 +68,10 @@ struct AiUsageMeterView: View {
 
     @ViewBuilder private var value: some View {
         if let remaining = window.remaining {
-            HStack(alignment: .firstTextBaseline, spacing: 1) {
-                Text(String(copy.percent(remaining).dropLast()))
-                    .font(.system(size: 22, weight: .semibold)).monospacedDigit()
-                Text("%").font(.system(size: 12, weight: .semibold))
-            }
-            .foregroundStyle(AiUsageTint(remaining: remaining).color)
+            AiUsageReadingNumber(
+                amount: String(copy.percent(remaining).dropLast()), unit: "%", size: 23, unitSize: 12,
+                color: AiUsageTint(remaining: remaining).color
+            )
             .opacity(readingOpacity)
         } else {
             Text("—").font(.system(size: 22)).foregroundStyle(aiUsageColor(0x9ba6b5))

@@ -5,6 +5,44 @@ enum AiUsageLayout: String, CaseIterable, Identifiable {
     var id: Self { self }
 }
 
+enum AiUsageSection: CaseIterable, Hashable {
+    case limits, balances
+
+    var defaultOrder: [AiUsageService] {
+        switch self {
+        case .limits: [.codex, .claude, .gemini, .muse]
+        case .balances: [.codex, .claudeAPI, .colab]
+        }
+    }
+
+    func title(_ copy: AiUsageCopy) -> String {
+        switch self {
+        case .limits: copy.text("サブスクの利用枠", "Plan limits")
+        case .balances: copy.text("クレジット・残高", "Credits and balances")
+        }
+    }
+
+    func normalizedOrder(_ rawValues: [String]?) -> [AiUsageService] {
+        let defaults = defaultOrder
+        let saved = (rawValues ?? []).compactMap(AiUsageService.init(rawValue:))
+        var seen = Set<AiUsageService>()
+        return (saved + defaults).filter { defaults.contains($0) && seen.insert($0).inserted }
+    }
+
+    func moving(_ service: AiUsageService, to target: AiUsageService, in order: [AiUsageService]) -> [AiUsageService] {
+        guard let from = order.firstIndex(of: service), let to = order.firstIndex(of: target), from != to else { return order }
+        var result = order
+        result.remove(at: from)
+        result.insert(service, at: to)
+        return result
+    }
+
+    func visibleRows(_ services: [AiUsagePanelService], in order: [AiUsageService]) -> [AiUsagePanelService] {
+        let byID = Dictionary(uniqueKeysWithValues: services.map { ($0.id, $0) })
+        return order.compactMap { byID[$0] }.filter { $0.appears(in: self) }
+    }
+}
+
 enum AiUsageColumn: String, CaseIterable, Identifiable {
     case session, weekly, other
     var id: Self { self }
@@ -81,10 +119,16 @@ struct AiUsagePanelService: Identifiable {
 
     var orderedWindows: [AiUsageWindow] { AiUsageColumn.allCases.flatMap(windows(in:)) }
 
-    var showsListRow: Bool {
-        if snapshot.reading?.windows.isEmpty == false { return true }
-        if snapshot.status == .signedOut { return true }
-        return snapshot.reading == nil && (snapshot.refreshing || changingAccount || hasFailure)
+    func appears(in section: AiUsageSection) -> Bool {
+        let needsStatus = snapshot.refreshing || changingAccount || snapshot.status == .signedOut || hasFailure
+        switch section {
+        case .limits:
+            return snapshot.reading?.windows.isEmpty == false ||
+                (snapshot.reading == nil && needsStatus && AiUsageSection.limits.defaultOrder.contains(id))
+        case .balances:
+            return snapshot.reading?.balances.isEmpty == false ||
+                (needsStatus && !AiUsageSection.limits.defaultOrder.contains(id))
+        }
     }
 
     private var hasFailure: Bool {
@@ -173,6 +217,30 @@ struct AiUsageQuotaLabel: View {
     }
 }
 
+struct AiUsageReadingNumber: View {
+    let amount: String
+    let unit: String?
+    let size: CGFloat
+    let unitSize: CGFloat
+    var color: Color = .primary
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: unit == "%" ? 2 : 4) {
+            Text(amount)
+                .font(.system(size: size, weight: .medium))
+                .monospacedDigit()
+                .tracking(size >= 20 ? -0.02 * size : 0)
+                .foregroundStyle(color)
+            if let unit {
+                Text(unit).font(.system(size: unitSize, weight: .medium))
+                    .foregroundStyle(aiUsageColor(0x9ba6b5))
+            }
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel([amount, unit].compactMap { $0 }.joined(separator: unit == "%" ? "" : " "))
+    }
+}
+
 struct AiUsagePanelBalance {
     let service: AiUsageService
     let parts: [AiUsageBalance]
@@ -202,25 +270,23 @@ struct AiUsagePanelBalance {
     }
 
     func label(_ copy: AiUsageCopy) -> String {
-        service == .codex ? copy.balanceLabel(total) : service.title
+        service == .codex ? copy.text("Codex クレジット", "Codex credits") : service.title
     }
 
-    func meterLabel(_ copy: AiUsageCopy) -> String {
-        service == .colab ? copy.text("ユニット", "Units") : copy.text("クレジット", "Credits")
-    }
-
-    func meterValue(_ copy: AiUsageCopy) -> String {
-        let value = copy.balanceValue(total)
+    var unit: String? {
         switch total.value {
-        case .units: return value + " CU"
-        case .amount where service == .codex: return value + " CR"
-        default: return value
+        case .units: "CU"
+        case .amount where service == .codex: "CR"
+        default: nil
         }
     }
 
     func meterDetail(_ copy: AiUsageCopy, now: Date) -> String? {
-        if service == .colab { return copy.balanceDetail(total, now: now) }
-        return total.expiresAt.map { copy.balanceExpiry($0, now: now) }
+        switch service {
+        case .codex: return copy.text("サブスクの枠を超えた分に使う", "Used after plan limits")
+        case .colab: return copy.balanceDetail(total, now: now)
+        default: return total.expiresAt.map { copy.balanceExpiry($0, now: now) }
+        }
     }
 
     func help(_ copy: AiUsageCopy, now: Date) -> String {

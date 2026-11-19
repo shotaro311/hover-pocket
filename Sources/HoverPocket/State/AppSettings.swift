@@ -172,37 +172,48 @@ final class AppSettings: ObservableObject {
         didSet { defaults.set(aiUsageServiceOrder.map(\.rawValue), forKey: "aiUsageServiceOrder") }
     }
 
+    @Published private(set) var aiUsageBalanceOrder: [AiUsageService] {
+        didSet { defaults.set(aiUsageBalanceOrder.map(\.rawValue), forKey: "aiUsageBalanceOrder") }
+    }
+
     @Published var aiUsageSort: AiUsageSort? {
         didSet { defaults.set(aiUsageSort.map { [$0.column.rawValue, $0.direction.rawValue] }, forKey: "aiUsageSort") }
     }
 
     var visibleAiUsageServices: [AiUsageService] {
-        aiUsageServiceOrder.filter { !hiddenAiUsageServices.contains($0) }
+        AiUsageService.allCases.filter { !hiddenAiUsageServices.contains($0) }
     }
 
-    func moveAiUsageService(_ service: AiUsageService, to target: AiUsageService) -> Bool {
-        guard let from = aiUsageServiceOrder.firstIndex(of: service),
-              let to = aiUsageServiceOrder.firstIndex(of: target), from != to else { return false }
-        var order = aiUsageServiceOrder
-        order.remove(at: from)
-        order.insert(service, at: to)
-        aiUsageServiceOrder = order
-        return true
+    func aiUsageOrder(in section: AiUsageSection) -> [AiUsageService] {
+        section == .limits ? aiUsageServiceOrder : aiUsageBalanceOrder
     }
 
-    func canStepAiUsageService(_ service: AiUsageService, by offset: Int) -> Bool {
-        aiUsageStepTarget(service, by: offset) != nil
+    func saveAiUsageOrder(_ order: [AiUsageService], in section: AiUsageSection) {
+        guard order != aiUsageOrder(in: section) else { return }
+        switch section {
+        case .limits: aiUsageServiceOrder = order
+        case .balances: aiUsageBalanceOrder = order
+        }
     }
 
-    func stepAiUsageService(_ service: AiUsageService, by offset: Int) {
-        guard let target = aiUsageStepTarget(service, by: offset) else { return }
-        _ = moveAiUsageService(service, to: target)
+    func canStepAiUsageService(_ service: AiUsageService, in section: AiUsageSection, by offset: Int) -> Bool {
+        aiUsageStepTarget(service, by: offset, in: aiUsageOrder(in: section)) != nil
     }
 
-    private func aiUsageStepTarget(_ service: AiUsageService, by offset: Int) -> AiUsageService? {
-        guard let from = aiUsageServiceOrder.firstIndex(of: service),
-              aiUsageServiceOrder.indices.contains(from + offset) else { return nil }
-        return aiUsageServiceOrder[from + offset]
+    func stepAiUsageService(
+        _ service: AiUsageService, in section: AiUsageSection, by offset: Int, among visible: [AiUsageService]? = nil
+    ) {
+        let order = aiUsageOrder(in: section)
+        let available = visible.map { ids in order.filter(ids.contains) } ?? order
+        guard let target = aiUsageStepTarget(service, by: offset, in: available) else { return }
+        saveAiUsageOrder(section.moving(service, to: target, in: order), in: section)
+    }
+
+    private func aiUsageStepTarget(
+        _ service: AiUsageService, by offset: Int, in order: [AiUsageService]
+    ) -> AiUsageService? {
+        guard let from = order.firstIndex(of: service), order.indices.contains(from + offset) else { return nil }
+        return order[from + offset]
     }
 
     @Published var hiddenProviderRawValues: Set<String> {
@@ -392,9 +403,14 @@ final class AppSettings: ObservableObject {
         self.hiddenAiUsageServices = Set((defaults.stringArray(forKey: "hiddenAiUsageServices") ?? [])
             .compactMap(AiUsageService.init(rawValue:)))
         self.aiUsageLayout = defaults.string(forKey: "aiUsageLayout").flatMap(AiUsageLayout.init(rawValue:)) ?? .list
-        var seen = Set<AiUsageService>()
-        let savedOrder = (defaults.stringArray(forKey: "aiUsageServiceOrder") ?? []).compactMap(AiUsageService.init(rawValue:))
-        self.aiUsageServiceOrder = (savedOrder + AiUsageService.allCases).filter { seen.insert($0).inserted }
+        let savedServiceOrder = defaults.stringArray(forKey: "aiUsageServiceOrder")
+        let savedBalanceOrder = defaults.stringArray(forKey: "aiUsageBalanceOrder")
+        self.aiUsageServiceOrder = AiUsageSection.limits.normalizedOrder(savedServiceOrder)
+        let balanceOrder = AiUsageSection.balances.normalizedOrder(savedBalanceOrder ?? savedServiceOrder)
+        self.aiUsageBalanceOrder = balanceOrder
+        if savedBalanceOrder == nil, savedServiceOrder != nil {
+            defaults.set(balanceOrder.map(\.rawValue), forKey: "aiUsageBalanceOrder")
+        }
         self.aiUsageSort = AiUsageSort(stored: defaults.stringArray(forKey: "aiUsageSort") ?? [])
         if defaults.object(forKey: Self.rememberLastSelectedProviderKey) == nil {
             self.rememberLastSelectedProvider = true

@@ -551,6 +551,65 @@ enum AiUsageVerificationCommand {
         let defaults = EphemeralAppSettingsDefaults()
         defaults.set(["timer", "calculator"], forKey: "providerOrder")
         let settings = AppSettings(defaults: defaults)
+        let now = Date()
+        let copy = AiUsageCopy(language: .japanese)
+        let scenario = PresentationScenario(now: now)
+        let sampleWindow = scenario.sampleWindow
+        try verifyPresentationSettings(t, defaults: defaults, settings: settings)
+        try verifyPresentationCopy(t, copy: copy, now: now, sampleWindow: sampleWindow)
+        try verifyOrderAndLayout(t, defaults: defaults, settings: settings, now: now)
+
+        let reader: AiUsageStore.Reader = { (service: AiUsageService) -> AiUsageResult in
+            scenario.fixtureResult(for: service)
+        }
+        let fixture = AiUsageStore(reader: reader, now: { scenario.now })
+        fixture.refresh(AiUsageService.allCases)
+        try await waitForReadings(fixture)
+        scenario.now = now.addingTimeInterval(30)
+        fixture.refresh([AiUsageService.claude], force: true)
+        try await waitForReadings(fixture)
+        try verifyFreshReadings(t, fixture: fixture, now: now, latest: scenario.now, copy: copy)
+
+        try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
+        let panel = AiUsagePanelView(settings: settings, usage: fixture, isActive: false, openSettings: {})
+        let preview = panel.background(Color.black)
+        let minimum: CGFloat = PanelLayout.manualSizeLimits().minimum.width - PanelLayout.surfaceSidePadding * 2
+        try captureFreshPanels(t, preview: preview, panel: panel, output: output, minimum: minimum, now: now)
+        try verifyNativeReordering(t, panel: panel)
+        try verifyNumberTypography(t)
+
+        scenario.showsFailures = true
+        fixture.beginAccountChange(AiUsageService.muse)
+        fixture.endAccountChange(AiUsageService.muse)
+        let affected: [AiUsageService] = [.codex, .claude, .gemini]
+        fixture.refresh(affected, force: true)
+        try await waitForReadings(fixture)
+        try verifyFailedReadings(t, fixture: fixture, copy: copy)
+        let claude = panelService(AiUsageService.claude, in: fixture)
+        let other = claude.windows(in: AiUsageColumn.other).map(claude.quota)
+        try verifyMeterDetails(t, quotas: other, copy: copy, now: now)
+        let quota = AiUsageQuota(window: sampleWindow)
+        try verifyReadingOpacity(t, quota: quota, copy: copy, now: now)
+        try verifySettingsAction(t, copy: copy)
+        try verifyNarrowContent(t, quota: quota, copy: copy, now: now)
+        try captureStatePanels(t, preview: preview, settings: settings, output: output, minimum: minimum)
+        try verifySettingsImage(t, settings: settings, fixture: fixture, output: output)
+        try verifyPanelImages(t, output: output, minimum: minimum)
+        let services = AiUsageService.allCases.map { panelService($0, in: fixture) }
+        try verifyPanelWidths(t, panel: panel, services: services, now: now, minimum: minimum)
+    }
+
+    private static func waitForReadings(_ fixture: AiUsageStore) async throws {
+        try await until { !fixture.snapshots.values.contains(where: \AiUsageSnapshot.refreshing) }
+    }
+
+    private static func panelService(_ service: AiUsageService, in fixture: AiUsageStore) -> AiUsagePanelService {
+        AiUsagePanelService(id: service, snapshot: fixture.snapshot(service), changingAccount: fixture.isChangingAccount(service))
+    }
+
+    private static func verifyPresentationSettings(
+        _ t: Checks, defaults: EphemeralAppSettingsDefaults, settings: AppSettings
+    ) throws {
         let existingTool = PluginManifest(id: .init(rawValue: "fixture-tool"), title: "Sample tool", symbolName: "square",
                                           defaultEnabled: true, requestedPermissions: [], refreshPolicy: .manual)
         let available = ProviderRegistry.builtIn.manifests + [existingTool]
@@ -564,9 +623,11 @@ enum AiUsageVerificationCommand {
         settings.hiddenAiUsageServices.insert(.gemini)
         try t.check(AppSettings(defaults: defaults).hiddenAiUsageServices == [.gemini], "Service visibility persists and reads back")
         settings.hiddenAiUsageServices = []
-        let now = Date()
-        let copy = AiUsageCopy(language: .japanese)
-        let sampleWindow = AiUsageWindow(model: "Fable", percent: 76, resetsAt: now + (3 * 24 + 21) * 3600 + 1800, minutes: 10_080)
+    }
+
+    private static func verifyPresentationCopy(
+        _ t: Checks, copy: AiUsageCopy, now: Date, sampleWindow: AiUsageWindow
+    ) throws {
         try t.check(copy.windowLabel(sampleWindow) == "Fable" && copy.reset(sampleWindow.resetsAt, now: now) == "3日21時間"
                     && sampleWindow.column == .other && sampleWindow.resetsAt.map(copy.resetHelp)?.hasSuffix("にリセット") == true,
                     "Other quota has both its model name and reset countdown plus exact-date help")
@@ -586,7 +647,6 @@ enum AiUsageVerificationCommand {
                     copy.windowLabel(.init(percent: 55, minutes: 4320)) == "3日" &&
                     AiUsageWindow(model: "Short", percent: 55, minutes: 300).column == .other,
                     "Named standard windows and unnamed nonstandard durations belong in Other")
-        try verifyOrderAndLayout(t, defaults: defaults, settings: settings, now: now)
         try t.check(copy.balanceValue(.init(kind: .planCredit, value: .amount(0.0001))) == "<$0.01" &&
                     copy.balanceValue(.init(kind: .computeUnits, value: .units(1e-30))) == "<0.1" &&
                     copy.balanceValue(.init(kind: .purchasedCredit, value: .amount(0))) == "$0.00", "Tiny positive balances and an explicit zero")
@@ -595,149 +655,166 @@ enum AiUsageVerificationCommand {
         try t.check(copy.balanceDetail(.init(kind: .computeUnits, value: .units(8)), now: now) == "消費量は不明" &&
                     copy.balanceDetail(.init(kind: .computeUnits, value: .units(8), perHour: 0.004), now: now)?.contains("<0.01") == true,
                     "Unknown and tiny hourly consumption")
-        let scenario = PresentationScenario(now: now)
-        let fixture = AiUsageStore(reader: { service in
-            switch service {
-            case .codex:
-                if scenario.showsFailures { return .failure(.network) }
-                return .success(.init(plan: "Pro Lite", windows: [
-                    .init(percent: 5.1, resetsAt: now + 289 * 60, minutes: 300),
-                    .init(percent: 79, resetsAt: now + (3 * 24 + 21) * 3600 + 1800, minutes: 10_080)
-                ], balances: [.init(kind: .codexCredits, value: .amount(40957))]))
-            case .claude:
-                var windows: [AiUsageWindow] = [
-                    .init(percent: 33, resetsAt: now + 70 * 60, minutes: 300),
-                    .init(percent: 55, resetsAt: now + 2 * 86400 + 1800, minutes: 10_080)
-                ]
-                if scenario.showsFailures {
-                    windows += [
-                        .init(model: "Fable", percent: nil, resetsAt: now + 3600, minutes: 10_080),
-                        .init(model: "GPT-5.3-Codex-Spark", percent: 30.1, resetsAt: now + 289 * 60, minutes: 300),
-                        .init(model: "GPT-5.3-Codex-Spark", percent: 55.1,
-                              resetsAt: now + (3 * 24 + 21) * 3600 + 1800, minutes: 10_080)
-                    ]
-                } else {
-                    windows.append(sampleWindow)
-                }
-                return .success(.init(plan: "Max 5x", windows: windows))
-            case .claudeAPI:
-                return .success(.init(balances: [
-                    .init(kind: .planCredit, value: .amount(57.25), label: "API credit (Max)", expiresAt: now + 12 * 86400),
-                    .init(kind: .purchasedCredit, value: .amount(47.73), expiresAt: now + 82 * 86400)
-                ]))
-            case .gemini:
-                return scenario.showsFailures ? .signedOut : .success(.init(windows: [
-                    .init(percent: 48, resetsAt: now + 35 * 60, minutes: 10_080)
-                ]))
-            case .colab:
-                return .success(.init(balances: [.init(kind: .computeUnits, value: .units(570.2), perHour: 0.8)]))
-            case .muse:
-                return scenario.showsFailures ? .failure(.changed) : .success(.init(windows: [
-                    .init(percent: 57, resetsAt: now + 6 * 86400 + 1800, minutes: 10_080)
-                ]))
-            }
-        }, now: { scenario.now })
-        func row(_ service: AiUsageService) -> AiUsagePanelService {
-            .init(id: service, snapshot: fixture.snapshot(service), changingAccount: fixture.isChangingAccount(service))
-        }
-        fixture.refresh(AiUsageService.allCases)
-        try await until { !fixture.snapshots.values.contains(where: \.refreshing) }
-        scenario.now = now + 30
-        fixture.refresh([.claude], force: true)
-        try await until { !fixture.snapshot(.claude).refreshing }
+    }
 
-        let fresh = AiUsageService.allCases.map(row)
-        try t.check(fresh.compactMap(\.updateDate).max() == scenario.now &&
-                    fresh.filter { $0.id != .claude }.compactMap(\.updateDate).max() == now,
+    private static func verifyFreshReadings(
+        _ t: Checks, fixture: AiUsageStore, now: Date, latest: Date, copy: AiUsageCopy
+    ) throws {
+        let fresh: [AiUsagePanelService] = AiUsageService.allCases.map { panelService($0, in: fixture) }
+        let newest = fresh.compactMap(\AiUsagePanelService.updateDate).max()
+        let otherServices = fresh.filter { $0.id != AiUsageService.claude }
+        let newestWithoutClaude = otherServices.compactMap(\AiUsagePanelService.updateDate).max()
+        try t.check(newest == latest && newestWithoutClaude == now,
                     "Header selects the newest successful visible reading")
-        var oldSuccess = row(.codex).snapshot
-        oldSuccess.fetchedAt = now - 86400
-        let oldRow = AiUsagePanelService(id: .codex, snapshot: oldSuccess, changingAccount: false)
-        try t.check(oldRow.updateDate == oldSuccess.fetchedAt && oldRow.staleDate == nil && !oldRow.snapshot.stale,
+
+        let codex = panelService(AiUsageService.codex, in: fixture)
+        var oldSuccess = codex.snapshot
+        oldSuccess.fetchedAt = now.addingTimeInterval(-86_400)
+        let oldRow = AiUsagePanelService(id: AiUsageService.codex, snapshot: oldSuccess, changingAccount: false)
+        let stillFresh = oldRow.staleDate == nil && !oldRow.snapshot.stale
+        try t.check(oldRow.updateDate == oldSuccess.fetchedAt && stillFresh,
                     "Elapsed time alone neither dims a successful reading nor changes its update label")
-        try t.check(fresh.filter(\.showsListRow).map(\.id) == [.codex, .claude, .gemini, .muse] &&
-                    fresh.compactMap(AiUsagePanelBalance.init).map(\.service) == [.codex, .claudeAPI, .colab],
-                    "Successful balance-only services have chips and meters but no table rows")
-        let loading = AiUsagePanelService(id: .colab, snapshot: .init(refreshing: true), changingAccount: false)
-        let idle = AiUsagePanelService(id: .colab, snapshot: .init(), changingAccount: false)
-        try t.check(loading.showsListRow && !idle.showsListRow, "A balance service gets a row while checking")
-        let api = AiUsagePanelBalance(row(.claudeAPI))
-        try t.check(api?.meterValue(copy) == "$104.98" && api?.help(copy, now: now).contains("$57.25") == true &&
-                    api?.help(copy, now: now).contains("$47.73") == true && api?.total.expiresAt == now + 12 * 86400,
+
+        let limits = AiUsageSection.limits.visibleRows(fresh, in: AiUsageSection.limits.defaultOrder)
+        let balances = AiUsageSection.balances.visibleRows(fresh, in: AiUsageSection.balances.defaultOrder)
+        let tableRows = limits.map(\AiUsagePanelService.id)
+        let balanceCards = balances.map(\AiUsagePanelService.id)
+        try t.check(tableRows == AiUsageSection.limits.defaultOrder && balanceCards == AiUsageSection.balances.defaultOrder,
+                    "Quota rows and balance cards use separate section membership, and Codex appears in both")
+        let fixtureCodex = limits.first { $0.id == AiUsageService.codex }
+        let separateCodex = balances.first { $0.id == AiUsageService.codex }
+        let codexCredit = separateCodex.flatMap(AiUsagePanelBalance.init)
+        try t.check(fixtureCodex?.orderedWindows.count == 2 && codexCredit?.unit == "CR",
+                    "Codex exposes its usage windows and an independent credit card")
+
+        let colab = panelService(AiUsageService.colab, in: fixture)
+        let loadingSnapshot = AiUsageSnapshot(refreshing: true)
+        let loading = AiUsagePanelService(id: AiUsageService.colab, snapshot: loadingSnapshot, changingAccount: false)
+        let idle = AiUsagePanelService(id: AiUsageService.colab, snapshot: AiUsageSnapshot(), changingAccount: false)
+        let loadingInBalances = loading.appears(in: .balances) && !loading.appears(in: .limits)
+        try t.check(loadingInBalances && !idle.appears(in: .balances), "A balance-only service gets a card while checking")
+        var signedOutSnapshot = AiUsageSnapshot()
+        signedOutSnapshot.apply(.signedOut, at: now)
+        let signedOutBalance = AiUsagePanelService(id: .claudeAPI, snapshot: signedOutSnapshot, changingAccount: false)
+        try t.check(signedOutBalance.appears(in: .balances) && !signedOutBalance.appears(in: .limits),
+                    "A signed-out balance-only service stays in the balance section")
+
+        let claudeAPI = panelService(AiUsageService.claudeAPI, in: fixture)
+        let api = AiUsagePanelBalance(claudeAPI)
+        let apiHelp = api?.help(copy, now: now) ?? ""
+        let hasBreakdown = apiHelp.contains("$57.25") && apiHelp.contains("$47.73")
+        let expectedExpiry = now.addingTimeInterval(12 * 86_400)
+        let apiValue = api.map { copy.balanceValue($0.total) }
+        try t.check(apiValue == "$104.98" && api?.unit == nil && hasBreakdown && api?.total.expiresAt == expectedExpiry,
                     "Claude API adds the balances and retains both amounts and dates in help")
-        try t.check(AiUsagePanelBalance(row(.codex))?.meterValue(copy) == "40,957 CR" &&
-                    AiUsagePanelBalance(row(.colab))?.meterValue(copy) == "570.2 CU", "Native units in the balance meters")
+        let codexAmount = AiUsagePanelBalance(codex)
+        let colabAmount = AiUsagePanelBalance(colab)
+        let hasCodexUnits = codexAmount?.unit == "CR" && codexAmount.map { copy.balanceValue($0.total) } == "40,957"
+        let hasColabUnits = colabAmount?.unit == "CU" && colabAmount.map { copy.balanceValue($0.total) } == "570.2"
+        try t.check(hasCodexUnits && hasColabUnits, "Credit and unit values use independent CR and CU labels")
+        try t.check(codexAmount?.meterDetail(copy, now: now) == "サブスクの枠を超えた分に使う",
+                    "Codex credit card explains that credits are used after plan limits")
+    }
 
-        try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
-        let panel = AiUsagePanelView(settings: settings, usage: fixture, isActive: false, openSettings: {})
-        let preview = panel.background(.black)
-        let minimum = PanelLayout.manualSizeLimits().minimum.width - PanelLayout.surfaceSidePadding * 2
-        let list = try capture(preview, size: NSSize(width: minimum, height: 350), appearance: .darkAqua)
-        try list.write(to: output.appendingPathComponent("list.png"), options: .atomic)
-        try verifyRowMetadata(t, panel: panel, service: row(.claude), now: now, width: minimum)
-        settings.aiUsageLayout = .meter
-        let meter = try capture(preview, size: NSSize(width: 760, height: 510), appearance: .darkAqua)
-        try meter.write(to: output.appendingPathComponent("meter.png"), options: .atomic)
-        try verifyRowMetadata(t, panel: panel, service: row(.claude), now: now, width: minimum)
-
-        scenario.showsFailures = true
-        fixture.beginAccountChange(.muse)
-        fixture.endAccountChange(.muse)
-        fixture.refresh([.codex, .claude, .gemini], force: true)
-        try await until { !fixture.snapshots.values.contains(where: \.refreshing) }
-        try t.check(AiUsageSettingsView.canSignOut(.gemini, usage: fixture) &&
-                    !AiUsageSettingsView.canSignOut(.colab, usage: fixture) && !AiUsageSettingsView.canSignOut(.codex, usage: fixture),
+    private static func verifyFailedReadings(_ t: Checks, fixture: AiUsageStore, copy: AiUsageCopy) throws {
+        let geminiCanSignOut = AiUsageSettingsView.canSignOut(AiUsageService.gemini, usage: fixture)
+        let colabCanSignOut = AiUsageSettingsView.canSignOut(AiUsageService.colab, usage: fixture)
+        let codexCanSignOut = AiUsageSettingsView.canSignOut(AiUsageService.codex, usage: fixture)
+        try t.check(geminiCanSignOut && !colabCanSignOut && !codexCanSignOut,
                     "Gemini can sign out when only Colab has a reading")
-        try t.check(row(.codex).snapshot.stale && row(.codex).reason(copy) == copy.error(.network) &&
-                    row(.codex).updateDate == nil &&
-                    row(.codex).snapshot.fetchedAt.map(copy.stale)?.hasSuffix(" の値") == true,
+
+        let codex = panelService(AiUsageService.codex, in: fixture)
+        let staleLabel = codex.snapshot.fetchedAt.map(copy.stale)
+        let staleReason = codex.reason(copy) == copy.error(AiUsageFailure.network)
+        let retainsReading = codex.snapshot.stale && staleLabel?.hasSuffix(" の値") == true
+        try t.check(retainsReading && staleReason && codex.updateDate == nil,
                     "Stale data preserves its value and error, and is excluded from the update clock")
-        try t.check(row(.gemini).emptyMessage(copy) == copy.signedOut && row(.gemini).updateDate == nil &&
-                    row(.muse).emptyMessage(copy) == copy.error(.changed) && row(.muse).orderedWindows.isEmpty &&
-                    row(.muse).updateDate == nil, "Signed-out and error states have reasons and no update clock or numeric reading")
-        let claude = row(.claude)
-        let other = claude.windows(in: .other).map(claude.quota)
-        try t.check(row(.gemini).showsListRow && row(.muse).showsListRow && row(.codex).showsListRow,
+        let gemini = panelService(AiUsageService.gemini, in: fixture)
+        let muse = panelService(AiUsageService.muse, in: fixture)
+        let signedOutWithoutUpdate = gemini.emptyMessage(copy) == copy.signedOut && gemini.updateDate == nil
+        let museError = muse.emptyMessage(copy) == copy.error(AiUsageFailure.changed)
+        let museHasNoReading = muse.orderedWindows.isEmpty && muse.updateDate == nil
+        try t.check(signedOutWithoutUpdate && museError && museHasNoReading,
+                    "Signed-out and error states have reasons and no update clock or numeric reading")
+        try t.check(gemini.appears(in: .limits) && muse.appears(in: .limits) && codex.appears(in: .limits),
                     "Signed-out, error-only and stale quota services remain listed")
-        let unavailable = other.first
-        try t.check(unavailable?.window.remaining == nil && unavailable?.resetText(copy, now: now) == nil &&
-                    unavailable?.help(copy) == "Fable\n取得できません" &&
-                    unavailable.map { copy.meterAccessibility($0, now: now) } == "Fable 取得できません",
+    }
+
+    private static func verifyMeterDetails(_ t: Checks, quotas: [AiUsageQuota], copy: AiUsageCopy, now: Date) throws {
+        let unavailable = quotas.first
+        let unavailableAccessibility = unavailable.map { copy.meterAccessibility($0, now: now) }
+        let hidesReading = unavailable?.window.remaining == nil && unavailable?.resetText(copy, now: now) == nil
+        try t.check(hidesReading && unavailable?.help(copy) == "Fable\n取得できません" &&
+                    unavailableAccessibility == "Fable 取得できません",
                     "Unreadable meter has no value or reset line, and explains the state in help and accessibility")
-        let longQuotas = Array(other.dropFirst())
-        try t.check(longQuotas.map { $0.fullName(copy) } == ["GPT-5.3-Codex-Spark 5時間", "GPT-5.3-Codex-Spark 1週間"] &&
-                    longQuotas.allSatisfy { quota in
-                        quota.help(copy).hasPrefix(quota.fullName(copy) + "\n") &&
-                        copy.meterAccessibility(quota, now: now).hasPrefix(quota.fullName(copy) + " ")
-                    }, "Duplicate quota names retain the full name and duration in help and accessibility")
-        try t.check(longQuotas.map { $0.meterDetail(copy, now: now) } == ["5時間 · 4:49", "1週間 · 3日21時間"],
+        let longQuotas = Array(quotas.dropFirst())
+        let names = longQuotas.map { $0.fullName(copy) }
+        let hasFullLabels = longQuotas.allSatisfy { quota in
+            let name = quota.fullName(copy)
+            let help = quota.help(copy)
+            let accessibility = copy.meterAccessibility(quota, now: now)
+            return help.hasPrefix(name + "\n") && accessibility.hasPrefix(name + " ")
+        }
+        try t.check(names == ["GPT-5.3-Codex-Spark 5時間", "GPT-5.3-Codex-Spark 1週間"] && hasFullLabels,
+                    "Duplicate quota names retain the full name and duration in help and accessibility")
+        let details = longQuotas.map { $0.meterDetail(copy, now: now) }
+        try t.check(details == ["5時間 · 4:49", "1週間 · 3日21時間"],
                     "The second meter line combines duplicate duration and remaining reset time")
-        let unreadableDuplicate = AiUsageQuota(window: .init(model: "GPT-5.3-Codex-Spark", percent: nil,
-                                                            resetsAt: now + 3600, minutes: 300), distinguishesDuration: true)
+        let unreadableWindow = AiUsageWindow(model: "GPT-5.3-Codex-Spark", percent: nil,
+                                             resetsAt: now.addingTimeInterval(3600), minutes: 300)
+        let unreadableDuplicate = AiUsageQuota(window: unreadableWindow, distinguishesDuration: true)
+        let duplicateDetail = unreadableDuplicate.meterDetail(copy, now: now)
+        let duplicateHelp = unreadableDuplicate.help(copy)
         try t.check(unavailable?.meterDetail(copy, now: now) == nil &&
-                    unreadableDuplicate.meterDetail(copy, now: now) == "5時間" &&
-                    unreadableDuplicate.help(copy) == "GPT-5.3-Codex-Spark 5時間\n取得できません",
+                    duplicateDetail == "5時間" && duplicateHelp == "GPT-5.3-Codex-Spark 5時間\n取得できません",
                     "Unreadable duplicate meter shows only the duration on its second line")
-        try verifyReadingOpacity(t, quota: .init(window: sampleWindow), copy: copy, now: now)
-        try verifySettingsAction(t, copy: copy)
-        try verifyNarrowContent(t, quota: .init(window: sampleWindow), copy: copy, now: now)
-        let states = try capture(preview, size: NSSize(width: minimum, height: 790), appearance: .darkAqua)
-        try states.write(to: output.appendingPathComponent("meter-states.png"), options: .atomic)
-        settings.aiUsageLayout = .list
+    }
+
+    private static func captureFreshPanels<V: View>(
+        _ t: Checks, preview: V, panel: AiUsagePanelView, output: URL, minimum: CGFloat, now: Date
+    ) throws {
+        let claude = panelService(AiUsageService.claude, in: panel.usage)
+        let listSize = NSSize(width: minimum, height: 470)
+        let list = try capture(preview, size: listSize, appearance: NSAppearance.Name.darkAqua)
+        try list.write(to: output.appendingPathComponent("list.png"), options: Data.WritingOptions.atomic)
+        try verifyRowMetadata(t, panel: panel, service: claude, now: now, width: minimum)
+
+        panel.settings.aiUsageLayout = AiUsageLayout.meter
+        let meterSize = NSSize(width: 760, height: 510)
+        let meter = try capture(preview, size: meterSize, appearance: NSAppearance.Name.darkAqua)
+        try meter.write(to: output.appendingPathComponent("meter.png"), options: Data.WritingOptions.atomic)
+        try verifyRowMetadata(t, panel: panel, service: claude, now: now, width: minimum)
+    }
+
+    private static func captureStatePanels<V: View>(
+        _ t: Checks, preview: V, settings: AppSettings, output: URL, minimum: CGFloat
+    ) throws {
+        let meterSize = NSSize(width: minimum, height: 790)
+        let states = try capture(preview, size: meterSize, appearance: NSAppearance.Name.darkAqua)
+        try states.write(to: output.appendingPathComponent("meter-states.png"), options: Data.WritingOptions.atomic)
+        settings.aiUsageLayout = AiUsageLayout.list
         try verifyPinnedListHeader(t, view: preview, width: minimum)
-        let listStates = try capture(preview, size: NSSize(width: minimum, height: 375), appearance: .darkAqua)
-        try listStates.write(to: output.appendingPathComponent("list-states.png"), options: .atomic)
+        let listSize = NSSize(width: minimum, height: 585)
+        let listStates = try capture(preview, size: listSize, appearance: NSAppearance.Name.darkAqua)
+        try listStates.write(to: output.appendingPathComponent("list-states.png"), options: Data.WritingOptions.atomic)
+    }
+
+    private static func verifySettingsImage(_ t: Checks, settings: AppSettings, fixture: AiUsageStore, output: URL) throws {
         let account = CodexVoiceAccountLoginController(contextProvider: { [] }, browserOpener: { _ in false }, credentialChangeHandler: {})
-        let settingsPNG = try capture(VStack(alignment: .leading) {
+        let content = VStack(alignment: HorizontalAlignment.leading) {
             Text(SettingsCategory.ai.title(language: .japanese)).font(.title2.weight(.semibold))
             SettingsCard {
                 AiUsageSettingsView(settings: settings, usage: fixture, codexAccount: account)
             }
         }.padding(24).frame(maxHeight: .infinity, alignment: .top)
-            .background(Color(nsColor: .windowBackgroundColor)),
-            size: NSSize(width: 680, height: 580), appearance: .aqua)
+            .background(Color(nsColor: NSColor.windowBackgroundColor))
+        let size = NSSize(width: 680, height: 690)
+        let settingsPNG = try capture(content, size: size, appearance: NSAppearance.Name.aqua)
         try t.check(NSBitmapImageRep(data: settingsPNG)?.pixelsWide ?? 0 > 0, "Settings still renders with the service order controls")
-        try settingsPNG.write(to: output.appendingPathComponent("settings.png"), options: .atomic)
+        try settingsPNG.write(to: output.appendingPathComponent("settings.png"), options: Data.WritingOptions.atomic)
+    }
+
+    private static func verifyPanelImages(_ t: Checks, output: URL, minimum: CGFloat) throws {
         for name in ["list", "meter", "meter-states", "list-states", "settings"] {
             let file = output.appendingPathComponent("\(name).png")
             let bitmap = try NSBitmapImageRep(data: Data(contentsOf: file))
@@ -747,10 +824,16 @@ enum AiUsageVerificationCommand {
                 try t.check(bitmap.map(solidMeterColors) == expected, "\(name) renders the expected palette and dims stale values")
             }
         }
+    }
+
+    private static func verifyPanelWidths(
+        _ t: Checks, panel: AiUsagePanelView, services: [AiUsagePanelService], now: Date, minimum: CGFloat
+    ) throws {
+        let settings = panel.settings
         for layout in AiUsageLayout.allCases {
             settings.aiUsageLayout = layout
             for size in PanelTextSizeOption.allCases {
-                let content = panel.panelContent(AiUsageService.allCases.map(row), now: now, width: minimum)
+                let content = panel.panelContent(services, now: now, width: minimum)
                     .environment(\.panelTextSize, size)
                 let fitting = NSHostingController(rootView: content)
                     .sizeThatFits(in: CGSize(width: minimum, height: .greatestFiniteMagnitude))
@@ -781,8 +864,8 @@ enum AiUsageVerificationCommand {
             host.layoutSubtreeIfNeeded()
             host.displayIfNeeded()
             let after = try readBitmap(host)
-            let header = CGRect(x: 38, y: 34, width: width - 60, height: 22)
-            let rows = CGRect(x: 14, y: 70, width: width - 28, height: 75)
+            let header = CGRect(x: 38, y: 34, width: width - 60, height: 40)
+            let rows = CGRect(x: 14, y: 85, width: width - 28, height: 60)
             try t.check(abs(clip.bounds.minY - start.y) > 40 &&
                         samePixels(before, after, in: header) && !samePixels(before, after, in: rows),
                         "List column headings stay in place when rows scroll")
@@ -885,40 +968,78 @@ enum AiUsageVerificationCommand {
 
     private static func verifyOrderAndLayout(_ t: Checks, defaults: EphemeralAppSettingsDefaults,
                                              settings: AppSettings, now: Date) throws {
-        try t.check(settings.aiUsageLayout == .list && settings.aiUsageServiceOrder == AiUsageService.allCases && settings.aiUsageSort == nil,
-                    "Existing settings start in List and keep the original order")
+        let limits: AiUsageSection = .limits
+        let balances: AiUsageSection = .balances
+        try t.check(settings.aiUsageLayout == .list && settings.aiUsageServiceOrder == limits.defaultOrder &&
+                    settings.aiUsageBalanceOrder == balances.defaultOrder && settings.aiUsageSort == nil,
+                    "Existing settings start in List and use the default order for each section")
         let malformed = EphemeralAppSettingsDefaults()
         malformed.set("unknown", forKey: "aiUsageLayout")
-        malformed.set(["bogus", "muse", "muse", "codex"], forKey: "aiUsageServiceOrder")
+        malformed.set(["bogus", "muse", "claude-api", "muse", "codex"], forKey: "aiUsageServiceOrder")
+        malformed.set(["colab", "colab", "muse", "invalid"], forKey: "aiUsageBalanceOrder")
         malformed.set(["weekly", "backwards"], forKey: "aiUsageSort")
         let repaired = AppSettings(defaults: malformed)
-        try t.check(repaired.aiUsageLayout == .list && repaired.aiUsageSort == nil &&
-                    repaired.aiUsageServiceOrder == [.muse, .codex, .claude, .claudeAPI, .gemini, .colab],
-                    "Invalid layout and sort fall back, and order removes duplicate and unknown IDs")
-        try t.check(!settings.canStepAiUsageService(.codex, by: -1) && settings.canStepAiUsageService(.codex, by: 1) &&
-                    settings.canStepAiUsageService(.muse, by: -1) && !settings.canStepAiUsageService(.muse, by: 1),
-                    "Ordering arrows disable only the outer moves")
+        let repairedLimits = repaired.aiUsageServiceOrder == [.muse, .codex, .claude, .gemini]
+        let repairedBalances = repaired.aiUsageBalanceOrder == [.colab, .codex, .claudeAPI]
+        try t.check(repaired.aiUsageLayout == .list && repaired.aiUsageSort == nil && repairedLimits && repairedBalances,
+                    "Migration removes unknown, duplicate and out-of-section IDs and appends missing services")
+        let legacy = EphemeralAppSettingsDefaults()
+        legacy.set(["colab", "muse", "codex", "claude-api"], forKey: "aiUsageServiceOrder")
+        let migrated = AppSettings(defaults: legacy)
+        migrated.stepAiUsageService(.muse, in: .limits, by: 1)
+        let restoredBalances = AppSettings(defaults: legacy).aiUsageBalanceOrder
+        try t.check(restoredBalances == [.colab, .codex, .claudeAPI],
+                    "Legacy balance order migrates once and is preserved after a limits move")
+        try t.check(!settings.canStepAiUsageService(.codex, in: limits, by: -1) &&
+                    settings.canStepAiUsageService(.codex, in: limits, by: 1) &&
+                    settings.canStepAiUsageService(.muse, in: limits, by: -1) &&
+                    !settings.canStepAiUsageService(.colab, in: balances, by: 1),
+                    "Settings arrows disable only the outer moves of each section")
         settings.hiddenAiUsageServices = [.gemini]
-        try t.check(!AiUsagePanelView.applyDrop(["outside:muse"], token: "fixture", target: .codex, settings: settings) &&
-                    AiUsagePanelView.applyDrop(["fixture:muse"], token: "fixture", target: .codex, settings: settings),
-                    "List drop updates the saved order and rejects an external payload")
-        settings.stepAiUsageService(.muse, by: -1)
-        try t.check(settings.aiUsageServiceOrder.first == .muse, "Settings Move up does not cross the first row")
-        settings.stepAiUsageService(.muse, by: 1)
-        try t.check(settings.aiUsageServiceOrder.prefix(2).elementsEqual([.codex, .muse]), "Settings Move down changes the shared order")
-        settings.stepAiUsageService(.muse, by: -1)
-        try t.check(settings.aiUsageServiceOrder.first == .muse, "Settings Move up changes the shared order")
-        settings.aiUsageSort = .init(column: .other, previous: nil)
-        try t.check(!AiUsagePanelView.applyDrop(["fixture:muse"], token: "fixture", target: .colab, settings: settings),
-                    "List stops accepting drops when a sort is active")
+        settings.stepAiUsageService(.muse, in: limits, by: -1)
+        try t.check(settings.aiUsageServiceOrder == [.codex, .claude, .muse, .gemini] &&
+                    settings.aiUsageBalanceOrder == balances.defaultOrder, "Settings Move up affects only limits")
+        settings.stepAiUsageService(.muse, in: limits, by: 1)
+        try t.check(settings.aiUsageServiceOrder == limits.defaultOrder, "Settings Move down restores the limits order")
+
+        let reordering = AiUsageReordering()
+        let item = AiUsageOrderItem(service: .codex, section: balances)
+        let frames: [AiUsageService: CGRect] = [
+            .codex: CGRect(x: 0, y: 0, width: 170, height: 80),
+            .colab: CGRect(x: 180, y: 0, width: 170, height: 80)
+        ]
+        let target = CGPoint(x: 200, y: 40)
+        reordering.begin(item, in: frames, settings: settings)
+        reordering.move(item, to: target)
+        let preview = reordering.order(in: balances, settings: settings)
+        try t.check(preview == [.claudeAPI, .colab, .codex] && settings.aiUsageBalanceOrder == balances.defaultOrder,
+                    "Pointer movement previews the new order without writing settings")
+        reordering.move(item, to: CGPoint(x: 200, y: 160))
+        try t.check(reordering.order(in: balances, settings: settings) == preview &&
+                    reordering.order(in: limits, settings: settings) == limits.defaultOrder,
+                    "Pointer targets outside the source section do not affect either preview order")
+        reordering.cancel()
+        try t.check(reordering.order(in: balances, settings: settings) == balances.defaultOrder,
+                    "Cancellation restores the saved order")
+        reordering.begin(item, in: frames, settings: settings)
+        reordering.move(item, to: target)
+        reordering.end(item, at: target, insideWindow: false, settings: settings)
+        try t.check(settings.aiUsageBalanceOrder == balances.defaultOrder,
+                    "Release outside the window restores the saved order")
+        settings.aiUsageSort = AiUsageSort(column: .other, previous: nil)
+        try t.check(!reordering.allowsMovement(in: limits, settings: settings) &&
+                    reordering.allowsMovement(in: balances, settings: settings),
+                    "List column sorting disables movement only for limits")
+        reordering.begin(item, in: frames, settings: settings)
+        reordering.end(item, at: target, insideWindow: true, settings: settings)
         settings.aiUsageLayout = .meter
-        try t.check(AiUsagePanelView.applyDrop(["fixture:muse"], token: "fixture", target: .claudeAPI, settings: settings),
-                    "Meter cards reorder the shared preference while a list sort is retained")
+        try t.check(reordering.allowsMovement(in: limits, settings: settings),
+                    "The meter keeps manual limits order while a table sort is stored")
         let reloaded = AppSettings(defaults: defaults)
         try t.check(reloaded.aiUsageLayout == .meter && reloaded.aiUsageSort == settings.aiUsageSort &&
-                    reloaded.aiUsageServiceOrder == [.codex, .claude, .claudeAPI, .muse, .gemini, .colab] &&
-                    reloaded.visibleAiUsageServices == [.codex, .claude, .claudeAPI, .muse, .colab],
-                    "Both layouts, settings order, hidden IDs and sort survive settings recreation")
+                    reloaded.aiUsageServiceOrder == limits.defaultOrder &&
+                    reloaded.aiUsageBalanceOrder == preview && reloaded.hiddenAiUsageServices == [.gemini],
+                    "Both layouts, both orders, hidden IDs and sort survive settings recreation")
         func sample(_ id: AiUsageService, _ values: [Double?]) -> AiUsagePanelService {
             var snapshot = AiUsageSnapshot()
             snapshot.apply(.success(.init(windows: values.map { .init(model: "Extra", percent: $0, minutes: 300) })), at: now)
@@ -936,17 +1057,186 @@ enum AiUsageVerificationCommand {
         try t.check(AiUsageSort(column: .weekly, previous: descending).direction == .asc &&
                     AiUsagePanelService.sorted(rows, by: nil).map(\.id) == rows.map(\.id),
                     "A new sort starts ascending and reset restores custom order")
-        _ = settings.moveAiUsageService(.muse, to: .colab)
+        settings.saveAiUsageOrder(balances.defaultOrder, in: balances)
         settings.aiUsageLayout = .list
         settings.aiUsageSort = nil
         settings.hiddenAiUsageServices = []
     }
 
+    private static func verifyNativeReordering(_ t: Checks, panel: AiUsagePanelView) throws {
+        let settings = panel.settings
+        let section: AiUsageSection = .balances
+        let original = settings.aiUsageOrder(in: section)
+        defer { settings.saveAiUsageOrder(original, in: section) }
+        let preview = panel.background(Color.black)
+        let size = NSSize(width: 760, height: 630)
+        try withHostingView(preview, size: size, appearance: NSAppearance.Name.darkAqua) { host in
+            guard let window = host.window else { throw LibraryError.message("AI Usage: missing fixture window") }
+            let handles = reorderHandles(in: host)
+            let source = handles.first { $0.item == AiUsageOrderItem(service: .codex, section: section) }
+            let target = handles.first { $0.item == AiUsageOrderItem(service: .colab, section: section) }
+            guard let source, let target, let item = source.item, let reordering = source.reordering else {
+                throw LibraryError.message("AI Usage: missing native balance handles")
+            }
+
+            let origin = source.convert(CGPoint(x: source.bounds.midX, y: source.bounds.midY), to: nil)
+            let destination = target.convert(CGPoint(x: target.bounds.midX, y: target.bounds.midY), to: nil)
+            let local = host.superview?.convert(origin, from: nil) ?? origin
+            try t.check(host.hitTest(local) === source &&
+                        source.accessibilityLabel() == "Codex クレジットを移動",
+                        "A window hit test reaches the named native reorder handle")
+            let frames = reordering.frames(in: section, window: window)
+            let sourceFits = frames[.codex]?.contains(origin) == true
+            let targetFits = frames[.colab]?.contains(destination) == true
+            try t.check(sourceFits && targetFits, "Native handle events target the visible card bounds")
+            let pasteboard = NSPasteboard(name: .drag)
+            let pasteboardCount = pasteboard.changeCount
+            let down = try pointerEvent(.leftMouseDown, point: origin, window: window)
+            let drag = try pointerEvent(.leftMouseDragged, point: destination, window: window)
+            let up = try pointerEvent(.leftMouseUp, point: destination, window: window)
+            source.mouseDown(with: down)
+            source.mouseDragged(with: drag)
+            let expected: [AiUsageService] = [.claudeAPI, .colab, .codex]
+            let renderedOrder = reordering.order(in: section, settings: settings)
+            try t.check(source.isReordering && renderedOrder == expected && settings.aiUsageBalanceOrder == original,
+                        "Native mouse drag previews the movement before release")
+            updateFixtureLayout(host)
+            let movedHandle = reorderHandles(in: host).first { $0.item == item }
+            let movedCenter = source.convert(CGPoint(x: source.bounds.midX, y: source.bounds.midY), to: nil)
+            try t.check(movedHandle === source && abs(movedCenter.x - destination.x) < 1,
+                        "The rendered card moves to the target slot without replacing its tracking handle")
+            let escape = try keyEvent(53, window: window)
+            source.keyDown(with: escape)
+            source.mouseUp(with: up)
+            try t.check(!reordering.isMoving(item) && settings.aiUsageBalanceOrder == original,
+                        "Escape followed by mouse-up cancels a native drag")
+            updateFixtureLayout(host)
+            source.mouseDown(with: down)
+            source.mouseDragged(with: drag)
+            let outsidePoint = CGPoint(x: window.frame.width + 10, y: destination.y)
+            let outside = try pointerEvent(.leftMouseUp, point: outsidePoint, window: window)
+            source.mouseUp(with: outside)
+            try t.check(!reordering.isMoving(item) && settings.aiUsageBalanceOrder == original,
+                        "A native mouse-up outside the window cancels the drag")
+            updateFixtureLayout(host)
+            source.mouseDown(with: down)
+            source.mouseDragged(with: drag)
+            source.mouseUp(with: up)
+            try t.check(settings.aiUsageBalanceOrder == expected && pasteboard.changeCount == pasteboardCount,
+                        "Native mouse release saves order without starting an OS drag session")
+            let upArrow = try keyEvent(126, window: window)
+            try t.check(window.makeFirstResponder(source) && window.firstResponder === source,
+                        "The reorder handle accepts keyboard focus")
+            source.keyDown(with: upArrow)
+            try t.check(settings.aiUsageBalanceOrder == [.claudeAPI, .codex, .colab],
+                        "An arrow key on the focused handle moves it by one position")
+        }
+    }
+
+    private static func updateFixtureLayout(_ host: NSView) {
+        RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+        host.layoutSubtreeIfNeeded()
+        host.displayIfNeeded()
+    }
+
+    private static func reorderHandles(in view: NSView) -> [AiUsageOrderHandleView] {
+        if let handle = view as? AiUsageOrderHandleView { return [handle] }
+        return view.subviews.flatMap { reorderHandles(in: $0) }
+    }
+
+    private static func pointerEvent(_ type: NSEvent.EventType, point: CGPoint, window: NSWindow) throws -> NSEvent {
+        guard let event = NSEvent.mouseEvent(with: type, location: point, modifierFlags: [], timestamp: 0,
+                                             windowNumber: window.windowNumber, context: nil, eventNumber: 1,
+                                             clickCount: 1, pressure: 1) else { throw AiUsageFailure.unavailable }
+        return event
+    }
+
+    private static func keyEvent(_ code: UInt16, window: NSWindow) throws -> NSEvent {
+        guard let event = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0,
+                                           windowNumber: window.windowNumber, context: nil, characters: "",
+                                           charactersIgnoringModifiers: "", isARepeat: false, keyCode: code)
+        else { throw AiUsageFailure.unavailable }
+        return event
+    }
+
+    private static func verifyNumberTypography(_ t: Checks) throws {
+        func width(_ amount: String) -> CGFloat {
+            let view = AiUsageReadingNumber(amount: amount, unit: nil, size: 27, unitSize: 12)
+            return NSHostingController(rootView: view).sizeThatFits(in: CGSize(width: 200, height: 60)).width
+        }
+        try t.check(abs(width("111.1") - width("888.8")) < 0.5, "Reading uses tabular digits")
+        try t.check(width("WW") > width("ii") + 5, "Reading uses a proportional system font rather than a monospaced font")
+    }
+
+    @MainActor
     private final class PresentationScenario {
+        private let referenceDate: Date
+        let sampleWindow: AiUsageWindow
         var now: Date
         var showsFailures = false
 
-        init(now: Date) { self.now = now }
+        init(now: Date) {
+            self.now = now
+            self.referenceDate = now
+            let longReset = now.addingTimeInterval(336_600)
+            self.sampleWindow = AiUsageWindow(model: "Fable", percent: 76, resetsAt: longReset, minutes: 10_080)
+        }
+
+        func fixtureResult(for service: AiUsageService) -> AiUsageResult {
+            switch service {
+            case .codex:
+                if showsFailures { return AiUsageResult.failure(AiUsageFailure.network) }
+                let session = AiUsageWindow(percent: 5.1, resetsAt: referenceDate.addingTimeInterval(17_340), minutes: 300)
+                let weekly = AiUsageWindow(percent: 79, resetsAt: sampleWindow.resetsAt, minutes: 10_080)
+                let credits = AiUsageBalance(kind: .codexCredits, value: .amount(40957))
+                let reading = AiUsageReading(plan: "Pro Lite", windows: [session, weekly], balances: [credits])
+                return AiUsageResult.success(reading)
+            case .claude:
+                return AiUsageResult.success(claudeReading())
+            case .claudeAPI:
+                let planExpiry = referenceDate.addingTimeInterval(12 * 86_400)
+                let purchaseExpiry = referenceDate.addingTimeInterval(82 * 86_400)
+                let plan = AiUsageBalance(kind: .planCredit, value: .amount(57.25),
+                                          label: "API credit (Max)", expiresAt: planExpiry)
+                let purchase = AiUsageBalance(kind: .purchasedCredit, value: .amount(47.73), expiresAt: purchaseExpiry)
+                let reading = AiUsageReading(balances: [plan, purchase])
+                return AiUsageResult.success(reading)
+            case .gemini:
+                if showsFailures { return AiUsageResult.signedOut }
+                let weekly = AiUsageWindow(percent: 48, resetsAt: referenceDate.addingTimeInterval(2100), minutes: 10_080)
+                let reading = AiUsageReading(windows: [weekly])
+                return AiUsageResult.success(reading)
+            case .colab:
+                let balance = AiUsageBalance(kind: .computeUnits, value: .units(570.2), perHour: 0.8)
+                let reading = AiUsageReading(balances: [balance])
+                return AiUsageResult.success(reading)
+            case .muse:
+                if showsFailures { return AiUsageResult.failure(AiUsageFailure.changed) }
+                let reset = referenceDate.addingTimeInterval(6 * 86_400 + 1800)
+                let weekly = AiUsageWindow(percent: 57, resetsAt: reset, minutes: 10_080)
+                let reading = AiUsageReading(windows: [weekly])
+                return AiUsageResult.success(reading)
+            }
+        }
+
+        private func claudeReading() -> AiUsageReading {
+            let session = AiUsageWindow(percent: 33, resetsAt: referenceDate.addingTimeInterval(4200), minutes: 300)
+            let weeklyReset = referenceDate.addingTimeInterval(2 * 86_400 + 1800)
+            let weekly = AiUsageWindow(percent: 55, resetsAt: weeklyReset, minutes: 10_080)
+            var windows = [session, weekly]
+            if showsFailures {
+                let unavailable = AiUsageWindow(model: "Fable", percent: nil,
+                                                resetsAt: referenceDate.addingTimeInterval(3600), minutes: 10_080)
+                let model = "GPT-5.3-Codex-Spark"
+                let sparkSession = AiUsageWindow(model: model, percent: 30.1,
+                                                 resetsAt: referenceDate.addingTimeInterval(17_340), minutes: 300)
+                let sparkWeekly = AiUsageWindow(model: model, percent: 55.1, resetsAt: sampleWindow.resetsAt, minutes: 10_080)
+                windows.append(contentsOf: [unavailable, sparkSession, sparkWeekly])
+            } else {
+                windows.append(sampleWindow)
+            }
+            return AiUsageReading(plan: "Max 5x", windows: windows)
+        }
     }
 
     private static func capture<V: View>(_ view: V, size: NSSize, appearance: NSAppearance.Name) throws -> Data {

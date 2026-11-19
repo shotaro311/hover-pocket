@@ -6,7 +6,7 @@ struct AiUsagePanelView: View {
     let isActive: Bool
     let openSettings: () -> Void
     @Environment(\.panelTextSize) private var textSize
-    @State private var dragToken = UUID().uuidString
+    @State private var reordering = AiUsageReordering()
 
     var body: some View {
         TimelineView(.periodic(from: .now, by: 60)) { context in
@@ -24,13 +24,18 @@ struct AiUsagePanelView: View {
                     }
                 } else {
                     GeometryReader { proxy in
+                        let limits = rows(in: .limits, from: services)
+                        let balances = rows(in: .balances, from: services)
                         VStack(spacing: 4) {
-                            if settings.aiUsageLayout == .list {
-                                listHeader(columns(for: proxy.size.width))
-                                    .padding(.horizontal, Self.contentInset)
+                            if settings.aiUsageLayout == .list, !limits.isEmpty {
+                                VStack(spacing: 4) {
+                                    sectionTitle(.limits)
+                                    listHeader(columns(for: proxy.size.width))
+                                }
+                                .padding(.horizontal, Self.contentInset)
                             }
                             ScrollView(.vertical) {
-                                panelContent(services, now: now, width: proxy.size.width)
+                                sectionContent(limits: limits, balances: balances, now: now, width: proxy.size.width)
                             }
                             .scrollIndicators(.hidden)
                         }
@@ -42,7 +47,12 @@ struct AiUsagePanelView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .onChange(of: isActive, initial: true) { _, active in
             if active { usage.refresh(visible) }
+            else { reordering.cancel() }
         }
+        .onChange(of: settings.aiUsageLayout) { _, _ in reordering.cancel() }
+        .onChange(of: settings.aiUsageSort) { _, _ in reordering.cancel() }
+        .onChange(of: settings.hiddenAiUsageServices) { _, _ in reordering.cancel() }
+        .onDisappear { reordering.cancel() }
     }
 
     private static let contentInset: CGFloat = 14
@@ -52,19 +62,51 @@ struct AiUsagePanelView: View {
     }
 
     func panelContent(_ services: [AiUsagePanelService], now: Date, width: CGFloat) -> some View {
-        Group {
-            switch settings.aiUsageLayout {
-            case .list: list(services, now: now, columns: columns(for: width))
-            case .meter: meters(services, now: now)
+        sectionContent(limits: rows(in: .limits, from: services),
+                       balances: rows(in: .balances, from: services), now: now, width: width)
+    }
+
+    private func rows(in section: AiUsageSection, from services: [AiUsagePanelService]) -> [AiUsagePanelService] {
+        section.visibleRows(services, in: reordering.order(in: section, settings: settings))
+    }
+
+    private func sectionContent(
+        limits: [AiUsagePanelService], balances: [AiUsagePanelService], now: Date, width: CGFloat
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            if !limits.isEmpty {
+                if settings.aiUsageLayout == .list {
+                    list(limits, now: now, columns: columns(for: width))
+                } else {
+                    VStack(alignment: .leading, spacing: 6) {
+                        sectionTitle(.limits)
+                        meters(limits, now: now)
+                    }
+                }
+            }
+            if !balances.isEmpty {
+                VStack(alignment: .leading, spacing: 6) {
+                    sectionTitle(.balances)
+                    balanceCards(balances, now: now)
+                }
             }
         }
         .padding(.horizontal, Self.contentInset)
         .padding(.bottom, 12)
     }
 
+    private func sectionTitle(_ section: AiUsageSection) -> some View {
+        HStack(spacing: 8) {
+            Text(section.title(copy))
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(aiUsageColor(0x9ba6b5))
+                .accessibilityAddTraits(.isHeader)
+            Rectangle().fill(.white.opacity(0.08)).frame(height: 1).accessibilityHidden(true)
+        }
+    }
+
     private var visible: [AiUsageService] { settings.visibleAiUsageServices }
     private var copy: AiUsageCopy { .init(language: settings.appLanguage) }
-    private var canDrag: Bool { settings.aiUsageLayout == .meter || settings.aiUsageSort == nil }
 
     private func header(_ services: [AiUsagePanelService]) -> some View {
         let refreshing = services.contains { $0.snapshot.refreshing }
@@ -119,29 +161,11 @@ struct AiUsagePanelView: View {
     }
 
     private func list(_ services: [AiUsagePanelService], now: Date, columns: ListColumns) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            ForEach(AiUsagePanelService.sorted(services.filter(\.showsListRow), by: settings.aiUsageSort)) { service in
-                listRow(service, now: now, columns: columns)
+        let visible = services.map(\.id)
+        return VStack(alignment: .leading, spacing: 4) {
+            ForEach(AiUsagePanelService.sorted(services, by: settings.aiUsageSort)) { service in
+                listRow(service, now: now, columns: columns, visible: visible)
             }
-
-            AiUsageFlow(spacing: 6) {
-                ForEach(services) { service in
-                    if let balance = AiUsagePanelBalance(service) {
-                        HStack(spacing: 5) {
-                            Text(balance.label(copy)).foregroundStyle(.secondary)
-                            Text(copy.balanceValue(balance.total)).monospacedDigit()
-                                .opacity(service.readingOpacity)
-                        }
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 4)
-                        .background(.white.opacity(0.07), in: Capsule())
-                        .help([
-                            service.staleDate.map(copy.stale), service.reason(copy), balance.help(copy, now: now)
-                        ].compactMap { $0 }.joined(separator: "\n"))
-                    }
-                }
-            }
-            .padding(.top, 4)
         }
     }
 
@@ -167,11 +191,12 @@ struct AiUsagePanelView: View {
         .accessibilityValue(value)
     }
 
-    private func listRow(_ service: AiUsagePanelService, now: Date, columns: ListColumns) -> some View {
-        VStack(alignment: .leading, spacing: 3) {
+    private func listRow(_ service: AiUsagePanelService, now: Date, columns: ListColumns, visible: [AiUsageService]) -> some View {
+        let item = AiUsageOrderItem(service: service.id, section: .limits)
+        return VStack(alignment: .leading, spacing: 3) {
             HStack(alignment: .top, spacing: ListColumns.spacing) {
                 Group {
-                    if canDrag { handle(service.id) }
+                    if reordering.allowsMovement(in: .limits, settings: settings) { handle(item, title: service.id.title, visible: visible) }
                     else { Color.clear.frame(height: 1).accessibilityHidden(true) }
                 }
                 .frame(width: ListColumns.handle)
@@ -206,66 +231,95 @@ struct AiUsagePanelView: View {
         .padding(.horizontal, ListColumns.inset)
         .padding(.vertical, 6)
         .background(.white.opacity(0.055), in: RoundedRectangle(cornerRadius: 7))
-        .modifier(DropService(enabled: canDrag, perform: { drop($0, on: service.id) }))
+        .modifier(AiUsageReorderItemStyle(item: item, reordering: reordering, radius: 7, border: 0))
     }
 
     private func meters(_ services: [AiUsagePanelService], now: Date) -> some View {
-        AiUsageFlow(spacing: 8) {
+        let visible = services.map(\.id)
+        return AiUsageFlow(spacing: 8) {
             ForEach(services) { service in
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack(alignment: .top, spacing: 8) {
-                        handle(service.id)
-                        VStack(alignment: .leading, spacing: 2) {
-                            HStack(spacing: 4) {
-                                serviceName(service)
-                                staleTime(service)
-                            }
-                            if service.snapshot.stale, let reason = service.reason(copy) {
-                                AiUsageReasonText(message: reason)
-                            }
-                        }
-                    }
-                    if service.snapshot.reading == nil {
-                        emptyMessage(service)
-                    } else {
-                        AiUsageFlow(spacing: 4) {
-                            ForEach(Array(service.orderedWindows.enumerated()), id: \.offset) { _, window in
-                                AiUsageMeterView(quota: service.quota(window), copy: copy, now: now,
-                                                 readingOpacity: service.readingOpacity)
-                            }
-                            if let balance = AiUsagePanelBalance(service) {
-                                balanceMeter(balance, now: now, readingOpacity: service.readingOpacity)
-                            }
-                        }
-                    }
-                }
-                .padding(8)
-                .background(.white.opacity(0.035), in: RoundedRectangle(cornerRadius: 8))
-                .overlay { RoundedRectangle(cornerRadius: 8).strokeBorder(.white.opacity(0.12)).allowsHitTesting(false) }
-                .modifier(DropService(enabled: true, perform: { drop($0, on: service.id) }))
+                meterCard(service, now: now, visible: visible)
             }
         }
     }
 
-    private func balanceMeter(_ balance: AiUsagePanelBalance, now: Date, readingOpacity: Double) -> some View {
-        VStack(spacing: 6) {
-            Text(balance.meterLabel(copy)).font(.system(size: 11)).foregroundStyle(.secondary)
-            Text(balance.meterValue(copy)).font(.system(size: 19, weight: .semibold, design: .monospaced))
-                .lineLimit(1)
-                .minimumScaleFactor(0.55)
-                .opacity(readingOpacity)
-                .padding(.horizontal, 5)
-                .padding(.vertical, 4)
-                .frame(maxWidth: .infinity)
-                .background(aiUsageColor(0x161b22), in: RoundedRectangle(cornerRadius: 4))
-            if let detail = balance.meterDetail(copy, now: now) {
-                Text(detail).font(.system(size: 10)).foregroundStyle(.secondary)
-                    .lineLimit(1).minimumScaleFactor(0.75)
+    private func meterCard(_ service: AiUsagePanelService, now: Date, visible: [AiUsageService]) -> some View {
+        let item = AiUsageOrderItem(service: service.id, section: .limits)
+        return VStack(alignment: .leading, spacing: 4) {
+            HStack(alignment: .top, spacing: 8) {
+                handle(item, title: service.id.title, visible: visible)
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 4) {
+                        serviceName(service)
+                        staleTime(service)
+                    }
+                    if service.snapshot.stale, let reason = service.reason(copy) {
+                        AiUsageReasonText(message: reason)
+                    }
+                }
+            }
+            if service.orderedWindows.isEmpty {
+                emptyMessage(service)
+            } else {
+                AiUsageFlow(spacing: 4) {
+                    ForEach(Array(service.orderedWindows.enumerated()), id: \.offset) { _, window in
+                        AiUsageMeterView(quota: service.quota(window), copy: copy, now: now,
+                                         readingOpacity: service.readingOpacity)
+                    }
+                }
             }
         }
-        .frame(width: AiUsageMeterView.width, height: AiUsageMeterView.height)
-        .help(balance.help(copy, now: now))
-        .accessibilityElement(children: .combine)
+        .padding(8)
+        .background(.white.opacity(0.035), in: RoundedRectangle(cornerRadius: 8))
+        .modifier(AiUsageReorderItemStyle(item: item, reordering: reordering, radius: 8))
+    }
+
+    private func balanceCards(_ services: [AiUsagePanelService], now: Date) -> some View {
+        let visible = services.map(\.id)
+        return AiUsageFlow(spacing: 8) {
+            ForEach(services) { service in
+                balanceCard(service, now: now, visible: visible)
+            }
+        }
+    }
+
+    private func balanceCard(_ service: AiUsagePanelService, now: Date, visible: [AiUsageService]) -> some View {
+        let item = AiUsageOrderItem(service: service.id, section: .balances)
+        let balance = AiUsagePanelBalance(service)
+        let title = balance?.label(copy) ?? service.id.title
+        return VStack(alignment: .leading, spacing: 3) {
+            HStack(spacing: 6) {
+                handle(item, title: title, visible: visible)
+                Text(title)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(aiUsageColor(0x9ba6b5))
+                    .lineLimit(1)
+            }
+            staleTime(service)
+            if let balance {
+                AiUsageReadingNumber(
+                    amount: copy.balanceValue(balance.total), unit: balance.unit, size: 27, unitSize: 12
+                )
+                .lineLimit(1)
+                .minimumScaleFactor(0.6)
+                .opacity(service.readingOpacity)
+                .help(balance.help(copy, now: now))
+
+                if let detail = balance.meterDetail(copy, now: now) {
+                    Text(detail).font(.system(size: 10)).monospacedDigit().foregroundStyle(.secondary)
+                        .lineLimit(2)
+                }
+                if let reason = service.reason(copy) {
+                    AiUsageReasonText(message: reason)
+                }
+            } else {
+                emptyMessage(service, stacked: true)
+            }
+        }
+        .frame(minWidth: 154, maxWidth: 154, minHeight: 68, alignment: .topLeading)
+        .padding(8)
+        .background(.white.opacity(0.035), in: RoundedRectangle(cornerRadius: 8))
+        .modifier(AiUsageReorderItemStyle(item: item, reordering: reordering, radius: 8))
     }
 
     private func serviceName(_ service: AiUsagePanelService) -> some View {
@@ -275,54 +329,29 @@ struct AiUsagePanelView: View {
     @ViewBuilder
     private func staleTime(_ service: AiUsagePanelService) -> some View {
         if let fetched = service.staleDate {
-            Text(copy.stale(fetched)).font(.system(size: 10))
+            Text(copy.stale(fetched)).font(.system(size: 10)).monospacedDigit()
                 .foregroundStyle(AiUsageTint.yellow.color)
                 .lineLimit(1)
         }
     }
 
     @ViewBuilder
-    private func emptyMessage(_ service: AiUsagePanelService) -> some View {
+    private func emptyMessage(_ service: AiUsagePanelService, stacked: Bool = false) -> some View {
         if service.snapshot.status == .signedOut {
-            AiUsageSignedOutView(copy: copy, openSettings: openSettings)
+            AiUsageSignedOutView(copy: copy, openSettings: openSettings, stacked: stacked)
         } else {
             AiUsageReasonText(message: service.emptyMessage(copy))
         }
     }
 
-    private func handle(_ service: AiUsageService) -> some View {
-        Grid(horizontalSpacing: 2, verticalSpacing: 2) {
-            ForEach(0..<3) { _ in
-                GridRow {
-                    Circle().frame(width: 2.5, height: 2.5)
-                    Circle().frame(width: 2.5, height: 2.5)
-                }
-            }
-        }
-        .frame(width: 12, height: 16)
-            .contentShape(Rectangle())
-            .foregroundStyle(.secondary)
-            .draggable(dragToken + ":" + service.rawValue)
-            .help(copy.text("ドラッグして並べ替え", "Drag to reorder"))
-            .accessibilityLabel(copy.text("\(service.title)の並べ替え", "Reorder \(service.title)"))
-    }
-
-    private func drop(_ items: [String], on target: AiUsageService) -> Bool {
-        Self.applyDrop(items, token: dragToken, target: target, settings: settings)
-    }
-
-    static func applyDrop(_ items: [String], token: String, target: AiUsageService, settings: AppSettings) -> Bool {
-        let prefix = token + ":"
-        let visible = settings.visibleAiUsageServices
-        guard settings.aiUsageLayout == .meter || settings.aiUsageSort == nil,
-              items.count == 1, let item = items.first, item.hasPrefix(prefix),
-              let source = AiUsageService(rawValue: String(item.dropFirst(prefix.count))),
-              visible.contains(source), visible.contains(target) else { return false }
-        return settings.moveAiUsageService(source, to: target)
+    private func handle(_ item: AiUsageOrderItem, title: String, visible: [AiUsageService]) -> some View {
+        AiUsageReorderHandle(item: item, title: title, copy: copy, settings: settings,
+                             reordering: reordering, visible: visible)
+            .frame(width: 14, height: 17)
     }
 
     private struct ListColumns {
-        static let handle: CGFloat = 12
+        static let handle: CGFloat = 14
         static let inset: CGFloat = 8
         static let spacing: CGFloat = 7
         let name: CGFloat
@@ -340,41 +369,48 @@ struct AiUsagePanelView: View {
         }
     }
 
-    private struct DropService: ViewModifier {
-        let enabled: Bool
-        let perform: ([String]) -> Bool
-        @State private var targeted = false
+}
 
-        func body(content: Content) -> some View {
-            if enabled {
-                content
-                    .contentShape(Rectangle())
-                    .overlay {
-                        if targeted {
-                            RoundedRectangle(cornerRadius: 8).strokeBorder(.white.opacity(0.4)).allowsHitTesting(false)
-                        }
-                    }
-                    .dropDestination(for: String.self, action: { items, _ in perform(items) }, isTargeted: { targeted = $0 })
-            } else {
-                content
+private struct AiUsageReorderItemStyle: ViewModifier {
+    let item: AiUsageOrderItem
+    let reordering: AiUsageReordering
+    let radius: CGFloat
+    var border: Double = 0.12
+
+    func body(content: Content) -> some View {
+        let moving = reordering.isMoving(item)
+        let outline = moving ? AiUsageTint.blue.color : Color.white.opacity(border)
+        return content
+            .background {
+                GeometryReader { geometry in
+                    AiUsageReorderFrame(item: item, reordering: reordering)
+                        .frame(width: geometry.size.width, height: geometry.size.height)
+                }
             }
-        }
+            .overlay {
+                RoundedRectangle(cornerRadius: radius).strokeBorder(outline, lineWidth: moving ? 1.5 : 1)
+                    .allowsHitTesting(false)
+            }
+            .shadow(color: .black.opacity(moving ? 0.45 : 0), radius: 4, y: 2)
+            .zIndex(moving ? 1 : 0)
     }
 }
 
 struct AiUsageSignedOutView: View {
     let copy: AiUsageCopy
     let openSettings: () -> Void
+    var stacked = false
 
     var body: some View {
-        HStack(spacing: 6) {
+        let layout = stacked ? AnyLayout(VStackLayout(alignment: .leading, spacing: 4)) : AnyLayout(HStackLayout(spacing: 6))
+        layout {
             Text(copy.signedOut).foregroundStyle(.secondary)
             Button(copy.text("設定を開く", "Open Settings"), action: openSettings)
                 .buttonStyle(.bordered)
                 .controlSize(.small)
                 .fixedSize()
         }
-        .lineLimit(1)
+        .lineLimit(stacked ? 2 : 1)
         .minimumScaleFactor(0.75)
     }
 }
@@ -447,9 +483,10 @@ struct AiUsageListQuotaView: View {
     private func value(_ remaining: Double) -> some View {
         HStack(spacing: 4) {
             if quota.window.column == .other { name }
-            Text(copy.percent(remaining)).monospacedDigit()
-                .font(.system(size: textSize.scaled(13), weight: .semibold))
-                .foregroundStyle(AiUsageTint(remaining: remaining).color)
+            AiUsageReadingNumber(
+                amount: String(copy.percent(remaining).dropLast()), unit: "%", size: textSize.scaled(13),
+                unitSize: textSize.scaled(9), color: AiUsageTint(remaining: remaining).color
+            )
                 .opacity(readingOpacity)
                 .fixedSize()
         }
