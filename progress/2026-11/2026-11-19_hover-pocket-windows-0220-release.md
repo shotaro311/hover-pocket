@@ -15,7 +15,7 @@
 
 - 配布物は `publish_release.ps1`（beta区分）で作った。Google OAuthの値はインストール済み0.2.19のDLLのメタデータから読み取りだけで取り出し、同じプロセスの環境変数で渡した（ログに値が含まれないことを確認）。FFmpegは照合済みのキャッシュを使った。manifestは `embedded-and-verified` / `unsigned`、版は `0.2.20`、チェックサムは7件とも一致。
 - [Windows 0.2.20](https://github.com/shotaro311/hover-pocket/releases/tag/win-v0.2.20) を下書きで作り、8配布物のサイズとSHA-256が手元とすべて一致したことを確かめてから `--latest=false` で公開した。タグは `eb386d9` を指す。完全版のパッケージは180,122,896 bytes、SHA-256 `7BD07EAB9A389F341663AB6E38DBF001BF8F3080EEBA9CC76A988070B21277B7`。
-- 公開後の `verify_release_readback.py --windows-tag win-v0.2.20 --windows-signing-gate beta --json` は99項目で合格。macOSの `macos-latest/appcast.xml` のSHA-256は公開前後で一致し、GitHub Latestは `v0.2.18-771` のまま。更新・ロールバックCIは今回も実行していない。
+- 公開後の `verify_release_readback.py --windows-tag win-v0.2.20 --windows-signing-gate beta --json` は99項目で合格。macOSの `macos-latest/appcast.xml` のSHA-256は公開前後で一致し、GitHub Latestは `v0.2.18-771` のまま。pushで「Verify Published Release Readback」と「Verify Release Install and Rollback Transitions」も成功と出たが、動いたのは構文と配布情報の検査だけで、公開物の読み戻しと、インストール・更新・ロールバックのジョブはスキップされた。更新・ロールバックの実地の検査は今回も実行していない。
 
 ## このPCへの適用
 
