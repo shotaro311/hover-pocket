@@ -2,8 +2,13 @@
 project_slug: hover-menu-preview
 updated: 2026-11-19
 updated_by: claude
-status: production-macos-0.2.18; production-windows-0.2.19
+status: production-macos-0.2.18; production-windows-0.2.20
 ---
+
+## 2026-11-19 Windows 0.2.20 本番配信
+
+- `eb386d9` をmainへpushし、Verify WindowsとVerify Pocket Contractsが成功。[Windows 0.2.20](https://github.com/shotaro311/hover-pocket/releases/tag/win-v0.2.20) を `--latest=false` で公開し、8配布物の一致と公開物の99項目検査に合格。macOSは不変。
+- データと0.2.19一式を退避してからこのPCへ適用した。PID 28936 が0.2.20で応答中で、データは更新前後で一致（クリップボードの文字1件の時刻だけが再起動で更新）。本番アプリのパネルでAntigravityの欄が出て、Gemini Peerの値と一致することを確かめた。Codexのレビューは2回で「未完了」のまま、ユーザーの判断で配信した。[配信記録](2026-11/2026-11-19_hover-pocket-windows-0220-release.md)。
 
 ## 2026-11-19 AI UsageにAntigravityを追加（Windows 0.2.20）
 

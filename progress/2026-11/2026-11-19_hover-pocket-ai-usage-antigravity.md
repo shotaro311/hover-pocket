@@ -32,5 +32,7 @@ AI作業で使うGeminiをAntigravity CLI（agy）のGemini 4 Hydrogenへ切り�
 
 ## 残り
 
+- 0.2.20として配信済み（[配信記録](2026-11-19_hover-pocket-windows-0220-release.md)）。
+
 - macOS版のAntigravity欄（範囲外）。
 - CIで `--verify ai-usage` を流すこと（レビューの提案。今回の依頼の範囲外）。
