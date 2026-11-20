@@ -235,7 +235,7 @@ internal static class CaptureVerifier
             if (cancelled.Error is not null || cancelled.Result is not null) failures.Add("screenshot Escape cancel");
             var invalid = SelectSnapshot(desktopSnapshot, nativeBounds, window => window.CompleteSelection(new(-1, 0, 10, 10)));
             if (invalid.Error is null || invalid.Result is not null) failures.Add("screenshot crop error boundary");
-            var selectedByMouse = SelectSnapshot(desktopSnapshot, nativeBounds, window =>
+            void DragSelection(Window window)
             {
                 var handle = new WindowInteropHelper(window).Handle;
                 GetCursorPos(out var cursor);
@@ -248,11 +248,20 @@ internal static class CaptureVerifier
                     SendMessage(handle, 0x0202, 0, new nint((210 << 16) | 255));
                 }
                 finally { SetCursorPos(cursor.X, cursor.Y); }
+            }
+            var selectedByMouse = SelectSnapshot(desktopSnapshot, nativeBounds, window =>
+            {
+                DragSelection(window);
                 if (window.EditorForVerify is null) { failures.Add("native screenshot drag did not enter inline editing"); window.Close(); }
             });
             if (selectedByMouse.Error is not null || selectedByMouse.Result is not { PixelWidth: >= 194 and <= 196, PixelHeight: >= 119 and <= 121 }) failures.Add("native screenshot drag crop");
+            // Region recording starts the moment the drag is released: no editor, the region is confirmed at once.
+            var regionByMouse = SelectSnapshot(desktopSnapshot, nativeBounds, DragSelection, selectionOnly: true);
+            if (regionByMouse.DialogResult != true || regionByMouse.EditorForVerify is not null || regionByMouse.Error is not null
+                || regionByMouse.Region is not { Width: >= 194 and <= 196, Height: >= 119 and <= 121 })
+                failures.Add("region recording: releasing the drag did not confirm the region at once");
             await AssetRecycle.MoveAsync(screenshotStage);
-            VerifyConsole.WriteLine("PASS capture: repeated worker desktop capture -> modal selection -> annotated PNG pixel readback, original PNG, native mouse drag, Enter, Escape, crop error boundary");
+            VerifyConsole.WriteLine("PASS capture: repeated worker desktop capture -> modal selection -> annotated PNG pixel readback, original PNG, native mouse drag, region-recording drag confirms at once, Enter, Escape, crop error boundary");
             var item = WindowsGraphicsCapturePreviewService.CreateCaptureItemForWindow(new WindowInteropHelper(fixture).Handle);
             using (var shortcut = new CaptureController(store, Path.Combine(root, "shortcut"), () => Task.CompletedTask, () => { }, () => { }))
             {
@@ -434,9 +443,9 @@ internal static class CaptureVerifier
     [DllImport("user32.dll")] private static extern bool PostMessage(nint hwnd, uint message, nint wparam, nint lparam);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern int GetWindowText(nint hwnd, System.Text.StringBuilder title, int count);
     [DllImport("user32.dll")] private static extern nint SendMessage(nint hwnd, uint message, nint wparam, nint lparam);
-    private static ScreenshotSelectionWindow SelectSnapshot(BitmapSource snapshot, System.Drawing.Rectangle bounds, Action<ScreenshotSelectionWindow> interact)
+    private static ScreenshotSelectionWindow SelectSnapshot(BitmapSource snapshot, System.Drawing.Rectangle bounds, Action<ScreenshotSelectionWindow> interact, bool selectionOnly = false)
     {
-        var selection = new ScreenshotSelectionWindow(snapshot, bounds);
+        var selection = new ScreenshotSelectionWindow(snapshot, bounds, selectionOnly: selectionOnly);
         Exception? error = null;
         selection.Loaded += (_, _) => selection.Dispatcher.BeginInvoke(new Action(() =>
         {

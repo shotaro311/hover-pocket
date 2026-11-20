@@ -37,8 +37,16 @@ internal sealed class UiVerifier
             }
 
             if (ready && Environment.GetEnvironmentVariable("HOVERPOCKET_LIBRARY_ACTIONS_VERIFY_ONLY") == "1") return await LibraryActionVerifier.RunAsync(_controller);
+            if (ready && Environment.GetEnvironmentVariable("HOVERPOCKET_RECORDING_STOP_VERIFY_ONLY") == "1")
+                return await RecordingStopVerifier.RunAsync(_controller);
             if (ready && Environment.GetEnvironmentVariable("HOVERPOCKET_SYNC_VERIFY_ONLY") == "1")
                 return await AssetSyncVerifier.RunAsync(_controller);
+            if (ready && Environment.GetEnvironmentVariable("HOVERPOCKET_ASSET_TRASH_VERIFY_ONLY") == "1")
+            {
+                await AssetTrashVerifier.RunAsync(_controller, _failures);
+                foreach (var failure in _failures) VerifyConsole.WriteLine("FAIL " + failure);
+                return _failures.Count == 0 ? 0 : 1;
+            }
             if (ready && Environment.GetEnvironmentVariable("HOVERPOCKET_LIBRARY_MEDIA_VERIFY_ONLY") == "1")
                 return await LibraryMediaVerifier.RunAsync(_controller);
             if (ready && Environment.GetEnvironmentVariable("HOVERPOCKET_RESPONSE_VERIFY_ONLY") == "1")

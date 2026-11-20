@@ -54,6 +54,35 @@ public sealed partial class AssetStore
         return Task.FromResult(true);
     }, token);
     public Task<AssetSyncStatus> GetSyncStatusAsync(CancellationToken token = default) => SyncLocked(db => Task.FromResult(SyncStatus(db)), token);
+    /// <summary>
+    /// Leaves the sync group on this device only. The shared folder and the other devices' copies are not touched;
+    /// changes not yet sent are no longer sent. Afterwards the library works as an unsynced one (emptying the trash
+    /// no longer waits for the shared folder).
+    /// </summary>
+    public Task<AssetSyncStatus> DisconnectSyncAsync(CancellationToken token = default) => SyncLocked(db =>
+    {
+        using (var tx = db.BeginTransaction())
+        {
+            foreach (var table in new[] { "sync_meta", "sync_events", "sync_heads" }) Execute(db, "DELETE FROM " + table);
+            tx.Commit();
+        }
+        // The restore latch goes only after the group is gone from the DB. If it cannot be removed, the status reports
+        // CleanupPending so Settings keeps the button and a second press retries just this step.
+        try
+        {
+            var latch = Path.Combine(Root, "sync-configured");
+            // Delete only a plain file; a folder or link is left for the person to inspect, and stays pending.
+            if ((File.GetAttributes(latch) & (FileAttributes.Directory | FileAttributes.ReparsePoint)) != 0) throw new IOException("sync-configured is not a plain file");
+            File.Delete(latch);
+        }
+        catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException) { }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            throw new InvalidOperationException("同期はやめましたが、後始末のファイル（sync-configured）を消せませんでした。もう一度「この端末の同期をやめる」を押してください。", ex);
+        }
+        _syncError = null;
+        return Task.FromResult(SyncStatus(db));
+    }, token);
     private AssetSyncStatus SyncStatus(SqliteConnection db)
     {
         var pendingConflicts = SyncEvents(db, "disposition='conflict'");
@@ -62,7 +91,15 @@ public sealed partial class AssetStore
             e.Asset?.Name ?? e.Category!.Name, current.GetValueOrDefault(e.Key)?.Asset?.Name ?? current.GetValueOrDefault(e.Key)?.Category?.Name)).ToArray();
         return new(SyncMeta(db, "groupId") is not null, SyncMeta(db, "transportPath"), SyncMeta(db, "groupId"), SyncMeta(db, "deviceId"),
             Convert.ToInt32(Scalar(db, "SELECT count(*) FROM sync_events WHERE disposition='pending'")),
-            Convert.ToInt32(Scalar(db, "SELECT count(*) FROM sync_events WHERE exported=0")), conflicts, _syncError, SyncMeta(db, "enabled") == "1");
+            Convert.ToInt32(Scalar(db, "SELECT count(*) FROM sync_events WHERE exported=0")), conflicts, _syncError, SyncMeta(db, "enabled") == "1",
+            SyncMeta(db, "groupId") is null && SyncLatchMayRemain());
+    }
+    /// <summary>True unless the OS reports the restore latch as not found; an unreadable latch counts as remaining.</summary>
+    private bool SyncLatchMayRemain()
+    {
+        try { File.GetAttributes(Path.Combine(Root, "sync-configured")); return true; }
+        catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException) { return false; }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return true; }
     }
     private static string RequireSyncRoot(SqliteConnection db)
     {

@@ -230,8 +230,20 @@ internal sealed partial class CaptureController : IDisposable
         catch (Exception ex) { Report("収録の完了・保存に失敗しました: " + ex.Message + " 保存待ちファイルを保持しています。"); RecordingError?.Invoke(_status); return new([], "recording_save_failed"); }
         finally { exclusion?.Dispose(); if (ReferenceEquals(_voiceCaptureExclusion, exclusion)) _voiceCaptureExclusion = null; recorder.Dispose(); if (ReferenceEquals(_recorder, recorder)) _recorder = null; _clock.Stop(); _recordingStage = null; _busy = false; Report(_status); }
     }
+    /// <summary>From a stop request until the recording is saved, for screen and camera recordings alike.</summary>
+    internal bool StoppingRecording => (_stoppingRecording && Recording) || _deviceCapture?.Finishing == true;
+    private bool _stoppingRecording;
     public async Task StopRecordingAsync()
-    { if (_deviceCapture is not null) await _deviceCapture.StopAsync(); if (_recorder is null) return; _busy = true; _recorder.Stop(); Report("収録を終了し、ライブラリへ保存しています…"); if (_finishRecording is not null) await _finishRecording; }
+    {
+        var recording = Recording;
+        if (recording) { _stoppingRecording = true; StateChanged?.Invoke(); }
+        try
+        {
+            if (_deviceCapture is not null) await _deviceCapture.StopAsync(); if (_recorder is null) return;
+            _busy = true; _recorder.Stop(); Report("収録を終了し、ライブラリへ保存しています…"); if (_finishRecording is not null) await _finishRecording;
+        }
+        finally { if (recording) { _stoppingRecording = false; StateChanged?.Invoke(); } }
+    }
     public async Task RetryAsync()
     {
         if (Busy || Recording) return;
@@ -256,7 +268,7 @@ internal sealed partial class CaptureController : IDisposable
         catch (IOException) { recorder.Stop("保存先への接続が失われました。"); }
     }
     public void Dispose() { if (_disposed) return; _disposed = true; CloseToast(); _clock.Stop(); _hotkeys.Dispose(); _recorder?.Stop(); _deviceCapture?.Dispose(); VoiceTargets.Dispose(); _voiceCaptureExclusion?.Dispose(); _window?.CloseForShutdown(); }
-    internal static void ExcludeFromCapture(nint handle) { if (OperatingSystem.IsWindowsVersionAtLeast(10, 0, 19041)) SetWindowDisplayAffinity(handle, 0x11); }
+    internal static void ExcludeFromCapture(nint handle) { if (OperatingSystem.IsWindowsVersionAtLeast(10, 0, 19041)) SetWindowDisplayAffinity(handle, 0x11); CaptureWindowExclusion.KeepExcluded(handle); }
     [System.Runtime.InteropServices.DllImport("user32.dll")] private static extern bool SetWindowDisplayAffinity(nint hwnd, uint affinity);
 }
 

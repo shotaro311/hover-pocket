@@ -158,7 +158,89 @@ await Reject(() => store.ChangeCategoryAsync(folder, "move", parent: child), "fo
 await store.ChangeCategoryAsync(folder, "delete");
 Check((await store.GetAsync(id))!.TagIds.Length == 1 && File.Exists(store.OriginalPath(saved)), "category subtree deletion preserves originals and other memberships");
 var beforeFailedRecycle = (await restored.QueryAsync(new(View: "trash"))).Total;
-Check(await restored.EmptyTrashAsync(_ => Task.FromResult(false)) == 0 && (await restored.QueryAsync(new(View: "trash"))).Total == beforeFailedRecycle, "failed OS recycling retains metadata and original");
+var failedRecycle = await restored.EmptyTrashAsync(_ => Task.FromResult(false));
+Check(failedRecycle.Recycled == 0 && failedRecycle.Kept == beforeFailedRecycle && (await restored.QueryAsync(new(View: "trash"))).Total == beforeFailedRecycle, "failed OS recycling retains metadata and original and reports the kept count");
+using (var purgeStore = new AssetStore(Path.Combine(root, "purge-missing-original")))
+{
+    var keptSource = Path.Combine(root, "purge-kept.txt"); await File.WriteAllTextAsync(keptSource, "purge fixture kept");
+    var goneSource = Path.Combine(root, "purge-gone.txt"); await File.WriteAllTextAsync(goneSource, "purge fixture gone");
+    var keptId = (await purgeStore.ImportAsync(keptSource)).AssetId!; var goneId = (await purgeStore.ImportAsync(goneSource)).AssetId!;
+    await purgeStore.UpdateAsync([keptId, goneId], "trash");
+    var gonePath = purgeStore.OriginalPath((await purgeStore.GetAsync(goneId))!); File.SetAttributes(gonePath, FileAttributes.Normal); File.Delete(gonePath);
+    var recycledPaths = new List<string>();
+    var purge = await purgeStore.EmptyTrashAsync(path => { recycledPaths.Add(path); return Task.FromResult(false); });
+    Check(purge is { Recycled: 0, Kept: 2 } && await purgeStore.GetAsync(goneId) is { Trashed: true } && await purgeStore.GetAsync(keptId) is { Trashed: true }
+        && recycledPaths.Count == 1 && File.Exists(purgeStore.OriginalPath((await purgeStore.GetAsync(keptId))!)), "empty trash keeps a row whose original is gone instead of forgetting it, and touches no other original");
+}
+using (var unsafeStore = new AssetStore(Path.Combine(root, "purge-uncertain-original")))
+{
+    var folderSource = Path.Combine(root, "purge-folder.txt"); await File.WriteAllTextAsync(folderSource, "purge fixture folder");
+    var resizedSource = Path.Combine(root, "purge-resized.txt"); await File.WriteAllTextAsync(resizedSource, "purge fixture resized");
+    var folderId = (await unsafeStore.ImportAsync(folderSource)).AssetId!; var resizedId = (await unsafeStore.ImportAsync(resizedSource)).AssetId!;
+    await unsafeStore.UpdateAsync([folderId, resizedId], "trash");
+    // A folder now sits where the original was, holding a file that is not part of the trash.
+    var folderPath = unsafeStore.OriginalPath((await unsafeStore.GetAsync(folderId))!); File.SetAttributes(folderPath, FileAttributes.Normal); File.Delete(folderPath);
+    Directory.CreateDirectory(folderPath); var bystander = Path.Combine(folderPath, "not-in-trash.txt"); await File.WriteAllTextAsync(bystander, "keep me");
+    var resizedPath = unsafeStore.OriginalPath((await unsafeStore.GetAsync(resizedId))!); File.SetAttributes(resizedPath, FileAttributes.Normal);
+    await File.AppendAllTextAsync(resizedPath, " and changed");
+    var touched = new List<string>();
+    var uncertain = await unsafeStore.EmptyTrashAsync(path => { touched.Add(path); return Task.FromResult(true); });
+    Check(uncertain is { Recycled: 0, Kept: 2 } && touched.Count == 0 && File.Exists(bystander) && File.Exists(resizedPath)
+        && await unsafeStore.GetAsync(folderId) is { Trashed: true } && await unsafeStore.GetAsync(resizedId) is { Trashed: true },
+        "empty trash keeps a same-name folder and a resized file in place instead of recycling or forgetting them");
+}
+using (var hiddenStore = new AssetStore(Path.Combine(root, "purge-hidden-originals")))
+{
+    var swappedSource = Path.Combine(root, "purge-swapped.txt"); await File.WriteAllTextAsync(swappedSource, "purge fixture AAAA");
+    var waitingSource = Path.Combine(root, "purge-waiting.txt"); await File.WriteAllTextAsync(waitingSource, "purge fixture waiting");
+    var swappedId = (await hiddenStore.ImportAsync(swappedSource)).AssetId!; var waitingId = (await hiddenStore.ImportAsync(waitingSource)).AssetId!;
+    await hiddenStore.UpdateAsync([swappedId, waitingId], "trash");
+    // Same size, different bytes: not this asset's original.
+    var swappedPath = hiddenStore.OriginalPath((await hiddenStore.GetAsync(swappedId))!); File.SetAttributes(swappedPath, FileAttributes.Normal);
+    await File.WriteAllTextAsync(swappedPath, "purge fixture BBBB");
+    var swapped = await hiddenStore.EmptyTrashAsync(_ => Task.FromResult(true));
+    Check(swapped.Kept == 1 && swapped.Recycled == 1 && File.Exists(swappedPath) && await hiddenStore.GetAsync(swappedId) is { Trashed: true },
+        "empty trash keeps a same-size file whose bytes are not the original");
+    // The originals folder is briefly out of reach: nothing in the trash is forgotten.
+    var originals = Path.GetDirectoryName(swappedPath)!; var parked = originals + "-parked"; Directory.Move(originals, parked);
+    var hidden = await hiddenStore.EmptyTrashAsync(_ => Task.FromResult(true));
+    Directory.Move(parked, originals);
+    Check(hidden is { Recycled: 0, Kept: 1 } && await hiddenStore.GetAsync(swappedId) is { Trashed: true },
+        "empty trash forgets nothing while the originals folder is out of reach");
+}
+var movedRoot = Path.Combine(root, "purge-moved-while-closed"); string movedTrashId, movedKeptId, movedOriginals;
+using (var movedBefore = new AssetStore(movedRoot))
+{
+    var keepSource = Path.Combine(root, "purge-moved-keep.txt"); await File.WriteAllTextAsync(keepSource, "purge fixture kept outside trash");
+    var trashSource = Path.Combine(root, "purge-moved-trash.txt"); await File.WriteAllTextAsync(trashSource, "purge fixture in trash");
+    movedKeptId = (await movedBefore.ImportAsync(keepSource)).AssetId!; movedTrashId = (await movedBefore.ImportAsync(trashSource)).AssetId!;
+    await movedBefore.UpdateAsync([movedTrashId], "trash");
+    movedOriginals = Path.GetDirectoryName(movedBefore.OriginalPath((await movedBefore.GetAsync(movedTrashId))!))!;
+}
+// Moved away while the app was closed; the next start recreates an empty originals folder.
+Directory.Move(movedOriginals, movedOriginals + "-moved");
+using (var movedAfter = new AssetStore(movedRoot))
+{
+    var moved = await movedAfter.EmptyTrashAsync(_ => Task.FromResult(true));
+    Check(moved is { Recycled: 0, Kept: 1 } && await movedAfter.GetAsync(movedTrashId) is { Trashed: true } && await movedAfter.GetAsync(movedKeptId) is not null,
+        "empty trash forgets nothing when the originals folder was replaced by an empty one");
+}
+if (OperatingSystem.IsWindows())
+{
+    // The originals folder is a link to a copy elsewhere: nothing behind the link is sent to the Recycle Bin.
+    using var linkedStore = new AssetStore(Path.Combine(root, "purge-linked-originals"));
+    var linkedSource = Path.Combine(root, "purge-linked.txt"); await File.WriteAllTextAsync(linkedSource, "purge fixture linked");
+    var linkedId = (await linkedStore.ImportAsync(linkedSource)).AssetId!; await linkedStore.UpdateAsync([linkedId], "trash");
+    var linkedOriginals = Path.GetDirectoryName(linkedStore.OriginalPath((await linkedStore.GetAsync(linkedId))!))!;
+    var target = linkedOriginals + "-target"; Directory.Move(linkedOriginals, target);
+    var start = new System.Diagnostics.ProcessStartInfo("cmd.exe", $"/c mklink /J \"{linkedOriginals}\" \"{target}\"") { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true };
+    using (var process = System.Diagnostics.Process.Start(start)!) { await process.WaitForExitAsync(); if (process.ExitCode != 0) throw new Exception("junction fixture could not be created"); }
+    var touchedLinked = new List<string>();
+    var linked = await linkedStore.EmptyTrashAsync(path => { touchedLinked.Add(path); return Task.FromResult(true); });
+    Directory.Delete(linkedOriginals); Directory.Move(target, linkedOriginals);
+    Check(linked is { Recycled: 0, Kept: 1 } && touchedLinked.Count == 0 && await linkedStore.GetAsync(linkedId) is { Trashed: true },
+        "empty trash sends nothing behind a linked originals folder to the Recycle Bin");
+}
 var backup2 = Path.Combine(root, "replacement-backup"); await shared.ExportAsync(backup2);
 var archived = await restored.ReplaceFromBackupAsync(backup2);
 Check(Directory.Exists(archived) && File.Exists(Path.Combine(archived, "originals", Path.GetFileName(store.OriginalPath(saved)))), "replacement archives existing library");

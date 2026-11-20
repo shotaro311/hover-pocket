@@ -25,9 +25,11 @@ internal sealed partial class CaptureController
             if (monitor is null) throw new ArgumentException("一つの画面内で収録範囲を選択してください。");
             var crop = new Int32Rect(left - monitor.MonitorBounds.Left, top - monitor.MonitorBounds.Top, rect.Width, rect.Height);
             var item = WindowsGraphicsCapturePreviewService.CreateCaptureItemForMonitor(monitor.Handle);
+            // The whole monitor is captured and cropped, so keep the panel (opened to press stop) out of the video.
+            _voiceCaptureExclusion = new CaptureWindowExclusion();
             await BeginRecordingAsync(item, _preferences with { FolderId = useCurrentFolder ? folder : _preferences.FolderId }, null, CancellationToken.None, crop);
         }
-        catch (Exception ex) { Report("範囲収録を開始できません: " + ex.Message); RecordingError?.Invoke(_status); }
+        catch (Exception ex) { _voiceCaptureExclusion?.Dispose(); _voiceCaptureExclusion = null; Report("範囲収録を開始できません: " + ex.Message); RecordingError?.Invoke(_status); }
         finally { _restoreShell(); _busy = false; Report(_status); }
     }
 }

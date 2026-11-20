@@ -94,6 +94,38 @@ input {
   flex: 1 1 auto;
 }
 
+/* The stop button takes the title's place, so the spacer absorbs it and the tool icons stay under a resting pointer. */
+.hp-header:has(> .hp-record-stop:not([hidden])) > .hp-provider-title { display: none; }
+.hp-record-stop {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 10px;
+  border: 1px solid rgba(255, 124, 124, 0.45);
+  border-radius: 999px;
+  background: rgba(255, 124, 124, 0.14);
+  color: #ffc2c2;
+  font: inherit;
+  font-size: calc(12px * var(--hp-text-scale));
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.hp-record-stop[hidden] { display: none; }
+.hp-record-stop::before {
+  content: "";
+  width: 9px;
+  height: 9px;
+  border-radius: 2px;
+  background: #ff6b6b;
+}
+.hp-record-stop:hover { background: rgba(255, 124, 124, 0.24); }
+:root[data-panel-size="small"] .hp-record-stop { width: 28px; padding: 0; justify-content: center; }
+:root[data-panel-size="small"] .hp-record-stop-label { display: none; }
+.hp-record-stop:disabled { cursor: default; opacity: 0.6; }
+
 .hp-size-switch {
   display: inline-flex;
   gap: 2px;
@@ -141,7 +173,14 @@ input {
   gap: 6px;
   padding-right: 4px;
   border-right: 1px solid var(--hp-line-strong);
+  /* With many tools in a narrow panel the row scrolls, so the buttons to its right stay in reach. */
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
 }
+.hp-provider-icons::-webkit-scrollbar { display: none; }
+.hp-provider-icons > .hp-icon-button,
+.hp-header > .hp-icon-button { flex-shrink: 0; }
 
 .hp-icon-button {
   width: 28px;

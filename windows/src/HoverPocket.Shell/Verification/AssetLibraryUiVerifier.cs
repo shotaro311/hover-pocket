@@ -64,7 +64,7 @@ internal static class AssetLibraryUiVerifier
             while (await web.ExecuteScriptAsync("!!document.querySelector('[data-action=screenshot]')") != "true" && DateTime.UtcNow < captureDeadline) await Task.Delay(30);
             await web.ExecuteScriptAsync("document.querySelector('[data-action=screenshot]').click();document.querySelector('[data-action=recording]').click()");
             while (captureActions.Count < 2 && DateTime.UtcNow < captureDeadline) await Task.Delay(30);
-            if (!captureActions.SequenceEqual(new[] { "screenshot", "recording" })) failures.Add("assets: capture icons did not reach their native actions");
+            if (!captureActions.SequenceEqual(new[] { "screenshot", "regionRecording" })) failures.Add("assets: capture icons did not reach their native actions");
             else VerifyConsole.WriteLine("PASS library capture icons: screenshot and recording reach native actions without settings dispatch");
         }
         finally { controller.PanelBridgeController.AssetCaptureRequested = priorCapture; }
@@ -277,7 +277,8 @@ internal static class AssetLibraryUiVerifier
         }
         await controller.PanelBridgeController.SelectProviderFromShellAsync("controls");
         await AssetInteractionVerifier.RunAsync(controller, imageId, failures);
-        if (failures.Count == 0) VerifyConsole.WriteLine("PASS assets: durable import, PNG alpha, PDF mixed/1000 lazy pages/isolated worker restart, corrupt/protected originals, virtual cards, native resize/fullscreen/hover exit/focus dismissal, capture timeout recovery, uninterrupted timer, drag preparation, resource lease, organizer, empty folder drop, temporary selection, OS recycle" + (videoPath is null ? " (video fixture absent)" : ", H.264 playback/range delivery/single owner"));
+        await AssetTrashVerifier.RunAsync(controller, failures);
+        if (failures.Count == 0) VerifyConsole.WriteLine("PASS assets: durable import, PNG alpha, PDF mixed/1000 lazy pages/isolated worker restart, corrupt/protected originals, virtual cards, native resize/fullscreen/hover exit/focus dismissal, capture timeout recovery, uninterrupted timer, drag preparation, resource lease, organizer, empty folder drop, temporary selection, OS recycle, empty trash, bulk trash" + (videoPath is null ? " (video fixture absent)" : ", H.264 playback/range delivery/single owner"));
         return failures.ToArray();
     }
 

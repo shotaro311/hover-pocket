@@ -1,6 +1,6 @@
 export function createAssetSyncSettings(root, request) {
   let english = false, busy = false, status = null, lastConflicts = "", lastDevices = "", timer = null, stopped = false, revision = 0, actionError = null;
-  let pairing = { available: false, session: { phase: "idle" }, devices: [] }, joining = false;
+  let pairing = { available: false, session: { phase: "idle" }, devices: [] }, joining = false, confirmingDisconnect = false;
   root.innerHTML = `<div class="settings-action-row"><h2 data-sync-title></h2><span class="sync-badge" data-sync-badge></span></div>
     <p class="settings-note" data-sync-note></p>
     <label class="toggle-row"><span data-sync-enabled-label></span><input type="checkbox" data-sync-enabled></label>
@@ -9,7 +9,7 @@ export function createAssetSyncSettings(root, request) {
     <div class="pairing-box" data-sync-join-box hidden><label><span data-sync-code-label></span> <input type="text" data-sync-code-input inputmode="numeric" maxlength="24" autocomplete="off" spellcheck="false" placeholder="123-12345678"></label><div class="settings-button-row settings-spaced-row"><button type="button" data-sync-connect></button><button type="button" data-sync-join-cancel></button></div></div>
     <div class="pairing-box" data-sync-session hidden><p data-sync-session-label></p><output class="pairing-code" data-sync-code></output><p class="settings-note" data-sync-peer></p><p class="settings-note" data-sync-expiry></p><div class="settings-button-row"><button type="button" data-sync-approve hidden></button><button type="button" data-sync-cancel></button></div></div>
     <p class="settings-status" role="status" data-sync-status></p><p class="settings-status" role="status" data-sync-connection-status></p><div data-sync-conflicts></div>
-    <details class="settings-details" data-sync-advanced><summary data-sync-details-label></summary><p class="settings-note" data-sync-security></p><p class="settings-note" data-sync-path></p><div class="settings-button-row"><button type="button" data-sync-create></button><button type="button" data-sync-join></button></div></details>`;
+    <details class="settings-details" data-sync-advanced><summary data-sync-details-label></summary><p class="settings-note" data-sync-security></p><p class="settings-note" data-sync-path></p><div class="settings-button-row"><button type="button" data-sync-create></button><button type="button" data-sync-join></button><button type="button" data-sync-disconnect></button></div><p class="settings-note" data-sync-disconnect-note></p></details>`;
   const el = name => root.querySelector("[data-sync-" + name + "]");
   const text = (ja, en) => english ? en : ja;
   const active = () => ["starting", "waiting", "peer", "applying"].includes(pairing.session?.phase);
@@ -39,12 +39,17 @@ export function createAssetSyncSettings(root, request) {
     el("approve").hidden = session.phase !== "peer" || pairing.role !== "invite";
     el("approve").textContent = text("接続を許可", "Allow connection"); el("approve").disabled = busy || seconds === 0;
     el("cancel").textContent = text("キャンセル", "Cancel"); el("cancel").disabled = busy;
-    el("connection-status").textContent = actionError ?? session.error ?? (session.phase === "complete" ? text("接続しました。素材の同期を開始します。", "Connected. Your library will now sync.") : pairing.error === "syncthing_unavailable" ? text("端末連携にはSyncthingの起動が必要です。", "Start Syncthing to connect devices.") : pairing.error === "helper_missing" ? text("アプリを更新すると端末連携を利用できます。", "Update HoverPocket to enable device pairing.") : pairing.error ?? "");
+    el("connection-status").textContent = actionError ?? session.error ?? (session.phase === "complete" && status?.configured ? text("接続しました。素材の同期を開始します。", "Connected. Your library will now sync.") : pairing.error === "syncthing_unavailable" ? text("端末連携にはSyncthingの起動が必要です。", "Start Syncthing to connect devices.") : pairing.error === "helper_missing" ? text("アプリを更新すると端末連携を利用できます。", "Update HoverPocket to enable device pairing.") : pairing.error ?? "");
     el("details-label").textContent = text("接続の詳細", "Connection details");
     el("security").textContent = text("端末の連携にはSyncthingが必要です。コードは5分で失効します。外部の仲介サービスには画像や復号用の鍵を送りません。解除後も相手が受信済みの素材は残ります。", "Syncthing is required on each device. Codes expire in 5 minutes. The external rendezvous receives neither media nor decryption keys. Removing a device does not erase copies it already received.");
     el("path").textContent = status?.transportPath ?? text("接続時に保存先を自動設定します。", "The sync location is set up automatically.");
     el("create").textContent = text("手動で共有先を作成…", "Create a share manually…"); el("join").textContent = text("手動で共有先を選ぶ…", "Select a share manually…");
     el("create").disabled = busy || active() || Boolean(status?.configured); el("join").disabled = busy || active();
+    el("disconnect").hidden = !(status?.configured || status?.cleanupPending); el("disconnect").disabled = busy || active();
+    el("disconnect").textContent = confirmingDisconnect ? text("同期をやめる（確定）", "Stop syncing (confirm)") : text("この端末の同期をやめる…", "Stop syncing on this device…");
+    el("disconnect-note").hidden = !(status?.configured || status?.cleanupPending);
+    el("disconnect-note").textContent = text("この端末から共有先への新しい変更の書き出しを止めます。共有先のフォルダとほかの端末の素材はそのまま残ります。すでに共有先へ書き出した変更は、端末連携（Syncthing）の設定が残っていると相手に届く場合があります。",
+      "Stops writing new changes from this device to the share. The shared folder and the other devices' copies stay as they are. Changes already written to the share may still reach the other device while Syncthing keeps that share.");
     el("status").textContent = status?.error ?? (!status?.configured ? "" : !status.enabled ? text("一時停止中", "Paused")
       : status.pending || status.outgoing || status.conflicts.length ? text(`送信待ち ${status.outgoing}・到着待ち ${status.pending}・要確認 ${status.conflicts.length}`, `Outgoing ${status.outgoing} · waiting ${status.pending} · needs attention ${status.conflicts.length}`)
       : text("処理待ちの変更はありません。", "No changes waiting to be processed."));
@@ -82,12 +87,12 @@ export function createAssetSyncSettings(root, request) {
     finally { busy = false; paint(); }
   }
   const act = (method, params) => perform(async () => { status = await request(method,params); });
-  const pair = (method, params) => perform(async () => {
+  const pair = (method, params) => { confirmingDisconnect = false; return perform(async () => {
     const response = await request(method,params);
     if (response.session) pairing = response;
     else { pairing.session = response; if(method === "pairing.invite") pairing.role="invite"; if(method === "pairing.join") pairing.role="join"; }
     joining = false; el("code-input").value = "";
-  });
+  }); };
   async function refresh() {
     if (stopped) return;
     if (!busy) {
@@ -112,6 +117,13 @@ export function createAssetSyncSettings(root, request) {
   el("create").onclick = () => act("assetSync.configure", {createGroup:true});
   el("join").onclick = () => act("assetSync.configure", {createGroup:false});
   el("enabled").onchange = () => act("assetSync.enable", {enabled:el("enabled").checked});
+  el("advanced").addEventListener("toggle", () => { if (confirmingDisconnect) { confirmingDisconnect = false; paint(); } });
+  // Leaving the button (another category, scrolling away) cancels a pending confirmation.
+  new IntersectionObserver(([entry]) => { if (!entry.isIntersecting && confirmingDisconnect) { confirmingDisconnect = false; paint(); } }).observe(el("disconnect"));
+  el("disconnect").onclick = () => {
+    if (!confirmingDisconnect) { confirmingDisconnect = true; paint(); return; }
+    confirmingDisconnect = false; void act("assetSync.disconnect");
+  };
   window.addEventListener("pagehide", () => { stopped = true; clearTimeout(timer); }, {once:true});
   void refresh();
   return { render(state) { english = state.settings.language === "en"; paint(); } };

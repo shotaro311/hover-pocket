@@ -30,7 +30,46 @@ internal sealed partial class PanelBridgeController : IDisposable
     public HoverPocket.Assets.AssetStore AssetLibrary { get; }
     internal ClipboardHistoryStore ClipboardHistoryForVerify => _clipboardBridgeController.StoreForVerify;
     public Func<string, string?, Task>? AssetCaptureRequested { get; set; }
-    internal HoverPocket.Shell.Capture.CaptureController? VoiceCapture { get; set; }
+    private HoverPocket.Shell.Capture.CaptureController? _capture;
+    private (bool Recording, bool Stopping) _publishedCapture;
+    internal HoverPocket.Shell.Capture.CaptureController? VoiceCapture
+    {
+        get => _capture;
+        set
+        {
+            if (_capture is not null) _capture.StateChanged -= OnCaptureStateChanged;
+            _capture = value;
+            if (value is not null) value.StateChanged += OnCaptureStateChanged;
+        }
+    }
+
+    private long _captureRevision;
+    private (bool Recording, bool Stopping) CaptureState() =>
+        _capture is { } capture && (capture.Recording || capture.StoppingRecording) ? (true, capture.StoppingRecording) : (false, false);
+
+    /// <summary>The panel header shows a stop button while a recording runs, so publish only when that changes.</summary>
+    private void OnCaptureStateChanged()
+    {
+        if (System.Windows.Application.Current?.Dispatcher is { } dispatcher && !dispatcher.CheckAccess())
+        {
+            dispatcher.BeginInvoke(OnCaptureStateChanged);
+            return;
+        }
+        if (_disposed || CaptureState() == _publishedCapture) return;
+        _publishedCapture = CaptureState();
+        _captureRevision++;
+        _ = PostStateEventAsync("state.changed");
+    }
+
+    /// <summary>Only acknowledges the request: the button follows <c>state.changed</c>, so a late reply cannot redraw it.</summary>
+    private Task<object?> StopRecordingFromPanelAsync(JsonElement? parameters, CancellationToken cancellationToken)
+    {
+        _ = parameters;
+        cancellationToken.ThrowIfCancellationRequested();
+        var accepted = _capture is { Recording: true, StoppingRecording: false };
+        if (accepted) _ = _capture!.StopRecordingAsync();
+        return Task.FromResult<object?>(new { accepted });
+    }
     internal Func<string?, CancellationToken, Task<bool>>? VoiceLibraryRequested { get; set; }
     internal Func<Task>? ChatRequested { get; set; }
     internal Func<System.Windows.Window?>? ChatApprovalOwner { get; set; }
@@ -448,6 +487,7 @@ internal sealed partial class PanelBridgeController : IDisposable
         {
             RegisterChat(Register);
             Register("provider.select", SelectProviderAsync);
+            Register("capture.stopRecording", StopRecordingFromPanelAsync);
             Register(
                 "voice.requestMicrophone",
                 (parameters, cancellationToken) => RequestVoiceMicrophoneAsync(
@@ -497,6 +537,8 @@ internal sealed partial class PanelBridgeController : IDisposable
             Register("assetSync.configure", ConfigureAssetSyncAsync);
             Register("assetSync.enable", EnableAssetSyncAsync);
             Register("assetSync.resolve", ResolveAssetSyncAsync);
+            Register("assetSync.disconnect", async (_, token) =>
+                _pairing is not null ? await _pairing.Disconnect(token) : await AssetLibrary.DisconnectSyncAsync(token));
             Register("settings.setVoiceEnabled", SetVoiceEnabledAsync);
             Register("settings.setVoiceProvider", SetVoiceProviderAsync);
             Register(
@@ -598,6 +640,7 @@ internal sealed partial class PanelBridgeController : IDisposable
         }
 
         _disposed = true;
+        VoiceCapture = null;
         if (_assetSync is not null) _ = _assetSync.DisposeAsync();
         _pairing?.Dispose();
         if (_inlineChat is not null) _ = _inlineChat.DisposeAsync();
@@ -703,6 +746,8 @@ internal sealed partial class PanelBridgeController : IDisposable
             openSettingsCategory = includeOpenCategory ? TakePendingSettingsCategory() : null,
             weatherRegions = WeatherRegions.All,
             updater = _updaterService.Snapshot,
+            // The last published capture state and its revision: the page ignores an older one from a late reply.
+            capture = new { recording = _publishedCapture.Recording, stopping = _publishedCapture.Stopping, revision = _captureRevision },
             panel = new
             {
                 headerHeight = PanelSizeCatalog.HeaderHeight,

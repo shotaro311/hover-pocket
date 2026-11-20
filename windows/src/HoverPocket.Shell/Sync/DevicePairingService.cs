@@ -194,5 +194,16 @@ internal sealed class DevicePairingService(AssetStore store, Func<SyncthingLibra
         }
         finally { _actions.Release(); }
     }
+    /// <summary>Leaves the library sync group on this device; refused while a pairing could still reconfigure it.</summary>
+    internal async Task<AssetSyncStatus> Disconnect(CancellationToken token)
+    {
+        await _actions.WaitAsync(token);
+        try
+        {
+            if (State.Phase is "starting" or "waiting" or "peer" or "applying") throw new IOException("端末の接続中は同期をやめられません。接続を終えてから操作してください。");
+            return await store.DisconnectSyncAsync(token);
+        }
+        finally { _actions.Release(); }
+    }
     public void Dispose() { _session?.Cancel(); }
 }

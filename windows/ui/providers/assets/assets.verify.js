@@ -84,7 +84,7 @@ export async function verifyAssetSelection() {
     check(getComputedStyle(narrowToolbar).flexWrap==="nowrap" && getComputedStyle(narrowToolbar).overflowX==="auto" && narrowToolbar.clientHeight<70,"toolbar stays on one scrollable row in narrow panels");
     host.style.width="900px"; await wait(60);
     host.querySelector("[data-action=recording]").click();
-    check(last("assets.capture").kind==="recording" && last("assets.capture").folderId===null,"video icon directly dispatches recording");
+    check(last("assets.capture").kind==="regionRecording" && last("assets.capture").folderId===null,"video icon starts region recording");
     // Reset selection before the existing range and drag acceptance checks.
     await clickView("最近の素材");
     button(".assets-sidebar","Fixture A").click(); await wait(60);
@@ -179,6 +179,14 @@ export async function verifyAssetSelection() {
     check(calls.filter(call=>call.method==="assets.update").length===deletesBefore+1 && last("assets.update").operation==="trash" && last("assets.update").ids.length===2,"Delete trashes multiple selected assets once while update is pending");
     await clickView("ゴミ箱"); const trashDeletes=calls.filter(call=>call.method==="assets.update").length; deleteEvent(false); await wait(30);
     check(calls.filter(call=>call.method==="assets.update").length===trashDeletes,"Delete inside trash never permanently deletes originals");
+    const trashButton=host.querySelector(".assets-trash-selection");
+    check(trashButton.hidden,"footer trash button stays hidden inside the trash");
+    await clickView("最近の素材");
+    card("b").click(); card("a").dispatchEvent(new MouseEvent("click",{ctrlKey:true,bubbles:true})); await wait(20);
+    check(!trashButton.hidden && host.querySelector(".assets-footer").contains(trashButton) && host.querySelector(".assets-selected-count").textContent==="2件選択","footer offers bulk trash beside the selection count");
+    const bulkBefore=calls.filter(call=>call.method==="assets.update").length;
+    trashButton.click(); trashButton.click(); await wait(60);
+    check(calls.filter(call=>call.method==="assets.update").length===bulkBefore+1 && last("assets.update").operation==="trash" && last("assets.update").ids.slice().sort().join()==="a,b","footer button trashes the whole selection once");
     await clickView("最近の素材");
     const sameCard=card("a"), sameName=sameCard.querySelector(".assets-card-name");
     card("a").click();
@@ -247,6 +255,9 @@ export async function verifyAssetSelection() {
     host.querySelector("[data-action=captureMenu]").click();
     button(".assets-dialog","音声を録音").click(); await wait(20);
     check(last("assets.capture").kind==="audio","capture menu dispatches audio recording without a screen capture");
+    host.querySelector("[data-action=captureMenu]").click();
+    button(".assets-dialog","画面・ウィンドウを選んで画面収録").click(); await wait(20);
+    check(last("assets.capture").kind==="recording","capture menu keeps the screen or window recording");
     audioPreview=true;
     check(await provider.showAsset("a"),"Windows voice showAsset resolves metadata and opens the shared preview");
     const audio=host.querySelector("audio");

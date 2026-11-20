@@ -121,6 +121,7 @@ internal abstract class NoActivateWindow : Window
             Hwnd,
             NativeMethods.WsExToolWindow | (_activationEnabled ? 0 : NativeMethods.WsExNoActivate));
         NativeMethods.SetTopmostNoActivate(Hwnd);
+        HoverPocket.Shell.Capture.CaptureWindowExclusion.ExcludeIfActive(Hwnd);
         _source = HwndSource.FromHwnd(Hwnd);
         _source?.AddHook(WndProc);
     }

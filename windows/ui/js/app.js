@@ -32,6 +32,7 @@ const inlineChat = createInlineChat({ container: voiceLaneEl, request, on, toggl
 const providerIconsEl = document.querySelector("[data-provider-icons]");
 
 const refreshButtonEl = document.querySelector("[data-refresh]");
+const recordStopEl = document.querySelector("[data-record-stop]");
 const settingsButtonEl = document.querySelector("[data-settings]");
 const chatButtonEl = document.querySelector("[data-chat]");
 
@@ -125,6 +126,7 @@ async function renderNow(state, options = {}) {
   }
 
   renderTitle(state);
+  renderRecordingStop(state);
   updateChatSplit();
   renderProviderIcons(state);
   renderProvider(state, options, providerWillRemount);
@@ -139,6 +141,32 @@ async function renderNow(state, options = {}) {
  */
 function renderTitle(state) {
   titleEl.textContent = state.selectedProvider?.title ?? "HoverPocket";
+}
+
+let captureState = { recording: false, stopping: false, revision: -1 };
+
+function renderRecordingStop(state) {
+  const english = state.settings.language === "en";
+  // A reply built before the latest capture change carries an older revision: keep the newer state.
+  if (state.capture && (state.capture.revision ?? 0) >= captureState.revision) captureState = state.capture;
+  const capture = captureState;
+  recordStopEl.hidden = !capture.recording;
+  recordStopEl.disabled = Boolean(capture.stopping);
+  const label = capture.stopping
+    ? (english ? "Saving…" : "保存中…")
+    : (english ? "Stop recording" : "録画を停止");
+  const text = document.createElement("span");
+  text.className = "hp-record-stop-label";
+  text.textContent = label;
+  recordStopEl.replaceChildren(text);
+  recordStopEl.setAttribute("aria-label", label);
+  recordStopEl.title = english ? "Stop the recording and save it to the library" : "録画を止めてライブラリへ保存";
+  recordStopEl.onclick = () => {
+    recordStopEl.disabled = true;
+    void request("capture.stopRecording")
+      .then((result) => { if (!result?.accepted) recordStopEl.disabled = Boolean(captureState.stopping); })
+      .catch(() => { recordStopEl.disabled = false; });
+  };
 }
 
 /**

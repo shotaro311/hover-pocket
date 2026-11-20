@@ -15,6 +15,7 @@ public sealed record AssetQuery(string Text = "", string View = "recent", string
 public sealed record AssetPage(Asset[] Items, long Total, Category[] Folders, Category[] Tags, SavedSearch[] Searches, string[]? Extensions = null);
 public sealed record ImportResult(string Status, string? AssetId = null, string? Error = null);
 public sealed record ExportResult(long AssetCount, long ExcludedPending);
+public sealed record EmptyTrashResult(int Recycled, int Kept);
 public sealed record AssetManifest(int Version, string CreatedAt, Asset[] Assets, Category[] Folders,
     Category[] Tags, SavedSearch[] Searches, long ExcludedPending = 0);
 

@@ -43,6 +43,7 @@ internal sealed class ScreenshotSelectionWindow : Window
     public ScreenshotSelectionWindow(BitmapSource screenshot, DrawingRect bounds, Func<BitmapSource, EditedScreenshot, Task>? save = null, bool selectionOnly = false)
     {
         _selectionOnly = selectionOnly;
+        if (selectionOnly) _hint.Text = "ホバーでウィンドウを選択  •  クリックかドラッグで選ぶとすぐに録画を始めます  •  Escでキャンセル";
         _screen = screenshot; _bounds = bounds; _save = save; _windows = ReadWindows(bounds);
         WindowStyle = WindowStyle.None; ResizeMode = ResizeMode.NoResize; Topmost = true; ShowInTaskbar = false;
         Title = "撮影・編集 — HoverPocket"; Background = Brushes.Black; Cursor = Cursors.Cross;

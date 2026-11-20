@@ -163,34 +163,58 @@ public sealed partial class AssetStore : IDisposable
         "INSERT OR IGNORE INTO assets VALUES($id,$name,$normalized,$ext,$kind,$hash,$size,$created,$favorite,$trash,$internet)",
         ("id", a.Id), ("name", a.Name), ("normalized", AssetFormat.Normalize(a.Name)), ("ext", a.Extension), ("kind", a.Kind),
         ("hash", a.Sha256), ("size", a.SizeBytes), ("created", a.CreatedAt), ("favorite", a.Favorite), ("trash", a.Trashed), ("internet", a.InternetOrigin));
-    public Task<int> EmptyTrashAsync(Func<string, Task<bool>> recycle) => Task.Run(async () =>
+    public Task<EmptyTrashResult> EmptyTrashAsync(Func<string, Task<bool>> recycle) => Task.Run(async () =>
     {
         await Ready; Writable(); await _writer.WaitAsync();
         try
         {
-            using var db = Open(); var removed = 0;
+            using var db = Open(); int recycled = 0, kept = 0;
             if (Scalar(db, "SELECT name FROM sqlite_master WHERE type='table' AND name='sync_meta'") is not null
                 && SyncMeta(db, "groupId") is not null)
             {
                 // Keep originals recoverable for the other device before removing the last local copy.
                 if (SyncMeta(db, "enabled") != "1") throw new InvalidOperationException("同期を再開し、送信が完了してからゴミ箱を空にしてください。");
-                var transport = RequireSyncRoot(db); CaptureSyncChanges(db);
+                string transport;
+                try { transport = RequireSyncRoot(db); }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException or InvalidOperationException)
+                {
+                    throw new InvalidOperationException("同期の共有フォルダが見つからないため、ゴミ箱を空にできません。共有フォルダをつなぎ直すか、設定の「ライブラリの同期」→「接続の詳細」で、この端末の同期をやめてください。", ex);
+                }
+                CaptureSyncChanges(db);
                 await ExportSyncEventsAsync(db, transport, CancellationToken.None);
                 if (Convert.ToInt32(Scalar(db, "SELECT count(*) FROM sync_events WHERE exported=0")) > 0)
                     throw new InvalidOperationException("未送信の変更があります。同期が完了してからゴミ箱を空にしてください。");
             }
             foreach (var asset in ReadAssets(db, "SELECT * FROM assets WHERE trashed=1"))
             {
-                var path = OriginalPath(asset); if (!File.Exists(path)) continue;
+                var path = OriginalPath(asset);
+                // Only a verified original goes to the Recycle Bin. Anything else (missing, unreadable, a folder or a
+                // link, a different file) stays in the trash with its row: nothing is forgotten on a guess.
+                if (!IsVerifiedOriginal(asset, path)) { kept++; continue; }
                 Execute(db, "INSERT OR REPLACE INTO purges VALUES($id,$started,0)", ("id", asset.Id), ("started", DateTimeOffset.UtcNow.ToString("O")));
-                if (!await recycle(path)) { Execute(db, "DELETE FROM purges WHERE id=$id", ("id", asset.Id)); continue; }
+                if (!await recycle(path)) { Execute(db, "DELETE FROM purges WHERE id=$id", ("id", asset.Id)); kept++; continue; }
                 Execute(db, "UPDATE purges SET recycled=1 WHERE id=$id", ("id", asset.Id));
-                Execute(db, "DELETE FROM assets WHERE id=$id", ("id", asset.Id)); removed++;
+                Execute(db, "DELETE FROM assets WHERE id=$id", ("id", asset.Id)); recycled++;
             }
-            Changed?.Invoke(); return removed;
+            Changed?.Invoke(); return new EmptyTrashResult(recycled, kept);
         }
         finally { _writer.Release(); }
     });
+    /// <summary>
+    /// A regular file whose size and SHA-256 match the asset, in an originals folder that is a real folder (not a link).
+    /// </summary>
+    private static bool IsVerifiedOriginal(Asset asset, string path)
+    {
+        try
+        {
+            var folder = File.GetAttributes(Path.GetDirectoryName(path)!);
+            if ((folder & FileAttributes.Directory) == 0 || (folder & FileAttributes.ReparsePoint) != 0) return false;
+            var attributes = File.GetAttributes(path);
+            if ((attributes & (FileAttributes.Directory | FileAttributes.ReparsePoint)) != 0) return false;
+            return new FileInfo(path).Length == asset.SizeBytes && HashFile(path) == asset.Sha256;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return false; }
+    }
     private async Task<T> WriteAsync<T>(Func<SqliteConnection, T> action)
     {
         await Ready; Writable(); await _writer.WaitAsync();

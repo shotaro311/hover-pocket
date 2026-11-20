@@ -58,7 +58,7 @@ internal static class AssetSyncVerifier
                 window.__syncPanelDenied=null;
                 import('/js/bridge.js').then(async ({request}) => {
                     let denied=true;
-                    for (const [method,params] of [['assetSync.enable',{enabled:false}],['pairing.invite',{}],['pairing.approve',{approvalId:'fake'}]]) {
+                    for (const [method,params] of [['assetSync.enable',{enabled:false}],['assetSync.disconnect',{}],['pairing.invite',{}],['pairing.approve',{approvalId:'fake'}]]) {
                         try { await request(method,params); denied=false; } catch { }
                     }
                     window.__syncPanelDenied=denied;
@@ -115,6 +115,16 @@ internal static class AssetSyncVerifier
                 await web.CoreWebView2.CapturePreviewAsync(Microsoft.Web.WebView2.Core.CoreWebView2CapturePreviewImageFormat.Png,preview);
             }
 
+            // Leaving the group: the first click only asks to confirm, the second leaves; the shared folder stays.
+            await web.ExecuteScriptAsync("document.querySelector('[data-category=library]').click(); document.querySelector('[data-sync-advanced]').open=true");
+            await Wait(web.CoreWebView2,"!document.querySelector('[data-sync-disconnect]').hidden && !document.querySelector('[data-sync-disconnect]').disabled && document.querySelector('[data-sync-disconnect]').textContent==='この端末の同期をやめる…'");
+            await web.ExecuteScriptAsync("document.querySelector('[data-sync-disconnect]').click()");
+            await Wait(web.CoreWebView2,"document.querySelector('[data-sync-disconnect]').textContent==='同期をやめる（確定）'");
+            if(!(await store.GetSyncStatusAsync()).Configured) throw new Exception("first disconnect click left the group without confirmation");
+            await web.ExecuteScriptAsync("document.querySelector('[data-sync-disconnect]').click()");
+            await Wait(web.CoreWebView2,"document.querySelector('[data-sync-disconnect]').hidden && document.querySelector('[data-sync-badge]').textContent==='未接続'");
+            if((await store.GetSyncStatusAsync()).Configured || !File.Exists(Path.Combine(transport,"hoverpocket-sync.json"))) throw new Exception("disconnect did not leave the group or touched the shared folder");
+            VerifyConsole.WriteLine("PASS sync settings: stop syncing on this device asks to confirm, leaves the group and keeps the shared folder");
             VerifyConsole.WriteLine("PASS settings navigation: six categories, search, clear search on navigation, narrow window without horizontal overflow");
             VerifyConsole.WriteLine("PASS sync settings: English labels and settings-only bridge boundary");
             VerifyConsole.WriteLine("PASS sync UI evidence: "+root);

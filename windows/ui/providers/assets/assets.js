@@ -4,6 +4,10 @@ import { assetTranslator, translateAssetTree } from "./locale.js";
 export function renderAssetsProvider({ container, request, state }) {
   const english = state?.settings?.language === "en", t = assetTranslator(english ? "en" : "ja");
   const modifierLabel = state?.platform === "mac" ? "⌘" : "Ctrl", platformLabel = state?.platform === "mac" ? "macOS" : "Windows";
+  // macOS builds copy this file; region recording on the video icon and the footer trash button are Windows-only for now.
+  const mac = state?.platform === "mac";
+  const videoTitle = mac ? "画面収録を開始・停止" : "範囲を選んで録画（選ぶとすぐに始まります）・録画を停止", videoLabel = mac ? "画面収録を開始・停止" : "範囲を選んで録画・録画を停止";
+  const captureMenuTitle = mac ? "範囲収録・カメラ・録音" : "画面収録・カメラ・録音";
   let disposed = false, page = null, generation = 0, previewGeneration = 0, queryTimer, selectionReady = false;
   let query = { version: 2, text: "", view: "recent", offset: 0, limit: 100 }, selection = new Set(), anchor = null;
   let selectionRevision = 0, marquee = null, marqueeFrame = 0;
@@ -25,8 +29,8 @@ export function renderAssetsProvider({ container, request, state }) {
         <button class="assets-icon-button" data-action="clipboard" title="コピーした画像・ファイルを保存" aria-label="コピーした画像・ファイルを保存">${icon("paste")}</button>
         <span class="assets-toolbar-divider"></span>
         <button class="assets-icon-button assets-capture-button" data-action="screenshot" title="スクリーンショットを撮影" aria-label="スクリーンショットを撮影">${icon("camera")}</button>
-        <button class="assets-icon-button assets-capture-button" data-action="recording" title="画面収録を開始・停止" aria-label="画面収録を開始・停止">${icon("video")}</button>
-        <button class="assets-icon-button" data-action="captureMenu" title="範囲収録・カメラ・録音" aria-label="範囲収録・カメラ・録音" aria-haspopup="dialog">${icon("more")}</button>
+        <button class="assets-icon-button assets-capture-button" data-action="recording" title="${videoTitle}" aria-label="${videoLabel}">${icon("video")}</button>
+        <button class="assets-icon-button" data-action="captureMenu" title="${captureMenuTitle}" aria-label="${captureMenuTitle}" aria-haspopup="dialog">${icon("more")}</button>
         <button class="assets-icon-button" data-action="organizer" title="広い画面で整理する" aria-label="広い画面で整理する">${icon("organize")}</button>
       </div>
     </div>
@@ -36,7 +40,7 @@ export function renderAssetsProvider({ container, request, state }) {
       <button class="assets-more-filters" data-action="filters" title="日付・検索条件" aria-label="日付・検索条件">${icon("filter")}</button>
       <label class="assets-thumbnail-control" title="一覧のサイズ">${icon("grid",12)}<input class="assets-thumbnail-size" type="range" min="100" max="260" step="4" value="124" aria-label="一覧のサイズ">${icon("grid",19)}</label>
     </div></div>
-    <div class="assets-body"><aside class="assets-sidebar" aria-label="分類"></aside><div class="assets-main"><div class="assets-scroll" tabindex="0" role="listbox" aria-label="素材" aria-multiselectable="true"><div class="assets-spacer-top"></div><div class="assets-grid"></div><div class="assets-spacer-bottom"></div></div></div><section class="assets-preview" hidden aria-label="素材プレビュー"><div class="assets-preview-toolbar"><button data-action="endPreview" aria-label="一覧へ戻る">← 一覧</button><span class="assets-preview-name"></span><button data-action="zoomOut" aria-label="縮小">−</button><button data-action="zoomFit">フィット</button><button data-action="zoomIn" aria-label="拡大">＋</button><button data-action="fullscreen" aria-label="全画面を切り替え">⛶</button></div><div class="assets-media"></div><div class="assets-preview-bottom"></div></section></div><footer class="assets-footer"><span class="assets-summary" role="status"></span><span class="assets-selected-count" role="status"></span><span class="assets-status" role="status"></span></footer><dialog class="assets-selection assets-context-menu" aria-label="素材の操作"></dialog>`;
+    <div class="assets-body"><aside class="assets-sidebar" aria-label="分類"></aside><div class="assets-main"><div class="assets-scroll" tabindex="0" role="listbox" aria-label="素材" aria-multiselectable="true"><div class="assets-spacer-top"></div><div class="assets-grid"></div><div class="assets-spacer-bottom"></div></div></div><section class="assets-preview" hidden aria-label="素材プレビュー"><div class="assets-preview-toolbar"><button data-action="endPreview" aria-label="一覧へ戻る">← 一覧</button><span class="assets-preview-name"></span><button data-action="zoomOut" aria-label="縮小">−</button><button data-action="zoomFit">フィット</button><button data-action="zoomIn" aria-label="拡大">＋</button><button data-action="fullscreen" aria-label="全画面を切り替え">⛶</button></div><div class="assets-media"></div><div class="assets-preview-bottom"></div></section></div><footer class="assets-footer"><span class="assets-summary" role="status"></span><span class="assets-selected-count" role="status"></span><button type="button" class="assets-trash-selection" title="選択した素材をゴミ箱へ移す（Delete）" hidden>ゴミ箱へ移す</button><span class="assets-status" role="status"></span></footer><dialog class="assets-selection assets-context-menu" aria-label="素材の操作"></dialog>`;
   const trashDrop = document.createElement("div"); trashDrop.className = "assets-trash-drop"; trashDrop.hidden = true; trashDrop.setAttribute("role", "status");
   trashDrop.innerHTML = `<span class="assets-trash-icon" aria-hidden="true">⌫</span><div><strong>${english ? "Drop to move to trash" : "ここにドロップしてゴミ箱へ"}</strong><small>${english ? "You can undo this after dropping" : "あとから「元に戻す」で復元できます"}</small></div>`;
   root.append(trashDrop);
@@ -46,6 +50,7 @@ export function renderAssetsProvider({ container, request, state }) {
   const details = document.createElement("aside"); details.className = "assets-detail"; details.setAttribute("aria-label", "素材の詳細"); root.querySelector(".assets-body").append(details);
   const find = selector => root.querySelector(selector), scroll = find(".assets-scroll"), grid = find(".assets-grid"), media = find(".assets-media");
   const contextMenu = find(".assets-context-menu");
+  find(".assets-trash-selection").onclick = () => { if (query.view !== "trash" && !preview) void update("trash"); };
   const queryState = document.createElement("div"); queryState.className = "assets-query-state"; queryState.hidden = true; queryState.setAttribute("role", "status"); find(".assets-main").append(queryState);
   const clearFilters = document.createElement("button"); clearFilters.dataset.action = "clearFilters"; clearFilters.textContent = english ? "Clear filters" : "絞り込みを解除"; clearFilters.hidden = true; find(".assets-toolbar-filters").append(clearFilters);
   const hasFilters = () => !!(query.text?.trim() || query.kind || query.extension != null || query.createdAfter || query.createdBefore || query.folderId || query.tagId || query.folderIds?.length || query.tagIds?.length);
@@ -80,7 +85,7 @@ export function renderAssetsProvider({ container, request, state }) {
   });
   const selectionBox = document.createElement("div"); selectionBox.className = "assets-marquee"; selectionBox.hidden = true; scroll.append(selectionBox);
   scroll.title = english ? `Drag empty space to select. Shift-click selects a range; ${modifierLabel}-click adds or removes items.` : `空白をドラッグして範囲選択。Shift＋クリックで連続選択、${modifierLabel}＋クリックで追加・解除。`;
-  const report = message => { if (!disposed) find(".assets-status").textContent = t(message); };
+  const report = message => { if (disposed) return; const status = find(".assets-status"); status.textContent = t(message); status.title = status.textContent; };
   let organizeUndoToken = null;
   const run = async (method, params) => { try {
     const result = await request(method, params);
@@ -155,7 +160,7 @@ export function renderAssetsProvider({ container, request, state }) {
     for (const [view, name] of [["recent", "最近の素材"], ["favorites", "★ お気に入り"], ["uncategorized", "未分類"], ["trash", "ゴミ箱"]]) {
       const el = button(name, () => { query = { ...query, view, folderId: null, tagId: null, folderIds:[], tagIds:[] }; resetQuery(); }); el.classList.toggle("is-selected", query.view === view && !query.folderId && !query.tagId && !query.folderIds?.length && !query.tagIds?.length); if (view !== "recent") el.dataset.dropKind = ({favorites:"favorite",uncategorized:"unfiled",trash:"trash"})[view]; sidebar.append(el);
     }
-    if (query.view === "trash") sidebar.append(button("ゴミ箱を空にする…", async () => { const result = await run("assets.emptyTrash"); if (result?.removed !== undefined) report(`${result.removed}件を${platformLabel}のゴミ箱へ移しました。移せなかった原本は保持されています。`); await refresh(); }));
+    if (query.view === "trash") { const empty = button("ゴミ箱を空にする…", emptyTrash); empty.className = "assets-empty-trash"; sidebar.append(empty); }
     const heading = name => { const el = document.createElement("h3"); el.textContent = t(name); sidebar.append(el); };
     heading("フォルダ");
     for (const c of page.folders) { const el = button(c.name, event => filterCategory("folder", c.id, event)); el.classList.toggle("is-selected", query.folderId === c.id || query.folderIds?.includes(c.id)); el.style.paddingLeft = c.parentId ? "24px" : "10px"; el.oncontextmenu = event => { event.preventDefault(); editCategory(c); }; el.dataset.dropKind="folder"; el.dataset.folderId=c.id; sidebar.append(el); }
@@ -408,9 +413,22 @@ export function renderAssetsProvider({ container, request, state }) {
     contextMenu.style.left = `${Math.max(8, Math.min(x, innerWidth - bounds.width - 8))}px`;
     contextMenu.style.top = `${Math.max(8, Math.min(y, innerHeight - bounds.height - 8))}px`;
   }
+  async function emptyTrash() {
+    const result = await run("assets.emptyTrash");
+    if (result?.removed !== undefined && result.recycled === undefined) report(`${result.removed}件を${platformLabel}のゴミ箱へ移しました。移せなかった原本は保持されています。`);
+    else if (result?.removed !== undefined) {
+      const recycled = result.recycled ?? result.removed, kept = result.kept || 0;
+      report(english
+        ? [`Moved ${recycled} to the ${platformLabel} Recycle Bin.`, kept ? ` ${kept} stay in the trash because their originals could not be verified or are in use.` : ""].join("")
+        : [`${recycled}件を${platformLabel}のゴミ箱へ移しました。`, kept ? `${kept}件は原本を確かめられないか使用中のため、ゴミ箱に残しています。` : ""].join(""));
+    }
+    await refresh();
+  }
   function renderSelection() {
     const count = selection.size ? `${selection.size}${english ? " selected" : "件選択"}` : "";
     find(".assets-selected-count").textContent = count;
+    // The footer action mirrors the Delete key: only for a validated selection outside the trash.
+    find(".assets-trash-selection").hidden = mac || !(selectionReady && selection.size && query.view !== "trash" && !preview);
     const tools = contextMenu; tools.replaceChildren(); if (!selectionReady || !selection.size || !selectedAsset) { closeContextMenu(); return; }
     const status = document.createElement("span"); status.textContent = count; tools.append(status);
     const item = (text, action) => button(text, () => { closeContextMenu(); if (selectionReady && selection.size) void action(); });
@@ -575,8 +593,9 @@ export function renderAssetsProvider({ container, request, state }) {
   }
   function captureMenu() {
     const dialog = document.createElement("dialog"); dialog.className="assets-dialog";
-    const title=document.createElement("h3"); title.textContent=english?"Camera & audio":"カメラ撮影・録音"; dialog.append(title);
-    for (const [kind,label] of [["regionRecording",english?"Record a selected region":"範囲を選択して画面収録"],["cameraPhoto",english?"Camera photo":"カメラで写真を撮る"],["cameraVideo",english?"Camera video":"カメラで動画を収録"],["audio",english?"Audio recording":"音声を録音"]]) {
+    const title=document.createElement("h3"); title.textContent=mac?(english?"Camera & audio":"カメラ撮影・録音"):(english?"Screen recording, camera & audio":"画面収録・カメラ・録音"); dialog.append(title);
+    const screenRecording = mac ? ["regionRecording",english?"Record a selected region":"範囲を選択して画面収録"] : ["recording",english?"Record a screen or window":"画面・ウィンドウを選んで画面収録"];
+    for (const [kind,label] of [screenRecording,["cameraPhoto",english?"Camera photo":"カメラで写真を撮る"],["cameraVideo",english?"Camera video":"カメラで動画を収録"],["audio",english?"Audio recording":"音声を録音"]]) {
       dialog.append(button(label,()=>{dialog.close();void run("assets.capture",{kind,folderId:currentFolderId()});}));
     }
     dialog.append(button("閉じる",()=>dialog.close())); root.append(dialog); dialog.addEventListener("close",()=>dialog.remove()); dialog.showModal();
@@ -584,7 +603,7 @@ export function renderAssetsProvider({ container, request, state }) {
   const actions = {
     sidebar: () => { const open = root.classList.toggle("show-sidebar"); find('[data-action="sidebar"]').setAttribute("aria-expanded", String(open)); }, clearFilters: clearQueryFilters, add: () => run("assets.pick"), folder: () => run("assets.pick", { kind: "folder" }), clipboard: () => run("assets.clipboard"),
     organizer: () => run("assets.openOrganizer"),
-    screenshot: () => run("assets.capture", { kind:"screenshot", folderId: currentFolderId() }), recording: () => run("assets.capture", { kind:"recording", folderId: currentFolderId() }),
+    screenshot: () => run("assets.capture", { kind:"screenshot", folderId: currentFolderId() }), recording: () => run("assets.capture", { kind: mac ? "recording" : "regionRecording", folderId: currentFolderId() }),
     captureMenu, filters, sortDirection: () => { query.descending = query.descending === false; resetQuery(); },
     endPreview, fullscreen: toggleFullscreen, zoomIn: () => { zoom = Math.min(8, zoom * 1.25); applyZoom(); }, zoomOut: () => { zoom = Math.max(.25, zoom / 1.25); applyZoom(); }, zoomFit: () => { zoom = 1; applyZoom(); }
   };

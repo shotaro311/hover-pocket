@@ -10,7 +10,7 @@ public sealed record AssetSyncEvent(int Version, string GroupId, string Revision
 }
 public sealed record AssetSyncConflict(string Revision, string EntityType, string EntityId, string Name, string? LocalName);
 public sealed record AssetSyncStatus(bool Configured, string? TransportPath, string? GroupId, string? DeviceId,
-    int Pending, int Outgoing, AssetSyncConflict[] Conflicts, string? Error = null, bool Enabled = false);
+    int Pending, int Outgoing, AssetSyncConflict[] Conflicts, string? Error = null, bool Enabled = false, bool CleanupPending = false);
 internal sealed record AssetSyncValue(bool Deleted, Asset? Asset, Category? Category);
 internal sealed record AssetSyncHead(string Revision, AssetSyncValue Value);
 

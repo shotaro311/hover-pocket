@@ -71,7 +71,8 @@ internal sealed class AssetPaneController : IDisposable
         {
             using var pin = PinForDialog();
             if (MessageBox.Show(_owner, "素材をWindowsのゴミ箱へ移します。アプリ内の取り消しでは戻せません。続けますか？", "ゴミ箱を空にする", MessageBoxButton.OKCancel) != MessageBoxResult.OK) return new { cancelled = true };
-            _undo = null; return new { removed = await _store.EmptyTrashAsync(AssetRecycle.MoveAsync) };
+            _undo = null; var result = await _store.EmptyTrashAsync(AssetRecycle.MoveAsync);
+            return new { removed = result.Recycled, recycled = result.Recycled, kept = result.Kept };
         });
         Register("assets.saveSearch", async p => new { ok = await _store.SaveSearchAsync(Text(p, "name"), Parse<AssetQuery>(p!.Value.GetProperty("filter"))) });
         Register("assets.thumbnail", async p => { var token = _thumbnails.Token; var asset = await _store.GetAsync(Text(p, "id")); return asset is null ? null : await _media.FrameAsync(asset, 1, true, token); });

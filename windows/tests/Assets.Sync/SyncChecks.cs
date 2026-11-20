@@ -153,6 +153,46 @@ internal static class SyncChecks
         using(var reopened=new AssetStore(outboxRoot))
         { await Tick(reopened); Check((await reopened.GetSyncStatusAsync()).Outgoing==0,"restart retries durable outbox"); }
 
+        // The shared folder is gone: emptying the trash explains why it waits, and leaving the group lets it proceed.
+        var goneRoot=Path.Combine(root,"gone-transport-library"); var goneTransport=Path.Combine(root,"gone-transport");
+        using(var gone=new AssetStore(goneRoot))
+        {
+            await gone.ConfigureSyncAsync(goneTransport,true); await gone.SetSyncEnabledAsync(true);
+            var goneId=(await gone.ImportAsync(source)).AssetId!; await Tick(gone);
+            await gone.UpdateAsync([goneId],"trash");
+            Directory.Move(goneTransport,goneTransport+"-removed");
+            try { await gone.EmptyTrashAsync(_=>Task.FromResult(true)); Check(false,"missing shared folder blocks emptying the trash"); }
+            catch(InvalidOperationException ex) { Check(ex.Message.Contains("同期の共有フォルダが見つからない") && (await gone.GetAsync(goneId)) is { Trashed:true },"missing shared folder blocks emptying the trash with an explanation"); }
+            var left=await gone.DisconnectSyncAsync();
+            Check(!left.Configured && left.TransportPath is null && !left.Enabled && left.Outgoing==0 && !File.Exists(Path.Combine(goneRoot,"sync-configured")),"leaving the sync group clears it on this device only");
+            var recycled=new List<string>();
+            var emptied=await gone.EmptyTrashAsync(path=> { recycled.Add(path); return Task.FromResult(true); });
+            Check(emptied.Recycled==1 && await gone.GetAsync(goneId) is null && recycled.Count==1 && Directory.Exists(goneTransport+"-removed"),"after leaving, emptying the trash works and the shared folder is untouched");
+        }
+
+        // The restore latch cannot be removed: the group is already gone, the status says cleanup is pending, a retry finishes.
+        var heldRoot=Path.Combine(root,"held-latch-library");
+        using(var held=new AssetStore(heldRoot))
+        {
+            await held.ConfigureSyncAsync(Path.Combine(root,"held-latch-transport"),true);
+            var latch=Path.Combine(heldRoot,"sync-configured");
+            using(new FileStream(latch,FileMode.Open,FileAccess.Read,FileShare.None))
+            {
+                try { await held.DisconnectSyncAsync(); Check(false,"a held restore latch is reported"); }
+                catch(InvalidOperationException ex) { Check(ex.Message.Contains("後始末のファイル"),"a held restore latch is reported"); }
+                var pending=await held.GetSyncStatusAsync();
+                Check(!pending.Configured && pending.CleanupPending && File.Exists(latch),"the group is gone and the latch cleanup stays pending");
+            }
+            var retried=await held.DisconnectSyncAsync();
+            Check(!retried.Configured && !retried.CleanupPending && !File.Exists(latch),"a second press finishes the latch cleanup");
+            // A folder in the latch's place is not deleted; the cleanup stays visible as pending.
+            Directory.CreateDirectory(latch);
+            try { await held.DisconnectSyncAsync(); Check(false,"a folder in place of the latch is reported"); }
+            catch(InvalidOperationException) { Check((await held.GetSyncStatusAsync()).CleanupPending && Directory.Exists(latch),"a folder in place of the latch is reported and left pending"); }
+            Directory.Delete(latch);
+            Check(!(await held.GetSyncStatusAsync()).CleanupPending,"no latch, no pending cleanup");
+        }
+
         var syncDbRoot=Path.Combine(root,"damaged-sync");
         using(var damaged=new AssetStore(syncDbRoot))
         {

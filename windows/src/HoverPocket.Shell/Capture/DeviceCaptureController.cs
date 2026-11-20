@@ -35,6 +35,8 @@ internal sealed class DeviceCaptureController : IDisposable
     private bool _busy, _disposed;
     public bool Recording { get; private set; }
     internal bool Busy => _busy;
+    /// <summary>From a stop until the recording is saved to the library, whoever asked for the stop.</summary>
+    internal bool Finishing { get; private set; }
     internal DeviceCaptureWindow? WindowForVerify => _window;
     public string Status { get; private set; } = "デバイスを選んで撮影・収録できます。";
     public event Action? StateChanged;
@@ -173,14 +175,14 @@ internal sealed class DeviceCaptureController : IDisposable
         try
         {
             if (!Recording) return;
-            _busy = true; SetStatus("収録を終了し、ライブラリへ保存しています…");
+            _busy = true; Finishing = true; SetStatus("収録を終了し、ライブラリへ保存しています…");
             await _capture!.StopRecordAsync(); Recording = false; _duration.Stop();
             CaptureFiles.MarkComplete(_stage!, [_path!], _configured?.FolderId);
             var ids = await _files.ImportCompletedAsync(_stage!); _stage = null; _path = null;
             SetStatus($"ライブラリへ保存しました（{ids.Length}件）。");
         }
         catch { Recording = false; SetStatus("収録の確定・保存に失敗しました。保存待ちのファイルを保持しています。「保存待ちを再試行」から確認してください。"); _window?.Show(); }
-        finally { _duration.Stop(); _clock.Stop(); _badge?.Hide(); await ReleaseCaptureAsync(); _busy = false; _gate.Release(); SetStatus(Status); }
+        finally { _duration.Stop(); _clock.Stop(); _badge?.Hide(); await ReleaseCaptureAsync(); _busy = false; Finishing = false; _gate.Release(); SetStatus(Status); }
     }
     internal async Task ReleasePreviewAsync()
     { if (_busy || Recording) return; await _gate.WaitAsync(); try { await ReleaseCaptureAsync(); } finally { _gate.Release(); } }

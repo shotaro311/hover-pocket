@@ -275,7 +275,7 @@ internal static class AssetInteractionVerifier
         finally { MouseEvent(0x0004, 0, 0, 0, 0); SetCursorPos(previous.X, previous.Y); }
     }
 
-    private static async Task ClickSurfaceAsync(FrameworkElement surface, CoreWebView2 web, string selector, bool rightButton = false)
+    internal static async Task ClickSurfaceAsync(FrameworkElement surface, CoreWebView2 web, string selector, bool rightButton = false)
     {
         await UntilAsync(async () => await web.ExecuteScriptAsync($"!!document.querySelector({JsonSerializer.Serialize(selector)})") == "true");
         await web.ExecuteScriptAsync($"document.querySelector({JsonSerializer.Serialize(selector)}).scrollIntoView({{block:'nearest',inline:'nearest'}})");

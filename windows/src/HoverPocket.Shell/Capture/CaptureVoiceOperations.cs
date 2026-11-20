@@ -93,16 +93,37 @@ internal sealed partial class CaptureController
 // Keep the conversation and its controls available while capturing a display.
 internal sealed class CaptureWindowExclusion : IDisposable
 {
+    private static CaptureWindowExclusion? _active;
+    private static bool _classHandlerRegistered;
     private readonly List<(nint Window, uint Affinity)> _windows = [];
     public CaptureWindowExclusion()
     {
-        foreach (System.Windows.Window window in System.Windows.Application.Current.Windows)
+        if (!_classHandlerRegistered)
         {
-            var handle = new WindowInteropHelper(window).Handle;
-            if (handle != 0 && GetWindowDisplayAffinity(handle, out var affinity) && SetWindowDisplayAffinity(handle, 0x11)) _windows.Add((handle, affinity));
+            // Settings, the organizer and other plain windows opened while recording are kept out of the video too.
+            System.Windows.EventManager.RegisterClassHandler(typeof(System.Windows.Window), System.Windows.FrameworkElement.LoadedEvent,
+                new System.Windows.RoutedEventHandler((sender, _) => ExcludeIfActive(new WindowInteropHelper((System.Windows.Window)sender).Handle)));
+            _classHandlerRegistered = true;
         }
+        foreach (System.Windows.Window window in System.Windows.Application.Current.Windows) Exclude(new WindowInteropHelper(window).Handle);
+        _active = this;
     }
-    public void Dispose() { foreach (var (window, affinity) in _windows) SetWindowDisplayAffinity(window, affinity); _windows.Clear(); }
+    /// <summary>A window created while recording (a recreated panel, a resize overlay) is kept out of the video too.</summary>
+    internal static void ExcludeIfActive(nint handle) => _active?.Exclude(handle);
+    /// <summary>A window that excludes itself for good (a screenshot toast) keeps that setting after the recording.</summary>
+    internal static void KeepExcluded(nint handle) => _active?._windows.RemoveAll(item => item.Window == handle);
+    internal static bool IsExcludedForVerify(nint handle) => _active?._windows.Any(item => item.Window == handle) == true;
+    private void Exclude(nint handle)
+    {
+        if (handle == 0 || _windows.Any(item => item.Window == handle)) return;
+        if (GetWindowDisplayAffinity(handle, out var affinity) && SetWindowDisplayAffinity(handle, 0x11)) _windows.Add((handle, affinity));
+    }
+    public void Dispose()
+    {
+        if (ReferenceEquals(_active, this)) _active = null;
+        foreach (var (window, affinity) in _windows) SetWindowDisplayAffinity(window, affinity);
+        _windows.Clear();
+    }
     [System.Runtime.InteropServices.DllImport("user32.dll")] private static extern bool GetWindowDisplayAffinity(nint window, out uint affinity);
     [System.Runtime.InteropServices.DllImport("user32.dll")] private static extern bool SetWindowDisplayAffinity(nint window, uint affinity);
 }
