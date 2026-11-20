@@ -1086,8 +1086,22 @@ internal sealed class AiUsageVerifier
             const string settingsOrder = "codex,claude,gemini,muse,antigravity";
             string Ordered(string order) => $"usageVerify.services() === '{order}'";
             string BalanceOrdered(string order) => $"usageVerify.services('balanceOrder') === '{order}'";
+            // With hover switching, a header button that moves under a resting pointer selects another tool,
+            // which moves it back again: the panel then flips between the two tools without end.
+            await web.ExecuteScriptAsync("""
+                usageVerify.headerRects = () => usageVerify.all('.hp-header > :not([data-provider-title], [data-refresh], .hp-header-spacer), [data-provider-icons] button')
+                    .map(n => { const r = n.getBoundingClientRect(); return [r.left, r.top, r.width].map(v => v.toFixed(2)).join(':'); }).join('|');
+                usageVerify.headerBefore = usageVerify.headerRects();
+                """);
+            Check(await Js("!usageVerify.one('.hp-usage') && usageVerify.headerBefore.length > 0"), "panel UI: header measured on another tool");
             await Select("ai-usage");
             await WaitFor($"!!usageVerify.one('.hp-usage-list') && {Ordered(defaultListOrder)} && usageVerify.values('claude') === '68%|70%|15%|25%'");
+            Check(await Js("usageVerify.headerRects() === usageVerify.headerBefore"), "panel UI: opening AI Usage leaves the tool icons where they were");
+            Check(await Js("""
+                [usageVerify.one('[data-provider-title]'), usageVerify.one('[data-refresh]')].every(n => getComputedStyle(n).visibility === 'hidden')
+                && usageVerify.all('.hp-header [data-refresh] *, .hp-header [data-refresh]').every(n => getComputedStyle(n).visibility === 'hidden')
+                """), "panel UI: shared title and refresh are hidden while AI Usage shows its own");
+            if (nativeMouse) await VerifyNativeHoverSwitchAsync(web, ChangePanelState, Select, WaitFor, log, timeout.Token);
 
             Check(await Js("usageVerify.text('.hp-usage-header h2') === 'AI Usage' && usageVerify.one('[data-view=list]').getAttribute('aria-pressed') === 'true'"), "panel UI: title and list default");
             Check(await Js("""
@@ -1475,6 +1489,64 @@ internal sealed class AiUsageVerifier
             window.Close();
             web.Dispose();
         }
+    }
+
+    /// <summary>
+    /// A real cursor rests on the AI Usage icon with hover switching on: the panel must settle on AI Usage
+    /// instead of flipping to the neighbouring tool and back.
+    /// </summary>
+    private async Task VerifyNativeHoverSwitchAsync(PanelWebView web, Func<string, object, Task> changePanelState,
+        Func<string, Task> select, Func<string, Task> waitFor, Action<string> log, CancellationToken token)
+    {
+        await changePanelState("settings.setSwitchingMode", new { switchingMode = "hover" });
+        var neighbour = JsonSerializer.Deserialize<string>(await web.ExecuteScriptAsync(
+            "usageVerify.one('[data-provider-icons] [data-provider-id=ai-usage]').previousElementSibling.dataset.providerId"))!;
+        await select(neighbour);
+        await waitFor("!usageVerify.one('.hp-usage')");
+        await web.ExecuteScriptAsync("""
+            window.hoverVerify = { flips: 0, last: usageVerify.one('[data-provider-icons] .is-selected')?.dataset.providerId };
+            hoverVerify.observer = new MutationObserver(() => {
+                const selected = usageVerify.one('[data-provider-icons] .is-selected')?.dataset.providerId;
+                if (selected !== hoverVerify.last) { hoverVerify.flips++; hoverVerify.last = selected; }
+            });
+            hoverVerify.observer.observe(usageVerify.one('[data-provider-icons]'), { subtree: true, attributes: true, attributeFilter: ['class'] });
+            """);
+        var cssWidth = JsonSerializer.Deserialize<double>(await web.ExecuteScriptAsync("innerWidth"));
+        var ratio = web.ActualWidth / cssWidth;
+        var position = JsonNode.Parse(await web.ExecuteScriptAsync(
+            "usageVerify.center(usageVerify.one('[data-provider-icons] [data-provider-id=ai-usage]'))"))!;
+        var icon = web.PointToScreen(new System.Windows.Point(position["x"]!.GetValue<double>() * ratio, position["y"]!.GetValue<double>() * ratio));
+        var below = web.PointToScreen(new System.Windows.Point(position["x"]!.GetValue<double>() * ratio, web.ActualHeight - 20));
+        if (!GetCursorPos(out var previous)) throw new InvalidOperationException("Native AI Usage verify needs an interactive desktop.");
+        int flips;
+        string selected;
+        try
+        {
+            SetCursorPos((int)below.X, (int)below.Y);
+            await Task.Delay(150, token);
+            for (var step = 1; step <= 6; step++)
+            {
+                SetCursorPos((int)icon.X, (int)(below.Y + (icon.Y - below.Y) * step / 6));
+                await Task.Delay(30, token);
+            }
+            // A hand on the mouse is never still: nudge the cursor by a pixel, as the reported flicker needed.
+            for (var nudge = 0; nudge < 30; nudge++)
+            {
+                SetCursorPos((int)icon.X + nudge % 2, (int)icon.Y);
+                await Task.Delay(50, token);
+            }
+            flips = JsonSerializer.Deserialize<int>(await web.ExecuteScriptAsync("hoverVerify.observer.disconnect(), hoverVerify.flips"));
+            selected = JsonSerializer.Deserialize<string>(await web.ExecuteScriptAsync("hoverVerify.last"))!;
+        }
+        finally
+        {
+            SetCursorPos(previous.X, previous.Y);
+            await changePanelState("settings.setSwitchingMode", new { switchingMode = "click" });
+        }
+        log($"ai-usage native hover: {flips} selection change(s) in 1.5 s, settled on {selected}");
+        Check(flips == 1 && selected == "ai-usage", "panel UI: a cursor held on the AI Usage icon selects it once, without flipping back");
+        if (selected != "ai-usage") await select("ai-usage");
+        await waitFor("!!usageVerify.one('.hp-usage-list')");
     }
 
     private static async Task VerifyNativePointerAsync(PanelWebView web, Func<string, Task> waitFor, string expectedOrder,

@@ -5,8 +5,9 @@
   font-display: block;
 }
 
+/* Keep their space: with hover switching, icons that shift under a resting pointer select another tool and loop. */
 .hp-panel:has(.hp-usage) > .hp-header > :is([data-provider-title], [data-refresh]) {
-  display: none;
+  visibility: hidden;
 }
 
 .hp-usage {
