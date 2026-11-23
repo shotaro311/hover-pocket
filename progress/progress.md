@@ -2,10 +2,15 @@
 project_slug: hover-menu-preview
 updated: 2026-11-23
 updated_by: claude
-status: production-macos-0.2.19; production-windows-0.2.23
+status: production-macos-0.2.19; production-windows-0.2.24
 ---
 
-## 2026-11-23 ディスプレイのコントラスト調整（Windows、未コミット・未配信）
+## 2026-11-23 Windows 0.2.24 本番配信
+
+- `28c6d5b` をmainへpushし、Verify WindowsとVerify Pocket Contractsが成功。[Windows 0.2.24](https://github.com/shotaro311/hover-pocket/releases/tag/win-v0.2.24) を `--latest=false` で公開し、8配布物の一致と公開物の99項目検査に合格。macOSは不変。
+- データと0.2.23一式を退避してからこのPCへ適用した。PID 2332 が0.2.24で応答中で、データは更新前後で一致（クリップボードの文字1件の時刻だけが再起動で更新）。レビュー未完了は本人に伝えたうえで「このまま配信する」との判断。本番のパネルでコントラストを動かす確認は本人の操作で行う。[配信記録](2026-11/2026-11-23_hover-pocket-windows-0224-release.md)。
+
+## 2026-11-23 ディスプレイのコントラスト調整（Windows 0.2.24）
 
 - Controlsの「ディスプレイ」欄の見出しの右端に「◐ コントラスト」ボタンを足した。押すと各画面に明るさとコントラストのバーが並ぶ（初期値オフ、保存して次回も引き継ぐ）。コントラストはDDC/CIのVCP `0x12` で、明るさと同じモニターごとの直列化と読み戻しを使う。オフの間はモニターへ問い合わせない。
 - 設計はClaude、実装はCodex（Sol / high）。別の会話のCodex（Astra / high）のレビューを2回行った。2回目で要修正が残ったため「レビュー未完了」。2回目のあとにClaudeが4件直したが、Codexの確認は受けていない。明るさにも以前からある競合2件と、設定保存の同期書き込みは、判断して残した。
