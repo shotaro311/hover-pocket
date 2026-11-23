@@ -7,7 +7,7 @@ namespace HoverPocket.Shell.Providers.Controls;
 internal sealed class ControlsBridgeController : IDisposable
 {
     private static readonly TimeSpan OperationTimeout = TimeSpan.FromMilliseconds(1500);
-    private static readonly TimeSpan BrightnessOperationTimeout = TimeSpan.FromSeconds(7);
+    private static readonly TimeSpan DisplayOperationTimeout = TimeSpan.FromSeconds(7);
     private static readonly TimeSpan SnapshotCacheLifetime = TimeSpan.FromMilliseconds(750);
     private static readonly TimeSpan FallbackRefreshInterval = TimeSpan.FromSeconds(10);
     private readonly IVolumeEndpointService _volume;
@@ -57,6 +57,8 @@ internal sealed class ControlsBridgeController : IDisposable
         dispatcher.Register("controls.setVolume", HandleSetVolumeAsync);
         dispatcher.Register("controls.toggleMute", HandleToggleMuteAsync);
         dispatcher.Register("controls.setBrightness", HandleSetBrightnessAsync);
+        dispatcher.Register("controls.setContrast", async (parameters, token) => await SetContrastAsync(
+            ReadRequiredString(parameters, "id"), ReadRequiredInt(parameters, "value"), token));
         dispatcher.Register("controls.mediaCommand", HandleMediaCommandAsync);
         dispatcher.Register("controls.openMediaSource", HandleOpenMediaSourceAsync);
     }
@@ -189,19 +191,50 @@ internal sealed class ControlsBridgeController : IDisposable
         return snapshot;
     }
 
-    public async Task<ControlsSnapshot> SetBrightnessAsync(
+    public void SetContrastVisible(bool visible) => _brightness.SetContrastVisible(visible);
+
+    public async Task RefreshContrastAsync(CancellationToken cancellationToken) =>
+        _ = await ReadDisplaysSafelyAsync(cancellationToken);
+
+    public Task<ControlsSnapshot> SetBrightnessAsync(
+        string displayId,
+        int value,
+        CancellationToken cancellationToken) =>
+        SetDisplayAsync(DdcFeature.Brightness, displayId, value, cancellationToken);
+
+    public Task<ControlsSnapshot> SetContrastAsync(
+        string displayId,
+        int value,
+        CancellationToken cancellationToken) =>
+        SetDisplayAsync(DdcFeature.Contrast, displayId, value, cancellationToken);
+
+    private async Task<ControlsSnapshot> SetDisplayAsync(
+        DdcFeature feature,
         string displayId,
         int value,
         CancellationToken cancellationToken)
     {
         ThrowIfDisposed();
+        var contrast = feature == DdcFeature.Contrast;
         var fallbackDisplays = _lastSnapshot?.Displays
-            ?? [new DisplayBrightnessState("display:timeout", "Display", false, null, "Brightness command timed out.")];
+            ?? [new DisplayBrightnessState("display:timeout", "Display", false, null,
+                contrast ? null : "Brightness command timed out.")];
+        if (contrast)
+        {
+            fallbackDisplays = fallbackDisplays.Select(display =>
+                string.Equals(display.Id, displayId, StringComparison.OrdinalIgnoreCase)
+                    ? display with { ContrastError = "Contrast command timed out.", ContrastWriteVerified = false }
+                    : display).ToArray();
+        }
+
+        var normalized = Math.Clamp(value, 0, 100);
         var displays = await AwaitOrFallbackAsync(
-            _brightness.SetBrightnessAsync(displayId, Math.Clamp(value, 0, 100), cancellationToken),
+            contrast
+                ? _brightness.SetContrastAsync(displayId, normalized, cancellationToken)
+                : _brightness.SetBrightnessAsync(displayId, normalized, cancellationToken),
             fallbackDisplays,
             cancellationToken,
-            BrightnessOperationTimeout);
+            DisplayOperationTimeout);
         Volatile.Write(ref _latestDisplays, displays);
         var current = _lastSnapshot;
         ControlsSnapshot snapshot;

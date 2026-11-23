@@ -58,6 +58,7 @@ internal sealed class MonitorBrightnessService : IMonitorBrightnessService, IDis
     private readonly SemaphoreSlim _wmiWriteGate = new(1, 1);
     private readonly ConcurrentDictionary<string, MonitorGate> _gates = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, long> _writeSequences = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, long> _contrastWriteSequences = new(StringComparer.OrdinalIgnoreCase);
     private Task<IReadOnlyList<DisplayBrightnessState>>? _activeRead;
     private IReadOnlyList<DisplayBrightnessState>? _lastSnapshot;
     private DateTimeOffset _lastSnapshotAt;
@@ -66,6 +67,9 @@ internal sealed class MonitorBrightnessService : IMonitorBrightnessService, IDis
     private int _activeWrites;
     private volatile bool _topologyDirty;
     private volatile bool _skipPrimary;
+    private volatile bool _contrastVisible;
+    private bool _contrastRefreshPending;
+    private long _contrastEnabledAt;
     private readonly bool _listening;
     private bool _disposed;
 
@@ -96,26 +100,31 @@ internal sealed class MonitorBrightnessService : IMonitorBrightnessService, IDis
     // Verification only: runs on the rebuild thread after probing and before the registry swap.
     internal Action? BeforeRegistrySwapForVerify { get; set; }
 
+    // Verification only: runs after request sequencing and before acquiring the monitor gate.
+    internal Action<DdcFeature, string, int, uint?>? BeforeDdcWriteForVerify { get; set; }
+
     public async Task<IReadOnlyList<DisplayBrightnessState>> ReadAsync(CancellationToken cancellationToken)
     {
         ThrowIfDisposed();
         Task<IReadOnlyList<DisplayBrightnessState>> readTask;
         lock (_readSync)
         {
-            if (Volatile.Read(ref _activeWrites) > 0 && _lastSnapshot is not null)
+            if (Volatile.Read(ref _activeWrites) > 0 && (_lastSnapshot is not null || _contrastRefreshPending))
+            {
+                return _lastSnapshot ?? FallbackStates(DetectingError);
+            }
+
+            if (!_contrastRefreshPending && _lastSnapshot is not null
+                && DateTimeOffset.UtcNow - _lastSnapshotAt <= _timing.CacheLifetime
+                && (!_contrastVisible || CurrentRegistry()?.Endpoints.Any(endpoint => CanRetryContrast(endpoint.Contrast)) != true))
             {
                 return _lastSnapshot;
             }
 
-            if (_lastSnapshot is not null
-                && DateTimeOffset.UtcNow - _lastSnapshotAt <= _timing.CacheLifetime)
+            if (_contrastRefreshPending || _activeRead is null || _activeRead.IsCompleted)
             {
-                return _lastSnapshot;
-            }
-
-            if (_activeRead is null || _activeRead.IsCompleted)
-            {
-                _activeRead = StartRead();
+                _activeRead = StartRead(_activeRead, _contrastVisible, _contrastRefreshPending);
+                _contrastRefreshPending = false;
             }
 
             readTask = _activeRead;
@@ -123,9 +132,7 @@ internal sealed class MonitorBrightnessService : IMonitorBrightnessService, IDis
 
         try
         {
-            var snapshot = await readTask.WaitAsync(InitialReadWait, cancellationToken);
-            StoreSnapshot(snapshot);
-            return snapshot;
+            return await readTask.WaitAsync(InitialReadWait, cancellationToken);
         }
         catch (TimeoutException)
         {
@@ -137,28 +144,72 @@ internal sealed class MonitorBrightnessService : IMonitorBrightnessService, IDis
         }
     }
 
-    public async Task<IReadOnlyList<DisplayBrightnessState>> SetBrightnessAsync(
+    public void SetContrastVisible(bool visible)
+    {
+        lock (_readSync)
+        {
+            if (_contrastVisible == visible)
+            {
+                return;
+            }
+
+            if (visible)
+            {
+                Volatile.Write(ref _contrastEnabledAt, Stopwatch.GetTimestamp());
+                _lastSnapshotAt = DateTimeOffset.MinValue;
+            }
+
+            _contrastVisible = visible;
+            _contrastRefreshPending = visible;
+        }
+    }
+
+    public Task<IReadOnlyList<DisplayBrightnessState>> SetBrightnessAsync(
+        string displayId,
+        int value,
+        CancellationToken cancellationToken) =>
+        SetDisplayAsync(DdcFeature.Brightness, displayId, value, cancellationToken);
+
+    public Task<IReadOnlyList<DisplayBrightnessState>> SetContrastAsync(
+        string displayId,
+        int value,
+        CancellationToken cancellationToken) =>
+        SetDisplayAsync(DdcFeature.Contrast, displayId, value, cancellationToken);
+
+    private async Task<IReadOnlyList<DisplayBrightnessState>> SetDisplayAsync(
+        DdcFeature feature,
         string displayId,
         int value,
         CancellationToken cancellationToken)
     {
         ThrowIfDisposed();
         var normalized = Math.Clamp(value, 0, 100);
-        if (displayId.StartsWith("wmi:", StringComparison.OrdinalIgnoreCase))
+        var isWmi = displayId.StartsWith("wmi:", StringComparison.OrdinalIgnoreCase);
+        if (isWmi && feature == DdcFeature.Brightness)
         {
             return await SetWmiAsync(displayId, normalized, cancellationToken);
         }
 
-        if (!displayId.StartsWith("ddc:", StringComparison.OrdinalIgnoreCase))
+        if (feature == DdcFeature.Contrast && (isWmi || !_contrastVisible))
         {
-            var rejected = Annotate(displayId, normalized, WriteResult.Failed("unknown-id", "unknown"));
-            RecordFailure("unknown-id", "unknown");
-            StoreSnapshot(rejected);
-            return rejected;
+            var cached = LastSnapshot() ?? ComposeCached();
+            return isWmi ? MarkWmiContrastUnsupported(cached, displayId) : cached;
         }
 
-        var sequence = _writeSequences.AddOrUpdate(displayId, 1, (_, previous) => previous + 1);
-        var operation = Task.Run(() => WriteDdc(displayId, normalized), CancellationToken.None);
+        if (!displayId.StartsWith("ddc:", StringComparison.OrdinalIgnoreCase))
+        {
+            RecordFailure("unknown-id", "unknown", feature);
+            return StoreWriteResult(feature, displayId, normalized, WriteResult.Failed("unknown-id", "unknown"));
+        }
+
+        var sequences = feature == DdcFeature.Contrast ? _contrastWriteSequences : _writeSequences;
+        long sequence;
+        lock (_readSync)
+        {
+            sequence = sequences.AddOrUpdate(displayId, 1, (_, previous) => previous + 1);
+        }
+
+        var operation = Task.Run(() => WriteDdc(feature, displayId, normalized), CancellationToken.None);
         WriteResult result;
         try
         {
@@ -167,32 +218,47 @@ internal sealed class MonitorBrightnessService : IMonitorBrightnessService, IDis
         catch (TimeoutException)
         {
             var model = FindEndpoint(displayId)?.Model ?? "unknown";
-            RecordFailure("timeout", model);
-            result = WriteResult.TimedOut(model);
-            // The command keeps its monitor gate until it really finishes, so the next write cannot race
-            // with it. Publish the late result so the panel does not keep showing the timeout.
+            RecordFailure("timeout", model, feature);
+            var timedOut = PublishResult(WriteResult.TimedOut(model));
+            // Keep the monitor gate until the command really finishes and publish its late result.
             _ = operation.ContinueWith(
-                completed =>
-                {
-                    if (_disposed
-                        || !_writeSequences.TryGetValue(displayId, out var latest)
-                        || latest != sequence)
-                    {
-                        return;
-                    }
-
-                    var late = Annotate(displayId, normalized, completed.Result);
-                    StoreSnapshot(late);
-                    StateChanged?.Invoke(this, late);
-                },
+                completed => PublishResult(completed.Result, notify: true),
                 CancellationToken.None,
                 TaskContinuationOptions.OnlyOnRanToCompletion,
                 TaskScheduler.Default);
+            return timedOut;
         }
 
-        var annotated = Annotate(displayId, normalized, result);
-        StoreSnapshot(annotated);
-        return annotated;
+        return PublishResult(result);
+
+        IReadOnlyList<DisplayBrightnessState> PublishResult(WriteResult outcome, bool notify = false)
+        {
+            lock (_readSync)
+            {
+                if (_disposed || (notify && sequences[displayId] != sequence))
+                {
+                    return _lastSnapshot ?? ComposeCached();
+                }
+
+                var snapshot = StoreWriteResult(feature, displayId, normalized, outcome);
+                if (notify)
+                {
+                    StateChanged?.Invoke(this, snapshot);
+                }
+
+                return snapshot;
+            }
+        }
+    }
+
+    private static IReadOnlyList<DisplayBrightnessState> MarkWmiContrastUnsupported(
+        IReadOnlyList<DisplayBrightnessState> cached,
+        string displayId)
+    {
+        return cached.Any(display => string.Equals(display.Id, displayId, StringComparison.OrdinalIgnoreCase))
+            ? cached.Select(display => string.Equals(display.Id, displayId, StringComparison.OrdinalIgnoreCase)
+                ? display with { ContrastSupported = false } : display).ToArray()
+            : [.. cached, new DisplayBrightnessState(displayId, "Built-in display", false, null, ContrastSupported: false)];
     }
 
     internal async Task<DisplayBrightnessState?> ReadTargetFreshAsync(
@@ -204,37 +270,7 @@ internal sealed class MonitorBrightnessService : IMonitorBrightnessService, IDis
         {
             if (displayId.StartsWith("ddc:", StringComparison.OrdinalIgnoreCase))
             {
-                var endpoint = FindEndpoint(displayId);
-                if (endpoint is null)
-                {
-                    return null;
-                }
-
-                var gate = Gate(displayId);
-                if (!gate.Semaphore.Wait(_timing.MonitorGateTimeout))
-                {
-                    return null;
-                }
-
-                try
-                {
-                    if (endpoint.Retired)
-                    {
-                        endpoint = FindEndpoint(displayId);
-                        if (endpoint is null || endpoint.Retired)
-                        {
-                            return null;
-                        }
-                    }
-
-                    return TryReadBrightness(endpoint, gate, endpoint.UseHighLevel)
-                        ? endpoint.State()
-                        : endpoint.State("DDC/CI brightness read failed.");
-                }
-                finally
-                {
-                    gate.Semaphore.Release();
-                }
+                return ReadDdcTarget(displayId, DdcFeature.Brightness)?.State;
             }
 
             if (!displayId.StartsWith("wmi:", StringComparison.OrdinalIgnoreCase)
@@ -249,9 +285,75 @@ internal sealed class MonitorBrightnessService : IMonitorBrightnessService, IDis
                 string.Equals(display.Id, displayId, StringComparison.OrdinalIgnoreCase));
             return target is null
                 ? null
-                : new DisplayBrightnessState(displayId, previous?.Name ?? "Built-in display", true, target.Value, IsPrimary: previous?.IsPrimary);
+                : new DisplayBrightnessState(displayId, previous?.Name ?? "Built-in display", true, target.Value,
+                    IsPrimary: previous?.IsPrimary, ContrastSupported: false);
         }, CancellationToken.None);
         return await readTask.WaitAsync(_timing.WriteTimeout, cancellationToken);
+    }
+
+    internal async Task<(int Value, uint RawValue)?> ReadContrastFreshForVerifyAsync(
+        string displayId, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var read = await Task.Run(() => ReadDdcTarget(displayId, DdcFeature.Contrast, TimeSpan.FromSeconds(30)),
+            cancellationToken);
+        return read is { State: { ContrastSupported: true, ContrastValue: int value } }
+            ? (value, read.Value.RawValue)
+            : null;
+    }
+
+    // Wait for the actual hardware command before the verifier attempts restoration.
+    internal async Task<bool> SetContrastForVerifyAsync(
+        string displayId, int value, TimeSpan gateTimeout, uint? rawValue = null)
+    {
+        var result = await Task.Run(() => WriteDdc(DdcFeature.Contrast, displayId, value, rawValue, gateTimeout));
+        return result.Accepted;
+    }
+
+    private (DisplayBrightnessState State, uint RawValue)? ReadDdcTarget(
+        string displayId, DdcFeature feature, TimeSpan? gateTimeout = null)
+    {
+        var endpoint = FindEndpoint(displayId);
+        if (endpoint is null)
+        {
+            return null;
+        }
+
+        var gate = Gate(displayId);
+        if (!gate.Semaphore.Wait(gateTimeout ?? _timing.MonitorGateTimeout))
+        {
+            return null;
+        }
+
+        try
+        {
+            if (endpoint.Retired)
+            {
+                endpoint = FindEndpoint(displayId);
+                if (endpoint is null || endpoint.Retired)
+                {
+                    return null;
+                }
+            }
+
+            if (feature == DdcFeature.Contrast && (!_contrastVisible || endpoint.Contrast?.Supported != true))
+            {
+                return null;
+            }
+
+            var setting = endpoint.Setting(feature);
+            var readable = TryReadSetting(endpoint, gate, feature, setting.UseHighLevel);
+            if (feature == DdcFeature.Contrast && !readable)
+            {
+                return null;
+            }
+
+            return (endpoint.State(readable ? null : "DDC/CI brightness read failed."), setting.RawValue);
+        }
+        finally
+        {
+            gate.Semaphore.Release();
+        }
     }
 
     internal static bool WriteMatches(bool accepted, DisplayBrightnessState? fresh, int requested) =>
@@ -306,31 +408,63 @@ internal sealed class MonitorBrightnessService : IMonitorBrightnessService, IDis
         }
     }
 
-    private Task<IReadOnlyList<DisplayBrightnessState>> StartRead()
+    private Task<IReadOnlyList<DisplayBrightnessState>> StartRead(
+        Task<IReadOnlyList<DisplayBrightnessState>>? previous,
+        bool readContrast,
+        bool preserveBrightnessWrite)
     {
         var generation = ++_readGeneration;
-        var task = Task.Run<IReadOnlyList<DisplayBrightnessState>>(Read, CancellationToken.None);
-        _ = task.ContinueWith(
-            completed =>
+        return Task.Run(async () =>
+        {
+            if (previous is { IsCompleted: false })
             {
-                lock (_readSync)
+                try
                 {
-                    if (generation == _readGeneration)
-                    {
-                        _lastSnapshot = completed.Result;
-                        _lastSnapshotAt = DateTimeOffset.UtcNow;
-                    }
+                    await previous;
+                }
+                catch (Exception ex) when (ex is ManagementException or COMException)
+                {
+                }
+            }
+
+            var snapshot = Read(readContrast);
+            lock (_readSync)
+            {
+                if (generation != _readGeneration || _disposed)
+                {
+                    return _lastSnapshot ?? snapshot;
                 }
 
-                StateChanged?.Invoke(this, completed.Result);
-            },
-            CancellationToken.None,
-            TaskContinuationOptions.OnlyOnRanToCompletion | TaskContinuationOptions.ExecuteSynchronously,
-            TaskScheduler.Default);
-        return task;
+                if (preserveBrightnessWrite && _lastSnapshot is { } last)
+                {
+                    snapshot = snapshot.Select(display =>
+                    {
+                        // A write that finished while this read ran may describe a newer value; its result is
+                        // kept only when it describes the value this read observed.
+                        var prior = last.FirstOrDefault(candidate => candidate.WriteVerified.HasValue
+                            && string.Equals(candidate.Id, display.Id, StringComparison.OrdinalIgnoreCase)
+                            && candidate.Supported == display.Supported
+                            && candidate.Value == display.Value);
+                        return prior is null ? display : display with
+                        {
+                            Error = prior.Error ?? display.Error,
+                            WriteVerified = prior.WriteVerified
+                        };
+                    }).ToArray();
+                }
+
+                _lastSnapshot = snapshot;
+                _lastSnapshotAt = readContrast && _contrastVisible
+                    && snapshot.Any(display => display.Supported && display.ContrastSupported is null)
+                    ? DateTimeOffset.MinValue
+                    : DateTimeOffset.UtcNow;
+                StateChanged?.Invoke(this, snapshot);
+                return snapshot;
+            }
+        }, CancellationToken.None);
     }
 
-    private IReadOnlyList<DisplayBrightnessState> Read()
+    private IReadOnlyList<DisplayBrightnessState> Read(bool readContrast)
     {
         var result = new List<DisplayBrightnessState>();
         if (_includeWmi)
@@ -346,20 +480,21 @@ internal sealed class MonitorBrightnessService : IMonitorBrightnessService, IDis
                         : monitor.Index == 0 ? "Built-in display" : $"Built-in display {monitor.Index + 1}",
                     true,
                     monitor.Value,
-                    IsPrimary: monitor.Index < displayLayout.Count ? displayLayout[monitor.Index].IsPrimary : monitor.Index == 0));
+                    IsPrimary: monitor.Index < displayLayout.Count ? displayLayout[monitor.Index].IsPrimary : monitor.Index == 0,
+                    ContrastSupported: false));
             }
 
             _skipPrimary = wmi.Count > 0;
         }
 
-        var registry = EnsureRegistry();
+        var registry = EnsureRegistry(readContrast);
         result.AddRange(registry.States());
         return result.Count == 0
             ? [new DisplayBrightnessState("display:none", "Display", false, null, "Display brightness is unavailable.")]
             : result;
     }
 
-    private DdcRegistry EnsureRegistry()
+    private DdcRegistry EnsureRegistry(bool readContrast)
     {
         var current = CurrentRegistry();
         // A monitor that did not answer (asleep, just woken, briefly busy) is shown as unsupported. Probe
@@ -369,17 +504,17 @@ internal sealed class MonitorBrightnessService : IMonitorBrightnessService, IDis
             var key = TopologyKey(FilterMonitors(_platform.EnumerateMonitors()));
             if (string.Equals(current.TopologyKey, key, StringComparison.Ordinal))
             {
-                RefreshValues(current);
+                RefreshValues(current, readContrast);
                 return current;
             }
         }
 
-        return Rebuild(current);
+        return Rebuild(current, readContrast);
     }
 
     // observed is the registry the caller found stale. If another caller replaced it while this one
     // waited, and the topology still matches, the newer registry is reused instead of probing again.
-    private DdcRegistry Rebuild(DdcRegistry? observed)
+    private DdcRegistry Rebuild(DdcRegistry? observed, bool readContrast = false)
     {
         _discoveryGate.Wait();
         try
@@ -403,6 +538,7 @@ internal sealed class MonitorBrightnessService : IMonitorBrightnessService, IDis
                 return current;
             }
 
+            var probeStarted = Stopwatch.GetTimestamp();
             var slots = new List<DdcSlot>();
             foreach (var monitor in monitors)
             {
@@ -445,7 +581,11 @@ internal sealed class MonitorBrightnessService : IMonitorBrightnessService, IDis
                     bool readable;
                     try
                     {
-                        readable = TryReadBrightness(endpoint, gate, preferHighLevel: false);
+                        readable = TryReadSetting(endpoint, gate, DdcFeature.Brightness, preferHighLevel: false);
+                        if (readable && readContrast)
+                        {
+                            RefreshContrast(endpoint, gate);
+                        }
                     }
                     finally
                     {
@@ -514,9 +654,16 @@ internal sealed class MonitorBrightnessService : IMonitorBrightnessService, IDis
 
                     try
                     {
-                        if (older.ValueTimestamp > endpoint.ValueTimestamp)
+                        if (older.Brightness.ValueTimestamp > endpoint.Brightness.ValueTimestamp)
                         {
-                            endpoint.Value = older.Value;
+                            endpoint.Brightness.Value = older.Brightness.Value;
+                        }
+
+                        if (older.Contrast is { } contrast
+                            && (endpoint.Contrast is null || (contrast.Supported == true
+                                && contrast.ValueTimestamp > Math.Max(probeStarted, endpoint.Contrast.ValueTimestamp))))
+                        {
+                            endpoint.Contrast = contrast;
                         }
                     }
                     finally
@@ -534,7 +681,7 @@ internal sealed class MonitorBrightnessService : IMonitorBrightnessService, IDis
         }
     }
 
-    private void RefreshValues(DdcRegistry registry)
+    private void RefreshValues(DdcRegistry registry, bool readContrast)
     {
         foreach (var endpoint in registry.Endpoints)
         {
@@ -552,14 +699,20 @@ internal sealed class MonitorBrightnessService : IMonitorBrightnessService, IDis
                     continue;
                 }
 
-                if (TryReadBrightness(endpoint, gate, endpoint.UseHighLevel) || Reopen(endpoint, gate))
+                if (TryReadSetting(endpoint, gate, DdcFeature.Brightness, endpoint.Brightness.UseHighLevel)
+                    || Reopen(endpoint, gate, DdcFeature.Brightness))
                 {
-                    endpoint.LastError = null;
+                    endpoint.Brightness.LastError = null;
                 }
                 else
                 {
-                    endpoint.LastError = "DDC/CI brightness read failed.";
-                    endpoint.NeedsReopen = true;
+                    endpoint.Brightness.LastError = "DDC/CI brightness read failed.";
+                    endpoint.Brightness.NeedsReopen = true;
+                }
+
+                if (readContrast)
+                {
+                    RefreshContrast(endpoint, gate);
                 }
             }
             finally
@@ -569,11 +722,52 @@ internal sealed class MonitorBrightnessService : IMonitorBrightnessService, IDis
         }
     }
 
-    private WriteResult WriteDdc(string displayId, int normalized)
+    private bool CanRetryContrast(DdcSetting? setting) =>
+        setting is { Supported: false, UnavailableSince: > 0 }
+        && (setting.UnavailableSince <= Volatile.Read(ref _contrastEnabledAt)
+            || Stopwatch.GetElapsedTime(setting.UnavailableSince) >= _timing.UnavailableRetry);
+
+    private void RefreshContrast(DdcEndpoint endpoint, MonitorGate gate)
+    {
+        if (!_contrastVisible || (endpoint.Contrast?.Supported == false && !CanRetryContrast(endpoint.Contrast)))
+        {
+            return;
+        }
+
+        var enabledAt = Volatile.Read(ref _contrastEnabledAt);
+        var setting = endpoint.Setting(DdcFeature.Contrast);
+        if (setting.Supported == false)
+        {
+            setting.Supported = null;
+        }
+
+        var readable = TryReadSetting(endpoint, gate, DdcFeature.Contrast, setting.UseHighLevel)
+            || (_contrastVisible && setting.Supported == true && Reopen(endpoint, gate, DdcFeature.Contrast));
+        if (_contrastVisible && enabledAt == Volatile.Read(ref _contrastEnabledAt))
+        {
+            if (setting.Supported is null)
+            {
+                setting.UnavailableSince = readable ? 0 : Stopwatch.GetTimestamp();
+                setting.Supported = readable;
+            }
+
+            setting.NeedsReopen = !readable;
+            setting.LastError = readable || setting.Supported == false ? null : "DDC/CI contrast read failed.";
+        }
+    }
+
+    private WriteResult WriteDdc(
+        DdcFeature feature, string displayId, int normalized, uint? rawValue = null, TimeSpan? gateTimeout = null)
     {
         Interlocked.Increment(ref _activeWrites);
         try
         {
+            BeforeDdcWriteForVerify?.Invoke(feature, displayId, normalized, rawValue);
+            if (feature == DdcFeature.Contrast && !_contrastVisible)
+            {
+                return WriteResult.Skipped;
+            }
+
             var endpoint = FindEndpoint(displayId);
             if (endpoint is null)
             {
@@ -585,14 +779,14 @@ internal sealed class MonitorBrightnessService : IMonitorBrightnessService, IDis
             if (endpoint is null)
             {
                 var model = ModelFromId(displayId);
-                RecordFailure("unknown-id", model);
+                RecordFailure("unknown-id", model, feature);
                 return WriteResult.Failed("unknown-id", model);
             }
 
             var gate = Gate(displayId);
-            if (!gate.Semaphore.Wait(_timing.MonitorGateTimeout))
+            if (!gate.Semaphore.Wait(gateTimeout ?? _timing.MonitorGateTimeout))
             {
-                RecordFailure("busy", endpoint.Model);
+                RecordFailure("busy", endpoint.Model, feature);
                 return WriteResult.Failed("busy", endpoint.Model);
             }
 
@@ -604,35 +798,65 @@ internal sealed class MonitorBrightnessService : IMonitorBrightnessService, IDis
                     var replacement = FindEndpoint(displayId);
                     if (replacement is null || replacement.Retired)
                     {
-                        RecordFailure("unknown-id", endpoint.Model);
+                        RecordFailure("unknown-id", endpoint.Model, feature);
                         return WriteResult.Failed("unknown-id", endpoint.Model);
                     }
 
                     endpoint = replacement;
                 }
 
-                if (endpoint.NeedsReopen)
+                var setting = endpoint.Setting(feature);
+                if (feature == DdcFeature.Contrast)
                 {
-                    _ = Reopen(endpoint, gate);
+                    if (!_contrastVisible)
+                    {
+                        return WriteResult.Skipped;
+                    }
+
+                    if (setting.Supported is null)
+                    {
+                        RefreshContrast(endpoint, gate);
+                    }
+
+                    if (setting.Supported != true)
+                    {
+                        return WriteResult.Skipped;
+                    }
                 }
 
-                var accepted = TrySetBrightness(endpoint, gate, normalized);
-                if (!accepted && Reopen(endpoint, gate))
+                if (setting.NeedsReopen)
                 {
-                    accepted = TrySetBrightness(endpoint, gate, normalized);
+                    _ = Reopen(endpoint, gate, feature);
+                }
+
+                var accepted = TrySetSetting(endpoint, gate, feature, normalized, rawValue);
+                if (feature == DdcFeature.Contrast && !_contrastVisible && !accepted)
+                {
+                    return WriteResult.Skipped;
+                }
+
+                if (!accepted && Reopen(endpoint, gate, feature))
+                {
+                    accepted = TrySetSetting(endpoint, gate, feature, normalized, rawValue);
+                }
+
+                if (!accepted && feature == DdcFeature.Contrast && !setting.UseHighLevel
+                    && TryReadHighLevel(endpoint, gate, feature))
+                {
+                    accepted = TrySetSetting(endpoint, gate, feature, normalized, rawValue);
                 }
 
                 if (!accepted)
                 {
-                    endpoint.NeedsReopen = true;
+                    setting.NeedsReopen = true;
                     _topologyDirty = true;
-                    RecordFailure("set-failed", endpoint.Model);
+                    RecordFailure("set-failed", endpoint.Model, feature);
                     return WriteResult.Failed("set-failed", endpoint.Model, endpoint.State());
                 }
 
-                endpoint.NeedsReopen = false;
-                endpoint.Value = normalized;
-                endpoint.LastError = null;
+                setting.NeedsReopen = false;
+                setting.Value = normalized;
+                setting.LastError = null;
                 Thread.Sleep(_timing.ReadbackDelay);
                 DisplayBrightnessState? fresh = null;
                 var verified = false;
@@ -643,13 +867,13 @@ internal sealed class MonitorBrightnessService : IMonitorBrightnessService, IDis
                         Thread.Sleep(_timing.ReadbackRetryDelay);
                     }
 
-                    if (!TryReadBrightness(endpoint, gate, endpoint.UseHighLevel))
+                    if (!TryReadSetting(endpoint, gate, feature, setting.UseHighLevel))
                     {
                         continue;
                     }
 
                     fresh = endpoint.State();
-                    if (Math.Abs(endpoint.Value - normalized) <= ReadbackTolerance)
+                    if (rawValue.HasValue ? setting.RawValue == rawValue : Math.Abs(setting.Value - normalized) <= ReadbackTolerance)
                     {
                         verified = true;
                         break;
@@ -658,7 +882,7 @@ internal sealed class MonitorBrightnessService : IMonitorBrightnessService, IDis
 
                 if (!verified)
                 {
-                    RecordFailure("readback-mismatch", endpoint.Model);
+                    RecordFailure("readback-mismatch", endpoint.Model, feature);
                 }
 
                 return new WriteResult(true, fresh, verified, false, endpoint.Model, verified ? null : "readback-mismatch");
@@ -676,7 +900,7 @@ internal sealed class MonitorBrightnessService : IMonitorBrightnessService, IDis
 
     // Called with the monitor gate held. Reopens the physical handle for the same stable monitor,
     // following it to a new HMONITOR when Windows recreated the logical monitor.
-    private bool Reopen(DdcEndpoint endpoint, MonitorGate gate)
+    private bool Reopen(DdcEndpoint endpoint, MonitorGate gate, DdcFeature feature)
     {
         foreach (var monitor in FilterMonitors(_platform.EnumerateMonitors()))
         {
@@ -709,8 +933,8 @@ internal sealed class MonitorBrightnessService : IMonitorBrightnessService, IDis
 
             endpoint.SwapMonitor(physical[index]).Dispose();
             _topologyDirty = true;
-            var readable = TryReadBrightness(endpoint, gate, preferHighLevel: false);
-            endpoint.NeedsReopen = !readable;
+            var readable = TryReadSetting(endpoint, gate, feature, preferHighLevel: false);
+            endpoint.Setting(feature).NeedsReopen = !readable;
             return readable;
         }
 
@@ -730,9 +954,9 @@ internal sealed class MonitorBrightnessService : IMonitorBrightnessService, IDis
         return -1;
     }
 
-    private bool TryReadBrightness(DdcEndpoint endpoint, MonitorGate gate, bool preferHighLevel)
+    private bool TryReadSetting(DdcEndpoint endpoint, MonitorGate gate, DdcFeature feature, bool preferHighLevel)
     {
-        if (preferHighLevel && TryReadHighLevel(endpoint, gate))
+        if (preferHighLevel && TryReadHighLevel(endpoint, gate, feature))
         {
             return true;
         }
@@ -740,14 +964,21 @@ internal sealed class MonitorBrightnessService : IMonitorBrightnessService, IDis
         for (var attempt = 0; attempt < 2; attempt++)
         {
             WaitForSpacing(gate);
-            var ok = endpoint.Monitor.TryReadVcpBrightness(out var current, out var maximum, out var error);
+            if (feature == DdcFeature.Contrast && !_contrastVisible)
+            {
+                return false;
+            }
+
+            var ok = endpoint.Monitor.TryReadVcp(feature, out var current, out var maximum, out var error);
             gate.Touch();
             if (ok && IsValidRange(0, current, maximum))
             {
-                endpoint.UseHighLevel = false;
-                endpoint.Minimum = 0;
-                endpoint.Maximum = maximum;
-                endpoint.Value = ToPercentage(0, current, maximum);
+                var setting = endpoint.Setting(feature);
+                setting.UseHighLevel = false;
+                setting.Minimum = 0;
+                setting.Maximum = maximum;
+                setting.RawValue = current;
+                setting.Value = ToPercentage(0, current, maximum);
                 return true;
             }
 
@@ -759,31 +990,45 @@ internal sealed class MonitorBrightnessService : IMonitorBrightnessService, IDis
             Thread.Sleep(_timing.TransientRetryDelay);
         }
 
-        return !preferHighLevel && TryReadHighLevel(endpoint, gate);
+        return !preferHighLevel && TryReadHighLevel(endpoint, gate, feature);
     }
 
-    private bool TryReadHighLevel(DdcEndpoint endpoint, MonitorGate gate)
+    private bool TryReadHighLevel(DdcEndpoint endpoint, MonitorGate gate, DdcFeature feature)
     {
         WaitForSpacing(gate);
-        var ok = endpoint.Monitor.TryReadHighLevelBrightness(out var minimum, out var current, out var maximum, out _);
+        if (feature == DdcFeature.Contrast && !_contrastVisible)
+        {
+            return false;
+        }
+
+        var ok = endpoint.Monitor.TryReadHighLevel(feature, out var minimum, out var current, out var maximum, out _);
         gate.Touch();
         if (!ok || !IsValidRange(minimum, current, maximum))
         {
             return false;
         }
 
-        endpoint.UseHighLevel = true;
-        endpoint.Minimum = minimum;
-        endpoint.Maximum = maximum;
-        endpoint.Value = ToPercentage(minimum, current, maximum);
+        var setting = endpoint.Setting(feature);
+        setting.UseHighLevel = true;
+        setting.Minimum = minimum;
+        setting.Maximum = maximum;
+        setting.RawValue = current;
+        setting.Value = ToPercentage(minimum, current, maximum);
         return true;
     }
 
-    private bool TrySetBrightness(DdcEndpoint endpoint, MonitorGate gate, int normalized)
+    private bool TrySetSetting(
+        DdcEndpoint endpoint, MonitorGate gate, DdcFeature feature, int normalized, uint? rawValue)
     {
-        var target = endpoint.Minimum + (uint)Math.Round(
-            (endpoint.Maximum - endpoint.Minimum) * normalized / 100d,
+        var setting = endpoint.Setting(feature);
+        var target = rawValue ?? setting.Minimum + (uint)Math.Round(
+            (setting.Maximum - setting.Minimum) * normalized / 100d,
             MidpointRounding.AwayFromZero);
+        if (target < setting.Minimum || target > setting.Maximum)
+        {
+            return false;
+        }
+
         for (var attempt = 0; attempt < 2; attempt++)
         {
             if (attempt > 0)
@@ -792,9 +1037,14 @@ internal sealed class MonitorBrightnessService : IMonitorBrightnessService, IDis
             }
 
             WaitForSpacing(gate);
-            var ok = endpoint.UseHighLevel
-                ? endpoint.Monitor.TryWriteHighLevelBrightness(target, out _)
-                : endpoint.Monitor.TryWriteVcpBrightness(target, out _);
+            if (feature == DdcFeature.Contrast && !_contrastVisible)
+            {
+                return false;
+            }
+
+            var ok = setting.UseHighLevel
+                ? endpoint.Monitor.TryWriteHighLevel(feature, target, out _)
+                : endpoint.Monitor.TryWriteVcp(feature, target, out _);
             gate.Touch();
             if (ok)
             {
@@ -852,12 +1102,11 @@ internal sealed class MonitorBrightnessService : IMonitorBrightnessService, IDis
                 RecordFailure(accepted ? "readback-mismatch" : "set-failed", "wmi");
             }
 
-            var annotated = Annotate(
+            return StoreWriteResult(
+                DdcFeature.Brightness,
                 displayId,
                 normalized,
                 new WriteResult(accepted, fresh, verified, false, "wmi", null));
-            StoreSnapshot(annotated);
-            return annotated;
         }
         finally
         {
@@ -866,44 +1115,63 @@ internal sealed class MonitorBrightnessService : IMonitorBrightnessService, IDis
         }
     }
 
-    private IReadOnlyList<DisplayBrightnessState> Annotate(string displayId, int value, WriteResult result)
+    private IReadOnlyList<DisplayBrightnessState> StoreWriteResult(
+        DdcFeature feature, string displayId, int value, WriteResult result)
     {
-        var current = ComposeCached();
-        var matched = false;
-        var error = result.Verified
-            ? null
-            : result.TimedOutCommand
-                ? "Brightness command timed out."
-                : result.Accepted
-                    ? $"Brightness readback did not match {value}%."
-                    : $"Brightness command failed for {value}%.";
-        var annotated = current.Select(display =>
+        lock (_readSync)
         {
-            if (!string.Equals(display.Id, displayId, StringComparison.OrdinalIgnoreCase))
+            var current = ComposeCached();
+            if (result == WriteResult.Skipped)
             {
-                return display;
+                return current;
             }
 
-            matched = true;
+            var contrast = feature == DdcFeature.Contrast;
+            var error = result.Verified
+                ? null
+                : result.TimedOutCommand
+                    ? $"{feature} command timed out."
+                    : result.Accepted
+                        ? $"{feature} readback did not match {value}%."
+                        : $"{feature} command failed for {value}%.";
+            var annotated = current.ToList();
+            var index = annotated.FindIndex(display => string.Equals(display.Id, displayId, StringComparison.OrdinalIgnoreCase));
+            var display = index >= 0 ? annotated[index] : new DisplayBrightnessState(displayId, "Display", false, null);
             var observed = result.Fresh ?? display;
-            return observed with
-            {
-                Name = string.IsNullOrWhiteSpace(observed.Name) ? display.Name : observed.Name,
-                IsPrimary = observed.IsPrimary ?? display.IsPrimary,
-                Error = error,
-                WriteVerified = result.Verified
-            };
-        }).ToList();
-        if (!matched)
-        {
-            annotated.Add((result.Fresh ?? new DisplayBrightnessState(displayId, "Display", false, null)) with
-            {
-                Error = error,
-                WriteVerified = result.Verified
-            });
-        }
+            var changed = contrast
+                ? display with
+                {
+                    ContrastSupported = observed.ContrastSupported,
+                    ContrastValue = observed.ContrastValue,
+                    ContrastError = error,
+                    ContrastWriteVerified = result.Verified
+                }
+                : display with
+                {
+                    Supported = observed.Supported,
+                    Value = observed.Value,
+                    Name = string.IsNullOrWhiteSpace(observed.Name) ? display.Name : observed.Name,
+                    IsPrimary = observed.IsPrimary ?? display.IsPrimary,
+                    Error = error,
+                    WriteVerified = result.Verified
+                };
 
-        return annotated;
+            if (index >= 0)
+            {
+                annotated[index] = changed;
+            }
+            else
+            {
+                annotated.Add(changed);
+            }
+
+            _lastSnapshot = annotated;
+            _lastSnapshotAt = _contrastVisible
+                && annotated.Any(item => item.Supported && item.ContrastSupported is null)
+                ? DateTimeOffset.MinValue
+                : DateTimeOffset.UtcNow;
+            return annotated;
+        }
     }
 
     // Combines the last WMI states with the cached DDC registry without touching the hardware.
@@ -918,7 +1186,18 @@ internal sealed class MonitorBrightnessService : IMonitorBrightnessService, IDis
 
         var combined = (last ?? [])
             .Where(display => display.Id.StartsWith("wmi:", StringComparison.OrdinalIgnoreCase))
-            .Concat(registry.States())
+            .Concat(registry.States().Select(display =>
+            {
+                var previous = last?.FirstOrDefault(candidate =>
+                    string.Equals(candidate.Id, display.Id, StringComparison.OrdinalIgnoreCase));
+                return previous is null ? display : display with
+                {
+                    Error = previous.Error ?? display.Error,
+                    WriteVerified = previous.WriteVerified,
+                    ContrastError = previous.ContrastError ?? display.ContrastError,
+                    ContrastWriteVerified = previous.ContrastWriteVerified
+                };
+            }))
             .ToList();
         return combined.Count == 0 ? last ?? FallbackStates("Brightness state is still loading.") : combined;
     }
@@ -972,15 +1251,6 @@ internal sealed class MonitorBrightnessService : IMonitorBrightnessService, IDis
         }
     }
 
-    private void StoreSnapshot(IReadOnlyList<DisplayBrightnessState> snapshot)
-    {
-        lock (_readSync)
-        {
-            _lastSnapshot = snapshot;
-            _lastSnapshotAt = DateTimeOffset.UtcNow;
-        }
-    }
-
     private IReadOnlyList<DisplayBrightnessState> FallbackStates(string error)
     {
         var displays = _displays.EnumerateMonitors();
@@ -995,8 +1265,9 @@ internal sealed class MonitorBrightnessService : IMonitorBrightnessService, IDis
                 IsPrimary: display.IsPrimary)).ToArray();
     }
 
-    private static void RecordFailure(string reason, string model) =>
-        AppDiagnostics.Record("brightness.write.failed", detail: $"reason={reason};model={model}");
+    private static void RecordFailure(string reason, string model, DdcFeature feature = DdcFeature.Brightness) =>
+        AppDiagnostics.Record(feature == DdcFeature.Contrast ? "contrast.write.failed" : "brightness.write.failed",
+            detail: $"reason={reason};model={model}");
 
     private static string ModelFromId(string displayId)
     {
@@ -1120,6 +1391,8 @@ internal sealed class MonitorBrightnessService : IMonitorBrightnessService, IDis
         string Model,
         string? FailureReason)
     {
+        public static WriteResult Skipped { get; } = new(false, null, false, false, "unknown", null);
+
         public static WriteResult Failed(string reason, string model, DisplayBrightnessState? state = null) =>
             new(false, state, false, false, model, reason);
 
@@ -1167,11 +1440,44 @@ internal sealed class MonitorBrightnessService : IMonitorBrightnessService, IDis
 
         public IDdcPhysicalMonitor Monitor { get; private set; } = monitor;
 
+        public DdcSetting Brightness { get; } = new();
+
+        public DdcSetting? Contrast { get; set; }
+
+        public DdcSetting Setting(DdcFeature feature) =>
+            feature == DdcFeature.Contrast ? Contrast ??= new DdcSetting() : Brightness;
+
+        public volatile bool Retired;
+
+        public IDdcPhysicalMonitor SwapMonitor(IDdcPhysicalMonitor next)
+        {
+            var previous = Monitor;
+            Monitor = next;
+            return previous;
+        }
+
+        public DisplayBrightnessState State(string? error = null) =>
+            new(Id, Name, true, Brightness.Value, error ?? Brightness.LastError, IsPrimary: IsPrimary,
+                ContrastSupported: Contrast?.Supported,
+                ContrastValue: Contrast is { Supported: true } contrast ? contrast.Value : null,
+                ContrastError: Contrast?.LastError);
+
+        public void Dispose() => Monitor.Dispose();
+    }
+
+    private sealed class DdcSetting
+    {
+        public bool? Supported { get; set; }
+
+        public long UnavailableSince { get; set; }
+
         public bool UseHighLevel { get; set; }
 
         public uint Minimum { get; set; }
 
         public uint Maximum { get; set; } = 100;
+
+        public uint RawValue { get; set; }
 
         private int _value;
 
@@ -1191,20 +1497,6 @@ internal sealed class MonitorBrightnessService : IMonitorBrightnessService, IDis
         public string? LastError { get; set; }
 
         public bool NeedsReopen { get; set; }
-
-        public volatile bool Retired;
-
-        public IDdcPhysicalMonitor SwapMonitor(IDdcPhysicalMonitor next)
-        {
-            var previous = Monitor;
-            Monitor = next;
-            return previous;
-        }
-
-        public DisplayBrightnessState State(string? error = null) =>
-            new(Id, Name, true, Value, error ?? LastError, IsPrimary: IsPrimary);
-
-        public void Dispose() => Monitor.Dispose();
     }
 
     private sealed record DdcSlot(DdcEndpoint? Endpoint, DisplayBrightnessState? Unavailable)

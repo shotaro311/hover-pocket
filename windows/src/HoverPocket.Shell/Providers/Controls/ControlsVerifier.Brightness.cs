@@ -371,14 +371,15 @@ internal sealed partial class ControlsVerifier
     private sealed class FakeMonitorHardware(int initial)
     {
         private readonly object _sync = new();
-        private int _previous = initial;
-        private int _target = initial;
-        private long _appliedAtTimestamp;
+        private readonly FakeValue _brightness = new(initial);
+        private readonly FakeValue _contrast = new(40);
         private int _inFlight;
 
         public int Generation { get; set; } = 1;
 
         public TimeSpan ReadDelay { get; set; }
+
+        public Action<DdcFeature>? BeforeRead { get; set; }
 
         // Simulates a monitor that is asleep or not answering DDC/CI.
         public bool Unresponsive { get; set; }
@@ -389,6 +390,20 @@ internal sealed partial class ControlsVerifier
 
         public TimeSpan ReadbackLag { get; set; }
 
+        public uint ContrastMaximum { get; set; } = 80;
+
+        public bool ContrastUnsupported { get; set; }
+
+        public bool ContrastHighLevelOnly { get; set; }
+
+        public bool IgnoreContrastWrites { get; set; }
+
+        public TimeSpan ContrastWriteDelay { get; set; }
+
+        public int ContrastReads;
+
+        public int ContrastWrites;
+
         public int Overlaps;
 
         public int Value
@@ -397,41 +412,66 @@ internal sealed partial class ControlsVerifier
             {
                 lock (_sync)
                 {
-                    return _target;
+                    return _brightness.Target;
                 }
             }
         }
 
-        public bool Read(int generation, out uint current)
+        public int ContrastRawValue
+        {
+            get
+            {
+                lock (_sync)
+                {
+                    return _contrast.Target;
+                }
+            }
+        }
+
+        public bool Read(DdcFeature feature, int generation, out uint current)
         {
             using var scope = Enter();
+            BeforeRead?.Invoke(feature);
             Thread.Sleep(ReadDelay);
+            var value = feature == DdcFeature.Contrast ? _contrast : _brightness;
             lock (_sync)
             {
-                var applied = Stopwatch.GetTimestamp() >= _appliedAtTimestamp;
-                current = (uint)(applied ? _target : _previous);
+                var applied = Stopwatch.GetTimestamp() >= value.AppliedAtTimestamp;
+                current = (uint)(applied ? value.Target : value.Previous);
             }
 
             return generation == Generation && !Unresponsive;
         }
 
-        public bool Write(int generation, uint value)
+        public bool Write(DdcFeature feature, int generation, uint requested)
         {
             using var scope = Enter();
-            Thread.Sleep(WriteDelay);
+            var contrast = feature == DdcFeature.Contrast;
+            Thread.Sleep(contrast ? ContrastWriteDelay : WriteDelay);
             if (generation != Generation)
             {
                 return false;
             }
 
-            lock (_sync)
+            if (!contrast || !IgnoreContrastWrites)
             {
-                _previous = _target;
-                _target = (int)value;
-                _appliedAtTimestamp = Stopwatch.GetTimestamp() + (long)(ReadbackLag.TotalSeconds * Stopwatch.Frequency);
+                var value = contrast ? _contrast : _brightness;
+                lock (_sync)
+                {
+                    value.Previous = value.Target;
+                    value.Target = (int)requested;
+                    value.AppliedAtTimestamp = Stopwatch.GetTimestamp() + (long)(ReadbackLag.TotalSeconds * Stopwatch.Frequency);
+                }
             }
 
             return true;
+        }
+
+        private sealed class FakeValue(int initial)
+        {
+            public int Previous = initial;
+            public int Target = initial;
+            public long AppliedAtTimestamp;
         }
 
         private InFlightScope Enter()
@@ -454,28 +494,49 @@ internal sealed partial class ControlsVerifier
     {
         public string Description => "Generic PnP Monitor";
 
-        public bool TryReadVcpBrightness(out uint current, out uint maximum, out int error)
-        {
-            maximum = 100;
-            var ok = hardware.Read(generation, out current);
-            error = ok ? 0 : unchecked((int)0xC026258D);
-            return ok;
-        }
+        public bool TryReadVcp(DdcFeature feature, out uint current, out uint maximum, out int error) =>
+            Read(feature, highLevel: false, out current, out maximum, out error);
 
-        public bool TryWriteVcpBrightness(uint value, out int error)
-        {
-            var ok = hardware.Write(generation, value);
-            error = ok ? 0 : unchecked((int)0xC026258D);
-            return ok;
-        }
+        public bool TryWriteVcp(DdcFeature feature, uint value, out int error) =>
+            Write(feature, value, highLevel: false, out error);
 
-        public bool TryReadHighLevelBrightness(out uint minimum, out uint current, out uint maximum, out int error)
+        public bool TryReadHighLevel(DdcFeature feature, out uint minimum, out uint current, out uint maximum, out int error)
         {
             minimum = 0;
-            return TryReadVcpBrightness(out current, out maximum, out error);
+            return Read(feature, highLevel: true, out current, out maximum, out error);
         }
 
-        public bool TryWriteHighLevelBrightness(uint value, out int error) => TryWriteVcpBrightness(value, out error);
+        public bool TryWriteHighLevel(DdcFeature feature, uint value, out int error) =>
+            Write(feature, value, highLevel: true, out error);
+
+        private bool Read(DdcFeature feature, bool highLevel, out uint current, out uint maximum, out int error)
+        {
+            var contrast = feature == DdcFeature.Contrast;
+            if (contrast)
+            {
+                Interlocked.Increment(ref hardware.ContrastReads);
+            }
+
+            maximum = contrast ? hardware.ContrastMaximum : 100;
+            var ok = hardware.Read(feature, generation, out current)
+                && (!contrast || !hardware.ContrastUnsupported && (!hardware.ContrastHighLevelOnly || highLevel));
+            error = ok ? 0 : unchecked((int)0xC026258D);
+            return ok;
+        }
+
+        private bool Write(DdcFeature feature, uint value, bool highLevel, out int error)
+        {
+            var contrast = feature == DdcFeature.Contrast;
+            if (contrast)
+            {
+                Interlocked.Increment(ref hardware.ContrastWrites);
+            }
+
+            var ok = (!contrast || !hardware.ContrastUnsupported && (!hardware.ContrastHighLevelOnly || highLevel))
+                && hardware.Write(feature, generation, value);
+            error = ok ? 0 : unchecked((int)0xC026258D);
+            return ok;
+        }
 
         public void Dispose()
         {

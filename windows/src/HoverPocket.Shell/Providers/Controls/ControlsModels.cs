@@ -9,7 +9,11 @@ internal sealed record DisplayBrightnessState(
     int? Value,
     string? Error = null,
     bool? WriteVerified = null,
-    bool? IsPrimary = null);
+    bool? IsPrimary = null,
+    bool? ContrastSupported = null,
+    int? ContrastValue = null,
+    string? ContrastError = null,
+    bool? ContrastWriteVerified = null);
 
 internal sealed record VolumeState(
     bool Available,
@@ -109,6 +113,13 @@ internal interface IMonitorBrightnessService
     Task<IReadOnlyList<DisplayBrightnessState>> ReadAsync(CancellationToken cancellationToken);
 
     Task<IReadOnlyList<DisplayBrightnessState>> SetBrightnessAsync(
+        string displayId,
+        int value,
+        CancellationToken cancellationToken);
+
+    void SetContrastVisible(bool visible);
+
+    Task<IReadOnlyList<DisplayBrightnessState>> SetContrastAsync(
         string displayId,
         int value,
         CancellationToken cancellationToken);

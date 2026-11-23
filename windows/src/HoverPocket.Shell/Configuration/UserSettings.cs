@@ -72,6 +72,8 @@ internal sealed class UserSettings
 
     public Dictionary<string, bool> ProviderVisibility { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 
+    public bool ControlsContrastVisible { get; set; }
+
     public List<string> AiUsageHiddenServices { get; set; } = [];
 
     public string AiUsageView { get; set; } = "list";
@@ -116,6 +118,7 @@ internal sealed class UserSettings
             DisableTopEdgeInFullscreen = DisableTopEdgeInFullscreen,
             ProviderOrder = [.. ProviderOrder],
             ProviderVisibility = new Dictionary<string, bool>(ProviderVisibility, StringComparer.OrdinalIgnoreCase),
+            ControlsContrastVisible = ControlsContrastVisible,
             AiUsageHiddenServices = [.. AiUsageHiddenServices],
             AiUsageView = AiUsageView,
             AiUsageServiceOrder = [.. AiUsageServiceOrder],

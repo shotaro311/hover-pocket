@@ -37,6 +37,8 @@ internal sealed record StartupOptions(
     /// <summary><c>offline</c> for <c>--verify ai-usage</c>, <c>live</c> for <c>--verify ai-usage-live</c>.</summary>
     public string? AiUsageVerifyMode { get; init; }
 
+    public bool VerifyContrastHardware { get; init; }
+
     public bool IsVerify =>
         AiUsageVerifyMode is not null
         || VerifyShell
@@ -46,6 +48,7 @@ internal sealed record StartupOptions(
         || VerifySticky
         || VerifyClipboard
         || VerifyControls
+        || VerifyContrastHardware
         || VerifyCalc
         || VerifyTimer
         || VerifyCalendar
@@ -70,6 +73,7 @@ internal sealed record StartupOptions(
         var verifySticky = false;
         var verifyClipboard = false;
         var verifyControls = false;
+        var verifyContrastHardware = false;
         var verifyCalc = false;
         var verifyTimer = false;
         var verifyCalendar = false;
@@ -108,6 +112,7 @@ internal sealed record StartupOptions(
                 verifySticky = string.Equals(verifyTarget, "sticky", StringComparison.OrdinalIgnoreCase);
                 verifyClipboard = string.Equals(verifyTarget, "clipboard", StringComparison.OrdinalIgnoreCase);
                 verifyControls = string.Equals(verifyTarget, "controls", StringComparison.OrdinalIgnoreCase);
+                verifyContrastHardware = string.Equals(verifyTarget, "contrast-hardware", StringComparison.OrdinalIgnoreCase);
                 verifyCalc = string.Equals(verifyTarget, "calc", StringComparison.OrdinalIgnoreCase);
                 verifyTimer = string.Equals(verifyTarget, "timer", StringComparison.OrdinalIgnoreCase);
                 verifyWeather = string.Equals(verifyTarget, "weather", StringComparison.OrdinalIgnoreCase);
@@ -231,7 +236,8 @@ internal sealed record StartupOptions(
             verifyLivePreviewFallback,
             new ShellSettings(displayPlacement))
         {
-            AiUsageVerifyMode = aiUsageVerifyMode
+            AiUsageVerifyMode = aiUsageVerifyMode,
+            VerifyContrastHardware = verifyContrastHardware
         };
     }
 

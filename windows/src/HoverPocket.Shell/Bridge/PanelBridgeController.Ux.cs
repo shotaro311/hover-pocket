@@ -17,6 +17,7 @@ internal sealed partial class PanelBridgeController
     internal Task InvokeChatShortcutAsync(string kind) => PostPanelEventOnUiThreadAsync(kind == "voice" ? "chat.toggleVoice" : "chat.focusInput", new { });
     private void RegisterUx(Action<string, Func<JsonElement?, CancellationToken, Task<object?>>> register, BridgeSurface surface)
     {
+        RegisterControls(register, surface);
         if (surface != BridgeSurface.Settings) return;
         register("settings.captureShortcut", (p, _) => { VoiceCapture?.SuspendShortcuts(ReadRequiredBool(p, "active")); return Task.FromResult<object?>(new { ok = true }); });
         register("settings.getShortcuts", (_, _) => Task.FromResult<object?>(new Dictionary<string, string>(CurrentSettings.Shortcuts)

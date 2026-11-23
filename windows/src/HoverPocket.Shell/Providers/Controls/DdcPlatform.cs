@@ -25,24 +25,29 @@ internal interface IDdcPlatform
     IReadOnlyList<IDdcPhysicalMonitor> OpenPhysicalMonitors(IntPtr monitorHandle);
 }
 
+internal enum DdcFeature : byte
+{
+    Brightness = 0x10,
+    Contrast = 0x12
+}
+
 internal interface IDdcPhysicalMonitor : IDisposable
 {
     string Description { get; }
 
-    bool TryReadVcpBrightness(out uint current, out uint maximum, out int error);
+    bool TryReadVcp(DdcFeature feature, out uint current, out uint maximum, out int error);
 
-    bool TryWriteVcpBrightness(uint value, out int error);
+    bool TryWriteVcp(DdcFeature feature, uint value, out int error);
 
-    bool TryReadHighLevelBrightness(out uint minimum, out uint current, out uint maximum, out int error);
+    bool TryReadHighLevel(DdcFeature feature, out uint minimum, out uint current, out uint maximum, out int error);
 
-    bool TryWriteHighLevelBrightness(uint value, out int error);
+    bool TryWriteHighLevel(DdcFeature feature, uint value, out int error);
 }
 
 internal sealed class NativeDdcPlatform : IDdcPlatform
 {
     private const uint DisplayDeviceActive = 0x00000001;
     private const uint EddGetDeviceInterfaceName = 0x00000001;
-    private const byte VcpLuminance = 0x10;
     private readonly DisplayLayoutService _displays = new();
     private readonly object _friendlyNameSync = new();
     private Dictionary<string, string>? _friendlyNames;
@@ -231,30 +236,34 @@ internal sealed class NativeDdcPlatform : IDdcPlatform
     {
         public string Description { get; } = description;
 
-        public bool TryReadVcpBrightness(out uint current, out uint maximum, out int error)
+        public bool TryReadVcp(DdcFeature feature, out uint current, out uint maximum, out int error)
         {
-            var ok = GetVCPFeatureAndVCPFeatureReply(handle, VcpLuminance, out _, out current, out maximum);
+            var ok = GetVCPFeatureAndVCPFeatureReply(handle, (byte)feature, out _, out current, out maximum);
             error = ok ? 0 : Marshal.GetLastWin32Error();
             return ok;
         }
 
-        public bool TryWriteVcpBrightness(uint value, out int error)
+        public bool TryWriteVcp(DdcFeature feature, uint value, out int error)
         {
-            var ok = SetVCPFeature(handle, VcpLuminance, value);
+            var ok = SetVCPFeature(handle, (byte)feature, value);
             error = ok ? 0 : Marshal.GetLastWin32Error();
             return ok;
         }
 
-        public bool TryReadHighLevelBrightness(out uint minimum, out uint current, out uint maximum, out int error)
+        public bool TryReadHighLevel(DdcFeature feature, out uint minimum, out uint current, out uint maximum, out int error)
         {
-            var ok = GetMonitorBrightness(handle, out minimum, out current, out maximum);
+            var ok = feature == DdcFeature.Contrast
+                ? GetMonitorContrast(handle, out minimum, out current, out maximum)
+                : GetMonitorBrightness(handle, out minimum, out current, out maximum);
             error = ok ? 0 : Marshal.GetLastWin32Error();
             return ok;
         }
 
-        public bool TryWriteHighLevelBrightness(uint value, out int error)
+        public bool TryWriteHighLevel(DdcFeature feature, uint value, out int error)
         {
-            var ok = SetMonitorBrightness(handle, value);
+            var ok = feature == DdcFeature.Contrast
+                ? SetMonitorContrast(handle, value)
+                : SetMonitorBrightness(handle, value);
             error = ok ? 0 : Marshal.GetLastWin32Error();
             return ok;
         }
@@ -332,6 +341,18 @@ internal sealed class NativeDdcPlatform : IDdcPlatform
     [DllImport("dxva2.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool SetMonitorBrightness(SafePhysicalMonitorHandle monitor, uint brightness);
+
+    [DllImport("dxva2.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetMonitorContrast(
+        SafePhysicalMonitorHandle monitor,
+        out uint minimum,
+        out uint current,
+        out uint maximum);
+
+    [DllImport("dxva2.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool SetMonitorContrast(SafePhysicalMonitorHandle monitor, uint contrast);
 
     [DllImport("dxva2.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]

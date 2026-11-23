@@ -109,15 +109,17 @@ public partial class App : System.Windows.Application
             return;
         }
 
+        if (options.VerifyContrastHardware)
+        {
+            VerifyConsole.AttachParent();
+            _ = RunContrastHardwareVerificationAsync();
+            return;
+        }
+
         if (options.VerifyControls)
         {
             VerifyConsole.AttachParent();
-            Environment.ExitCode = new ControlsVerifier(
-                options.ChangeBrightnessForVerify,
-                options.TogglePlaybackForVerify,
-                options.VerifyLivePreview,
-                options.VerifyLivePreviewFallback).Run();
-            Shutdown();
+            _ = RunControlsVerificationAsync(options);
             return;
         }
 
@@ -348,6 +350,50 @@ public partial class App : System.Windows.Application
         if (credentialCurrent || googleCredentialCurrent)
         {
             Environment.ExitCode = 1;
+        }
+    }
+
+    private async Task RunControlsVerificationAsync(StartupOptions options)
+    {
+        try
+        {
+            Environment.ExitCode = await new ControlsVerifier(
+                options.ChangeBrightnessForVerify,
+                options.TogglePlaybackForVerify,
+                options.VerifyLivePreview,
+                options.VerifyLivePreviewFallback).RunAsync();
+        }
+        catch (Exception exception)
+        {
+            Environment.ExitCode = 1;
+            try
+            {
+                VerifyConsole.WriteLine($"controls_verify_failed={exception.GetType().Name}");
+            }
+            catch
+            {
+            }
+        }
+        finally
+        {
+            Shutdown();
+        }
+    }
+
+    private async Task RunContrastHardwareVerificationAsync()
+    {
+        try
+        {
+            Environment.ExitCode = await ControlsVerifier.RunContrastHardwareAsync();
+        }
+        catch (Exception exception)
+        {
+            VerifyConsole.WriteLine($"contrast_hardware_failed={exception.GetType().Name}");
+            Environment.ExitCode = 1;
+        }
+        finally
+        {
+            Shutdown();
         }
     }
 

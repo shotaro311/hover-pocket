@@ -41,6 +41,57 @@
   text-transform: uppercase;
 }
 
+.hp-controls-display-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.hp-controls-display-header h2 {
+  margin: 0;
+}
+
+.hp-controls-display-header button {
+  min-height: 20px;
+  padding: 0 7px;
+  border: 1px solid var(--hp-line);
+  border-radius: 999px;
+  color: var(--hp-muted);
+  background: transparent;
+  font-size: calc(10px * var(--hp-text-scale));
+  cursor: pointer;
+}
+
+.hp-controls-display-header button[aria-pressed="true"] {
+  border-color: color-mix(in srgb, var(--hp-accent-2) 40%, transparent);
+  color: var(--hp-text);
+  background: color-mix(in srgb, var(--hp-accent-2) 15%, transparent);
+}
+
+.hp-display-adjustment {
+  display: grid;
+  grid-template-columns: calc(76px * var(--hp-text-scale)) minmax(0, 1fr) 4ch;
+  align-items: center;
+  gap: 6px;
+}
+
+.hp-display-adjustment,
+.hp-contrast-save-error {
+  margin: 0;
+  color: var(--hp-dim);
+  font-size: calc(10px * var(--hp-text-scale));
+}
+
+.hp-display-adjustment input {
+  margin: 0;
+}
+
+.hp-display-adjustment-value {
+  text-align: right;
+}
+
 /* Every display row stays visible; when the panel is short the whole Controls view scrolls instead. */
 .hp-controls-list {
   display: grid;

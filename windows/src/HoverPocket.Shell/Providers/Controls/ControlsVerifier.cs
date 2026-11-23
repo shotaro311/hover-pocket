@@ -25,11 +25,12 @@ internal sealed partial class ControlsVerifier
         _verifyLivePreviewFallback = verifyLivePreviewFallback;
     }
 
-    public int Run()
+    public async Task<int> RunAsync()
     {
         try
         {
-            Task.Run(RunAsync).GetAwaiter().GetResult();
+            await Task.Run(RunChecksAsync);
+            await VerifyContrastSettingsAsync();
         }
         catch (Exception ex)
         {
@@ -51,12 +52,13 @@ internal sealed partial class ControlsVerifier
         return 1;
     }
 
-    private async Task RunAsync()
+    private async Task RunChecksAsync()
     {
         VerifyBrightnessReadbackErrorIsRejected();
         await VerifyDeterministicFlowAsync();
         await VerifyBrightnessDetectionRaceAsync();
         await VerifyBrightnessServiceReliabilityAsync();
+        await VerifyContrastAsync();
         using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         await VerifyLiveVolumeAsync(cancellation.Token);
         await VerifyLiveDisplaysAsync(cancellation.Token);
@@ -149,6 +151,13 @@ internal sealed partial class ControlsVerifier
         }
 
         VerifyBridgeSerialization(changedBrightness);
+        controller.SetContrastVisible(true);
+        var changedContrast = await controller.SetContrastAsync("display-1", 67, CancellationToken.None);
+        if (changedContrast.Displays.Single() is not { Value: 63, ContrastValue: 67, ContrastWriteVerified: true }
+            || volume.ReadCount != volumeReadsBeforeBrightnessSet || media.ReadCount != mediaReadsBeforeBrightnessSet)
+        {
+            _failures.Add("contrast bridge: write returned an unexpected snapshot or refreshed media/volume");
+        }
 
         var paused = await controller.ExecuteMediaCommandAsync("playPause", null, CancellationToken.None);
         var rate = await controller.ExecuteMediaCommandAsync("rate", 1.5, CancellationToken.None);
@@ -596,6 +605,8 @@ internal sealed partial class ControlsVerifier
     {
         private readonly bool _completeDetectionInBackground;
         private int _value = 45;
+        private bool _contrastVisible;
+        private int _contrastValue = 50;
         private int _detectionStarted;
 
         public FakeBrightnessService(bool completeDetectionInBackground = false)
@@ -604,6 +615,30 @@ internal sealed partial class ControlsVerifier
         }
 
         public int ReadCount { get; private set; }
+
+        public Action<bool>? ContrastVisibilityChanged { get; init; }
+
+        public void SetContrastVisible(bool visible)
+        {
+            _contrastVisible = visible;
+            ContrastVisibilityChanged?.Invoke(visible);
+        }
+
+        public Task<IReadOnlyList<DisplayBrightnessState>> SetContrastAsync(
+            string displayId,
+            int value,
+            CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (_contrastVisible && displayId == "display-1")
+            {
+                _contrastValue = value;
+            }
+
+            return Task.FromResult<IReadOnlyList<DisplayBrightnessState>>(
+                [new DisplayBrightnessState("display-1", "Display", true, _value,
+                    ContrastSupported: _contrastVisible, ContrastValue: _contrastValue, ContrastWriteVerified: true)]);
+        }
 
         public event EventHandler<IReadOnlyList<DisplayBrightnessState>>? StateChanged;
 

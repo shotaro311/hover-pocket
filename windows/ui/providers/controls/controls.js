@@ -1,7 +1,7 @@
 import { on } from "../../js/bridge.js";
 
 const styleHref = "./providers/controls/controls.css";
-const brightnessUpdateDelayMs = 110;
+const displayUpdateDelayMs = 110;
 
 export function renderControlsProvider(context) {
   ensureStylesheet();
@@ -12,45 +12,64 @@ export function renderControlsProvider(context) {
 
   let disposed = false;
   const pendingOperations = new Set();
-  const brightnessUpdates = new Map();
+  const displayUpdates = new Map();
   let currentSnapshot = null;
   let currentRenderSignature = "";
+  let currentDisplaySignature = "";
+  let contrastVisible = context.state.settings.controlsContrastVisible === true;
+  let contrastVisibilityRevision = 0;
+  let contrastSaveError = "";
+  let loadedContrastVisibility = null;
+  const readContrastVisibility = async () => {
+    const { visible } = await context.request("controls.getContrastVisible");
+    return visible === true;
+  };
   let refreshPromise = null;
   let latestPreviewFrame = null;
   let previewSequence = 0;
   let previewDrawing = false;
-  let pointerRangeActive = false;
-  let keyboardRangeActive = false;
+  let pointerRangeActive = null;
+  let keyboardRangeActive = null;
   let deferredSnapshot = null;
-  let brightnessDetectionRetryTimer = null;
-  let brightnessDetectionRetryCount = 0;
+  let displayDetectionRetryTimer = null;
+  let displayDetectionRetryCount = 0;
 
-  const synchronizeBrightnessDetection = (snapshot) => {
-    const detecting = (snapshot?.displays ?? []).some(
-      (display) => display.error === "Brightness detection is still running.",
+  const synchronizeDisplayDetection = (snapshot) => {
+    const detecting = (snapshot?.displays ?? []).some((display) =>
+      display.error === "Brightness detection is still running."
+      || (contrastVisible && display.supported && display.contrastSupported == null),
     );
     if (!detecting) {
-      brightnessDetectionRetryCount = 0;
-      if (brightnessDetectionRetryTimer != null) {
-        window.clearTimeout(brightnessDetectionRetryTimer);
-        brightnessDetectionRetryTimer = null;
+      displayDetectionRetryCount = 0;
+      if (displayDetectionRetryTimer != null) {
+        window.clearTimeout(displayDetectionRetryTimer);
+        displayDetectionRetryTimer = null;
       }
       return;
     }
 
-    if (brightnessDetectionRetryTimer != null || brightnessDetectionRetryCount >= 3) {
+    if (displayDetectionRetryTimer != null || displayDetectionRetryCount >= 3) {
       return;
     }
 
-    brightnessDetectionRetryTimer = window.setTimeout(() => {
-      brightnessDetectionRetryTimer = null;
-      brightnessDetectionRetryCount += 1;
+    displayDetectionRetryTimer = window.setTimeout(() => {
+      displayDetectionRetryTimer = null;
+      displayDetectionRetryCount += 1;
       void refresh();
     }, 900);
   };
 
   const drawDeferredWhenIdle = () => {
-    if (pointerRangeActive || keyboardRangeActive || brightnessUpdates.size || !deferredSnapshot || disposed) {
+    if (pointerRangeActive || keyboardRangeActive || displayUpdates.size || disposed) {
+      return;
+    }
+
+    if (loadedContrastVisibility != null) {
+      const visible = loadedContrastVisibility;
+      loadedContrastVisibility = null;
+      applyLoadedContrastVisibility(visible);
+    }
+    if (!deferredSnapshot) {
       return;
     }
 
@@ -59,21 +78,21 @@ export function renderControlsProvider(context) {
     draw(snapshot);
   };
   const finishRangeInteraction = () => {
-    pointerRangeActive = false;
-    keyboardRangeActive = false;
+    pointerRangeActive = null;
+    keyboardRangeActive = null;
     drawDeferredWhenIdle();
   };
   const handlePointerUp = () => finishRangeInteraction();
   root.addEventListener("pointerdown", (event) => {
     if (event.target instanceof HTMLInputElement && event.target.type === "range") {
-      pointerRangeActive = true;
+      pointerRangeActive = event.target;
     }
   });
   root.addEventListener("keydown", (event) => {
     if (event.target instanceof HTMLInputElement
         && event.target.type === "range"
         && ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End", "PageUp", "PageDown"].includes(event.key)) {
-      keyboardRangeActive = true;
+      keyboardRangeActive = event.target;
     }
   });
   root.addEventListener("keyup", (event) => {
@@ -106,18 +125,20 @@ export function renderControlsProvider(context) {
     });
   };
 
-  const queueBrightness = (id, value, immediate = false) => {
+  const queueDisplayUpdate = (method, id, value, immediate = false) => {
     if (disposed) {
       return;
     }
 
-    let state = brightnessUpdates.get(id);
+    const key = displayUpdateKey(method, id);
+    let state = displayUpdates.get(key);
     if (!state) {
-      state = { inFlight: false, queuedValue: null, timer: null, lastSentAt: 0 };
-      brightnessUpdates.set(id, state);
+      state = { method, id, inFlight: false, queuedValue: null, timer: null, lastSentAt: -Infinity };
+      displayUpdates.set(key, state);
     }
 
     state.queuedValue = Math.max(0, Math.min(100, Math.round(Number(value) || 0)));
+    state.displayedValue = state.queuedValue;
     if (immediate && state.timer != null) {
       window.clearTimeout(state.timer);
       state.timer = null;
@@ -128,26 +149,26 @@ export function renderControlsProvider(context) {
     }
 
     if (immediate) {
-      sendBrightness(id, state);
+      sendDisplayUpdate(key, state);
     } else if (state.timer == null) {
       state.timer = window.setTimeout(() => {
         state.timer = null;
-        sendBrightness(id, state);
-      }, brightnessUpdateDelayMs);
+        sendDisplayUpdate(key, state);
+      }, displayUpdateDelayMs);
     }
   };
 
-  const sendBrightness = (id, state) => {
+  const sendDisplayUpdate = (key, state) => {
     if (disposed || state.inFlight || state.queuedValue == null) {
       return;
     }
 
-    const spacing = brightnessUpdateDelayMs - (performance.now() - state.lastSentAt);
+    const spacing = displayUpdateDelayMs - (performance.now() - state.lastSentAt);
     if (spacing > 1) {
       if (state.timer == null) {
         state.timer = window.setTimeout(() => {
           state.timer = null;
-          sendBrightness(id, state);
+          sendDisplayUpdate(key, state);
         }, spacing);
       }
       return;
@@ -157,10 +178,9 @@ export function renderControlsProvider(context) {
     state.queuedValue = null;
     state.inFlight = true;
     state.lastSentAt = performance.now();
-    const operationKey = `controls.setBrightness:${id}`;
-    pendingOperations.add(operationKey);
+    pendingOperations.add(key);
     root.classList.add("is-busy");
-    context.request("controls.setBrightness", { id, value }).then((snapshot) => {
+    context.request(state.method, { id: state.id, value }).then((snapshot) => {
       if (!disposed) {
         draw(snapshot);
       }
@@ -170,16 +190,79 @@ export function renderControlsProvider(context) {
       }
     }).finally(() => {
       state.inFlight = false;
-      pendingOperations.delete(operationKey);
+      pendingOperations.delete(key);
       if (state.queuedValue != null && state.queuedValue !== value && !disposed) {
-        sendBrightness(id, state);
+        sendDisplayUpdate(key, state);
         return;
       }
 
       state.queuedValue = null;
-      brightnessUpdates.delete(id);
+      displayUpdates.delete(key);
       root.classList.toggle("is-busy", pendingOperations.size > 0);
       drawDeferredWhenIdle();
+    });
+  };
+
+  const drawDisplays = (displays, force = false) => {
+    const signature = JSON.stringify([contrastVisible, contrastSaveError, displays]);
+    const previous = root.querySelector(":scope > .hp-controls-display-section");
+    if (!force && previous && signature === currentDisplaySignature) {
+      return;
+    }
+
+    const next = displaySection(displays, context.state, queueDisplayUpdate, {
+      contrastVisible,
+      toggleContrast,
+      pendingValue: (method, id) => displayUpdates.get(displayUpdateKey(method, id))?.displayedValue,
+      saveError: contrastSaveError,
+    });
+    if (previous) {
+      const restoreFocus = document.activeElement === previous.querySelector("[data-contrast-toggle]");
+      previous.replaceWith(next);
+      if (restoreFocus) {
+        next.querySelector("[data-contrast-toggle]").focus({ preventScroll: true });
+      }
+    } else {
+      root.prepend(next);
+    }
+    currentDisplaySignature = signature;
+  };
+
+  const toggleContrast = () => {
+    const previous = contrastVisible;
+    const visible = !previous;
+    const revision = ++contrastVisibilityRevision;
+    contrastVisible = visible;
+    contrastSaveError = "";
+    if (pointerRangeActive?.closest(".hp-controls-display-section")) {
+      pointerRangeActive = null;
+    }
+    if (keyboardRangeActive?.closest(".hp-controls-display-section")) {
+      keyboardRangeActive = null;
+    }
+    drawDisplays(currentSnapshot?.displays ?? [], true);
+    synchronizeDisplayDetection(currentSnapshot);
+    drawDeferredWhenIdle();
+    context.request("controls.setContrastVisible", { visible }).then((saved) => {
+      if (!disposed && revision === contrastVisibilityRevision) {
+        const persisted = saved.visible === true;
+        context.state.settings.controlsContrastVisible = persisted;
+        if (contrastVisible !== persisted) {
+          contrastVisible = persisted;
+          drawDisplays(currentSnapshot?.displays ?? [], true);
+        }
+      }
+    }).catch(async () => {
+      if (disposed || revision !== contrastVisibilityRevision) {
+        return;
+      }
+      const persisted = await readContrastVisibility().catch(() => previous);
+      if (!disposed && revision === contrastVisibilityRevision) {
+        contrastVisible = persisted;
+        context.state.settings.controlsContrastVisible = persisted;
+        contrastSaveError = text(context.state, "表示設定を保存できませんでした。", "Could not save the display setting.");
+        drawDisplays(currentSnapshot?.displays ?? [], true);
+      }
     });
   };
 
@@ -188,25 +271,26 @@ export function renderControlsProvider(context) {
       return;
     }
     currentSnapshot = snapshot;
-    synchronizeBrightnessDetection(snapshot);
-    if (pointerRangeActive || keyboardRangeActive || brightnessUpdates.size) {
+    synchronizeDisplayDetection(snapshot);
+    if (pointerRangeActive || keyboardRangeActive || displayUpdates.size) {
       deferredSnapshot = snapshot;
       return;
     }
 
     deferredSnapshot = null;
     const nextSignature = snapshotRenderSignature(snapshot);
-    if (nextSignature === currentRenderSignature && root.querySelector(".hp-controls-section")) {
+    if (nextSignature === currentRenderSignature && root.querySelector(".hp-controls-display-section")) {
+      drawDisplays(snapshot.displays ?? []);
       patchMediaPosition(root, snapshot);
       return;
     }
 
     root.className = `hp-controls${pendingOperations.size ? " is-busy" : ""}`;
     root.replaceChildren(
-      displaySection(snapshot.displays ?? [], context.state, queueBrightness),
       volumeSection(snapshot.volume ?? {}, context.state, update),
       mediaSection(snapshot.media ?? {}, snapshot.preview ?? {}, context.state, update),
     );
+    drawDisplays(snapshot.displays ?? []);
     currentRenderSignature = nextSignature;
     patchMediaPosition(root, snapshot);
     if (latestPreviewFrame) {
@@ -218,6 +302,28 @@ export function renderControlsProvider(context) {
     root.className = "hp-controls is-error";
     root.textContent = localizeError(String(error?.message ?? error), context.state);
   };
+
+  // The saved preference can arrive after the first draw. It never replaces a slider the user is moving;
+  // it waits for the same idle point as deferred snapshots.
+  const applyLoadedContrastVisibility = (visible) => {
+    if (disposed || contrastVisibilityRevision !== 0) {
+      return;
+    }
+    context.state.settings.controlsContrastVisible = visible;
+    if (contrastVisible === visible) {
+      return;
+    }
+    if (pointerRangeActive || keyboardRangeActive || displayUpdates.size) {
+      loadedContrastVisibility = visible;
+      return;
+    }
+    contrastVisible = visible;
+    if (currentSnapshot) {
+      drawDisplays(currentSnapshot.displays ?? []);
+      synchronizeDisplayDetection(currentSnapshot);
+    }
+  };
+  void readContrastVisibility().then(applyLoadedContrastVisibility).catch(() => {});
 
   const refresh = () => {
     if (disposed) {
@@ -310,11 +416,7 @@ export function renderControlsProvider(context) {
     }
   };
 
-  const unsubscribeState = on("controls.stateChanged", (snapshot) => {
-    if (!disposed) {
-      draw(snapshot);
-    }
-  });
+  const unsubscribeState = on("controls.stateChanged", draw);
   const unsubscribePreviewState = on("controls.previewState", applyPreviewState);
   const unsubscribePreviewFrame = on("controls.previewFrame", queuePreviewFrame);
 
@@ -344,13 +446,32 @@ export function renderControlsProvider(context) {
         { id: "display:C", name: "U16ZT", supported: false, value: null, isPrimary: false, error: "DDC/CI is not available." },
       ],
     ];
+    const contrastCases = [
+      [
+        { ...cases[0][0], contrastSupported: true, contrastValue: 70 },
+        { ...cases[0][1], contrastSupported: false },
+      ],
+      [
+        { ...cases[1][0], contrastSupported: true, contrastValue: 68, contrastWriteVerified: false,
+          contrastError: "Contrast readback did not match 70%." },
+        { ...cases[1][1], contrastSupported: null },
+        cases[1][2],
+      ],
+    ];
     const sizes = [["", ""], ["440px", ""], ["", "220px"], ["440px", "220px"]];
     const failures = [];
     const previousWidth = root.style.width;
     const previousHeight = root.style.height;
     try {
-      for (const displays of cases) {
-        const replacement = displaySection(displays, context.state, () => {});
+      const variants = [
+        ...cases.map((displays) => ({ displays, contrastVisible: false })),
+        ...contrastCases.map((displays) => ({ displays, contrastVisible: true })),
+      ];
+      for (const { displays, contrastVisible } of variants) {
+        const replacement = displaySection(displays, context.state, () => {}, {
+          contrastVisible,
+          toggleContrast: () => {},
+        });
         original.replaceWith(replacement);
         const expected = displayLabels(displays, context.state);
         try {
@@ -361,6 +482,36 @@ export function renderControlsProvider(context) {
           if (displays.length === 2 && !(expected[0].includes("メイン") || expected[0].includes("Main"))) {
             failures.push("duplicate primary label missing");
           }
+          const button = replacement.querySelector("[data-contrast-toggle]");
+          const header = replacement.querySelector(".hp-controls-display-header");
+          const heading = header.querySelector("h2");
+          if (button.parentElement !== header || button.getAttribute("aria-pressed") !== String(contrastVisible)) {
+            failures.push("display heading toggle missing or reports the wrong state");
+          }
+
+          const contrastLines = [...replacement.querySelectorAll("[data-contrast-adjustment]")];
+          if (contrastLines.length !== (contrastVisible ? 2 : 0)) {
+            failures.push("wrong number of contrast lines");
+          } else if (contrastVisible) {
+            const status = displays[1].contrastSupported === false
+              ? text(context.state, "非対応", "Unsupported")
+              : text(context.state, "確認中…", "Checking…");
+            if (contrastLines[0].querySelector("input")?.value !== String(displays[0].contrastValue)
+              || !contrastLines[1].textContent.includes(status)
+              || contrastLines[1].querySelector("input")) {
+              failures.push("supported, unsupported or checking contrast row is incorrect");
+            }
+            const error = replacement.querySelector("[data-contrast-error]");
+            if ((error?.textContent ?? "") !== localizeError(displays[0].contrastError, context.state)) {
+              failures.push("contrast error is missing or incorrectly localized");
+            }
+          }
+
+          if ([...replacement.querySelectorAll(".hp-control-row p")]
+            .some((message) => !message.title || message.title !== message.textContent)) {
+            failures.push("display details do not expose their full text in the tooltip");
+          }
+
           for (const [width, height] of sizes) {
             root.style.width = width;
             root.style.height = height;
@@ -370,7 +521,12 @@ export function renderControlsProvider(context) {
             const rootBounds = root.getBoundingClientRect();
             const rows = [...replacement.querySelectorAll(".hp-control-row")];
             const label = `${displays.length} displays at ${width || "auto"}x${height || "auto"}`;
-            if (rows.length !== displays.length) {
+            const buttonBounds = button.getBoundingClientRect();
+            if (Math.abs(buttonBounds.right - header.getBoundingClientRect().right) > 1
+              || buttonBounds.left <= heading.getBoundingClientRect().right) {
+              failures.push(`${label}: toggle is not at the right end of the display heading`);
+            }
+            if (rows.length !== displays.length || rows.some((row) => row.querySelectorAll("strong").length !== 1)) {
               failures.push(`${label}: rendered ${rows.length} rows`);
             }
             if (list.scrollHeight > list.clientHeight + 1) {
@@ -402,6 +558,8 @@ export function renderControlsProvider(context) {
       root.style.width = previousWidth;
       root.style.height = previousHeight;
     }
+    await verifyDisplayInteraction(context.state, contrastCases[0], failures);
+    await verifyLateSettingsDuringRange(context.state, contrastCases[0], failures);
     return { ok: failures.length === 0, failures };
   };
   return {
@@ -414,16 +572,16 @@ export function renderControlsProvider(context) {
       unsubscribePreviewFrame();
       latestPreviewFrame = null;
       deferredSnapshot = null;
-      if (brightnessDetectionRetryTimer != null) {
-        window.clearTimeout(brightnessDetectionRetryTimer);
-        brightnessDetectionRetryTimer = null;
+      if (displayDetectionRetryTimer != null) {
+        window.clearTimeout(displayDetectionRetryTimer);
+        displayDetectionRetryTimer = null;
       }
-      for (const state of brightnessUpdates.values()) {
+      for (const state of displayUpdates.values()) {
         if (state.timer != null) {
           window.clearTimeout(state.timer);
         }
       }
-      brightnessUpdates.clear();
+      displayUpdates.clear();
       pendingOperations.clear();
       window.removeEventListener("pointerup", handlePointerUp, true);
       window.removeEventListener("pointercancel", handlePointerUp, true);
@@ -431,7 +589,149 @@ export function renderControlsProvider(context) {
   };
 }
 
-function displaySection(displays, appState, queueBrightness) {
+async function verifyDisplayInteraction(appState, displays, failures) {
+  const host = document.createElement("div");
+  const state = { ...appState, settings: { ...appState.settings, controlsContrastVisible: false } };
+  let persisted = false;
+  let snapshot = { displays, refreshedAt: "2099-01-01T00:00:00Z", preview: { live: true } };
+  const operations = [];
+  const finishWrites = [];
+  let finishInitialSettings;
+  const initialSettings = new Promise((resolve) => { finishInitialSettings = resolve; });
+  let visibilityReads = 0;
+  const request = async (method, params) => {
+    if (method === "controls.getState") {
+      return snapshot;
+    }
+    if (method === "controls.getContrastVisible") {
+      return ++visibilityReads === 1 ? initialSettings : { visible: persisted };
+    }
+    if (method === "controls.setContrastVisible") {
+      persisted = params.visible;
+      return { visible: persisted };
+    }
+
+    operations.push({ method, ...params });
+    await new Promise((resolve) => finishWrites.push(resolve));
+    const key = method === "controls.setContrast" ? "contrastValue" : "value";
+    snapshot = {
+      ...snapshot,
+      displays: snapshot.displays.map((display) => display.id === params.id
+        ? { ...display, [key]: params.value } : display),
+    };
+    return snapshot;
+  };
+  const provider = renderControlsProvider({ container: host, state, request });
+  try {
+    const refresh = provider.refresh();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const root = host.firstElementChild;
+    const canvas = root.querySelector("canvas[data-live-preview]");
+    const button = () => root.querySelector("[data-contrast-toggle]");
+    const range = (method) => root.querySelector(`[data-display-method="${method}"]`);
+    const brightness = "controls.setBrightness";
+    const contrast = "controls.setContrast";
+    const initialBrightness = range(brightness);
+    if (!initialBrightness || !root.querySelector(".hp-volume") || !root.querySelector(".hp-media")) {
+      failures.push("unanswered contrast settings blocked display, volume or media rendering");
+      return;
+    }
+    await refresh;
+    initialBrightness.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }));
+    initialBrightness.value = "61";
+    initialBrightness.dispatchEvent(new Event("input", { bubbles: true }));
+    button().click();
+    if (button().getAttribute("aria-pressed") !== "true" || !range(contrast)
+      || range(brightness).value !== "61") {
+      failures.push("toggle did not redraw immediately while brightness was queued");
+    }
+    if ((await request("controls.getContrastVisible")).visible !== true) {
+      failures.push("enabled contrast preference did not read back");
+    }
+    finishInitialSettings({ visible: false });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    if (button().getAttribute("aria-pressed") !== "true" || !range(contrast)
+      || state.settings.controlsContrastVisible !== true) {
+      failures.push("late initial settings overrode the user's contrast toggle");
+    }
+    const contrastSlider = range(contrast);
+    if (!contrastSlider) {
+      return;
+    }
+    contrastSlider.value = "65";
+    contrastSlider.dispatchEvent(new Event("change", { bubbles: true }));
+    range(brightness).dispatchEvent(new Event("change", { bubbles: true }));
+    if (!operations.some((op) => op.method === brightness && op.id === displays[0].id && op.value === 61)
+      || !operations.some((op) => op.method === contrast && op.id === displays[0].id && op.value === 65)) {
+      failures.push("same-display brightness and contrast did not both send their own values");
+    }
+    button().click();
+    if (button().getAttribute("aria-pressed") !== "false" || range(contrast)
+      || (await request("controls.getContrastVisible")).visible !== false) {
+      failures.push("toggle did not hide contrast and read back off during writes");
+    }
+    for (const resolve of finishWrites) {
+      resolve();
+    }
+    await provider.refresh();
+    if (!canvas || canvas !== root.querySelector("canvas[data-live-preview]")) {
+      failures.push("contrast toggle/save or display refresh recreated the live preview canvas");
+    }
+  } finally {
+    finishInitialSettings({ visible: false });
+    provider.dispose();
+  }
+}
+
+// A saved "on" that arrives while a brightness slider is held by the keyboard must wait for keyup.
+async function verifyLateSettingsDuringRange(appState, displays, failures) {
+  const host = document.createElement("div");
+  const state = { ...appState, settings: { ...appState.settings, controlsContrastVisible: false } };
+  const snapshot = { displays, refreshedAt: "2099-01-01T00:00:00Z", preview: { live: true } };
+  let finishSettings;
+  const settings = new Promise((resolve) => { finishSettings = resolve; });
+  const request = async (method) => {
+    if (method === "controls.getState") {
+      return snapshot;
+    }
+    if (method === "controls.getContrastVisible") {
+      return settings;
+    }
+    return snapshot;
+  };
+  const provider = renderControlsProvider({ container: host, state, request });
+  try {
+    await provider.refresh();
+    const root = host.firstElementChild;
+    const slider = root.querySelector('[data-display-method="controls.setBrightness"]');
+    if (!slider) {
+      failures.push("late settings check: brightness slider missing");
+      return;
+    }
+    slider.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }));
+    finishSettings({ visible: true });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    // The test host is detached from the document, so containment is checked against the provider root.
+    if (!root.contains(slider) || root.querySelector('[data-display-method="controls.setContrast"]')) {
+      failures.push("late settings replaced a slider the keyboard was still moving");
+    }
+    slider.dispatchEvent(new KeyboardEvent("keyup", { key: "ArrowRight", bubbles: true }));
+    if (!root.querySelector('[data-display-method="controls.setContrast"]')
+      || root.querySelector("[data-contrast-toggle]")?.getAttribute("aria-pressed") !== "true") {
+      failures.push("late settings were not applied after the keyboard released the slider");
+    }
+  } finally {
+    finishSettings({ visible: false });
+    provider.dispose();
+  }
+}
+
+function displayUpdateKey(method, id) {
+  return `${method}:${id}`;
+}
+
+function displaySection(displays, appState, queueDisplayUpdate, options) {
+  const { contrastVisible, toggleContrast, pendingValue = () => null, saveError } = options;
   const body = document.createElement("div");
   body.className = "hp-controls-list";
   const names = displayLabels(displays, appState);
@@ -440,26 +740,41 @@ function displaySection(displays, appState, queueBrightness) {
     const detecting = display.error === "Brightness detection is still running.";
     row.className = `hp-control-row${display.supported ? "" : detecting ? " is-detecting" : " is-unsupported"}`;
     row.dataset.displayId = display.id ?? "";
+    const brightness = pendingValue("controls.setBrightness", display.id) ?? display.value;
     const title = label(
       names[index],
       display.supported && display.value != null
-        ? `${display.value}%`
+        ? `${brightness}%`
         : detecting
           ? text(appState, "検出中…", "Detecting…")
           : text(appState, "非対応", "Unsupported"),
     );
     title.querySelector("strong").title = names[index];
     if (display.supported && display.value != null) {
-      const slider = range(display.value, 0, 100);
-      const valueLabel = title.querySelector("span");
-      slider.addEventListener("input", () => {
-        valueLabel.textContent = `${slider.value}%`;
-        queueBrightness(display.id, slider.value);
-      });
-      slider.addEventListener("change", () => queueBrightness(display.id, slider.value, true));
-      row.append(title, slider);
+      const brightnessName = text(appState, "明るさ", "Brightness");
+      const brightnessValue = title.querySelector("span");
+      const brightnessSlider = displayRange("controls.setBrightness", display.id, brightness, brightnessName,
+        brightnessValue, queueDisplayUpdate);
+      row.append(title);
+      if (contrastVisible) {
+        brightnessValue.remove();
+        row.append(displayAdjustment(brightnessName, brightnessSlider, brightnessValue));
+      } else {
+        row.append(brightnessSlider);
+      }
+      if (contrastVisible) {
+        row.append(contrastAdjustment(display, appState, queueDisplayUpdate, pendingValue));
+        if (display.contrastWriteVerified === false || display.contrastError) {
+          const message = displayDetail(localizeError(
+            display.contrastError || text(appState, "読み戻しに失敗しました。", "Readback failed."),
+            appState,
+          ));
+          message.dataset.contrastError = "true";
+          row.append(message);
+        }
+      }
       if (display.writeVerified === false || display.error) {
-        row.append(detail(localizeError(
+        row.append(displayDetail(localizeError(
           display.error || text(appState, "読み戻しに失敗しました。", "Readback failed."),
           appState,
         )));
@@ -467,7 +782,7 @@ function displaySection(displays, appState, queueBrightness) {
     } else {
       row.append(
         title,
-        detail(localizeError(display.error || text(
+        displayDetail(localizeError(display.error || text(
           appState,
           "このディスプレイは明るさ操作に対応していません。",
           "Brightness control is not available for this display.",
@@ -476,7 +791,71 @@ function displaySection(displays, appState, queueBrightness) {
     }
     body.append(row);
   });
-  return section(text(appState, "ディスプレイ", "Displays"), body);
+  if (saveError) {
+    const message = displayDetail(saveError);
+    message.className = "hp-contrast-save-error";
+    message.setAttribute("role", "alert");
+    body.append(message);
+  }
+
+  const root = section(text(appState, "ディスプレイ", "Displays"), body);
+  root.classList.add("hp-controls-display-section");
+  const header = document.createElement("div");
+  header.className = "hp-controls-display-header";
+  const button = document.createElement("button");
+  button.type = "button";
+  button.dataset.contrastToggle = "true";
+  button.textContent = text(appState, "◐ コントラスト", "◐ Contrast");
+  button.title = contrastVisible
+    ? text(appState, "各画面のコントラストを隠す", "Hide contrast for each display")
+    : text(appState, "各画面のコントラストを表示", "Show contrast for each display");
+  button.setAttribute("aria-pressed", String(contrastVisible));
+  button.addEventListener("click", toggleContrast);
+  header.append(root.querySelector("h2"), button);
+  root.prepend(header);
+  return root;
+}
+
+function displayRange(method, id, value, name, valueLabel, queueDisplayUpdate) {
+  const slider = range(value, 0, 100);
+  slider.dataset.displayMethod = method;
+  slider.setAttribute("aria-label", name);
+  slider.addEventListener("input", () => {
+    valueLabel.textContent = `${slider.value}%`;
+    queueDisplayUpdate(method, id, slider.value);
+  });
+  slider.addEventListener("change", () => queueDisplayUpdate(method, id, slider.value, true));
+  return slider;
+}
+
+function displayAdjustment(name, control, value) {
+  const line = document.createElement("div");
+  line.className = "hp-display-adjustment";
+  const label = document.createElement("span");
+  label.textContent = name;
+  value.classList.add("hp-display-adjustment-value");
+  line.append(label, control, value);
+  return line;
+}
+
+function contrastAdjustment(display, appState, queueDisplayUpdate, pendingValue) {
+  const method = "controls.setContrast";
+  const name = text(appState, "コントラスト", "Contrast");
+  const valueLabel = document.createElement("span");
+  const value = pendingValue(method, display.id) ?? display.contrastValue;
+  let control;
+  if (display.contrastSupported === true && value != null) {
+    valueLabel.textContent = `${value}%`;
+    control = displayRange(method, display.id, value, name, valueLabel, queueDisplayUpdate);
+  } else {
+    control = document.createElement("span");
+    control.textContent = display.contrastSupported === false
+      ? text(appState, "非対応", "Unsupported")
+      : text(appState, "確認中…", "Checking…");
+  }
+  const line = displayAdjustment(name, control, valueLabel);
+  line.dataset.contrastAdjustment = "true";
+  return line;
 }
 
 // Adds Main / Sub only when two rows would otherwise show the same name.
@@ -693,6 +1072,12 @@ function label(titleText, valueText) {
   return root;
 }
 
+function displayDetail(message) {
+  const value = detail(message);
+  value.title = message;
+  return value;
+}
+
 function detail(message) {
   const value = document.createElement("p");
   value.textContent = message;
@@ -711,7 +1096,6 @@ function range(value, min, max) {
 function snapshotRenderSignature(snapshot) {
   const media = snapshot?.media ?? {};
   return JSON.stringify({
-    displays: snapshot?.displays ?? [],
     volume: snapshot?.volume ?? {},
     media: {
       available: media.available,
@@ -810,6 +1194,8 @@ function localizeError(message, state) {
     ["Display brightness is unavailable.", "ディスプレイの明るさを取得できません。"],
     ["Brightness detection timed out.", "明るさの検出が時間切れになりました。"],
     ["Brightness command timed out.", "明るさの変更が時間切れになりました。"],
+    ["Contrast command timed out.", "コントラストの変更が時間切れになりました。"],
+    ["DDC/CI contrast read failed.", "DDC/CIでコントラストを読み取れませんでした。"],
     ["Volume detection timed out.", "音量の検出が時間切れになりました。"],
     ["Media detection timed out.", "メディアの検出が時間切れになりました。"],
     ["Volume command timed out.", "音量の変更が時間切れになりました。"],
@@ -825,6 +1211,14 @@ function localizeError(message, state) {
   }
   if (/^Brightness command failed for \d+%\.$/.test(message)) {
     return `明るさを${message.match(/\d+%/)?.[0] ?? "指定値"}へ変更できませんでした。もう一度操作してください。`;
+  }
+  const contrastMismatch = /^Contrast readback did not match (\d+%)\.$/.exec(message);
+  if (contrastMismatch) {
+    return `コントラストが指定値（${contrastMismatch[1]}）に反映されたことを確認できませんでした。モニターの映像モードで固定されている場合があります。`;
+  }
+  const contrastFailure = /^Contrast command failed for (\d+%)\.$/.exec(message);
+  if (contrastFailure) {
+    return `コントラストを${contrastFailure[1]}へ変更できませんでした。もう一度操作してください。`;
   }
   return message;
 }
